@@ -9,7 +9,9 @@ import {
   getAnalyticsAccountGroups,
   normalizeBalanceSeries,
   rankCategoryIds,
+  summarizeBalanceMovements,
   summarizeCategoryWindow,
+  summarizeTotalExpenseWindow,
 } from '../../utils/AnalyticsUtils.js'
 
 const account = ({ id, type = 'asset', role = 'defaultAsset', direction = null, active = true, includeNetWorth = true }) => ({
@@ -230,6 +232,46 @@ test('ignores invalid account-chart date keys', () => {
   })
 
   assert.deepEqual(result.points, [{ x: '2026-08-02', value: 20 }])
+})
+
+test('builds completed and partial monthly account movement from month-end totals', () => {
+  const result = summarizeBalanceMovements({
+    months: 3,
+    today: new Date('2026-08-10T12:00:00Z'),
+    balanceSeries: [
+      { id: 'netWorth', points: [{ x: '2026-05-31', value: 100 }, { x: '2026-06-30', value: 130 }, { x: '2026-07-31', value: 120 }, { x: '2026-08-07', value: 140 }], currentPoint: { x: '2026-08-10', value: 150 } },
+      { id: 'debt', points: [{ x: '2026-05-31', value: 80 }, { x: '2026-06-30', value: 60 }, { x: '2026-07-31', value: 75 }, { x: '2026-08-07', value: 72 }], currentPoint: { x: '2026-08-10', value: 70 } },
+    ],
+  })
+
+  assert.deepEqual(result.monthKeys, ['2026-06', '2026-07', '2026-08'])
+  assert.deepEqual(result.series.find(({ id }) => id === 'netWorth').points, [
+    { x: '2026-06', value: 30, kind: 'actual' },
+    { x: '2026-07', value: -10, kind: 'actual' },
+    { x: '2026-08', value: 30, kind: 'partial' },
+  ])
+  assert.deepEqual(result.series.find(({ id }) => id === 'debt').points.map(({ value }) => value), [-20, 15, -5])
+})
+
+test('summarizes total expense from every category and forecasts only with two completed months', () => {
+  const result = summarizeTotalExpenseWindow({
+    averageMonths: 3,
+    today: new Date('2026-04-10T12:00:00Z'),
+    ledger: {
+      ledgerStartMonth: '2026-01',
+      months: {
+        '2026-01': { categories: { food: { amount: 40, byDay: { 20: 40 } }, rent: { amount: 60, byDay: { 2: 60 } } } },
+        '2026-02': { categories: { food: { amount: 20, byDay: { 20: 20 } } } },
+        '2026-03': { categories: { food: { amount: 30, byDay: { 20: 30 } } } },
+        '2026-04': { categories: { food: { amount: 10, byDay: { 5: 10 } } } },
+      },
+    },
+  })
+
+  assert.deepEqual(result.actualPoints.map(({ value }) => value), [100, 20, 30])
+  assert.equal(result.currentActual, 10)
+  assert.equal(result.currentForecast, 40)
+  assert.equal(result.forecastAvailable, true)
 })
 
 test('category ledger counts purchases, subtracts refunds, preserves uncategorized, and keeps group IDs', () => {

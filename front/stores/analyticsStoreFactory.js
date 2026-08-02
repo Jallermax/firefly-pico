@@ -9,10 +9,13 @@ import {
   getAnalyticsAccountGroups,
   normalizeBalanceSeries,
   rankCategoryIds,
+  summarizeBalanceMovements,
   summarizeCategoryWindow,
+  summarizeTotalExpenseWindow,
 } from '../utils/AnalyticsUtils.js'
 
 const BALANCE_METRICS = ['netWorth', 'savings', 'debt']
+const FINANCIAL_TREND_METRICS = [...BALANCE_METRICS, 'expenses']
 const CATEGORY_SERIES_LIMIT = 6
 
 export function createAnalyticsStore(id, useDependencies) {
@@ -151,7 +154,7 @@ export function createAnalyticsStore(id, useDependencies) {
       return {
         cacheKey,
         groups,
-        start: DateUtils.dateToString(subMonths(today, months)),
+        start: DateUtils.dateToString(startOfMonth(subMonths(today, months))),
         end: DateUtils.dateToString(today),
         period: months === 3 ? '1D' : '1W',
         displayCurrencyCode: displayCode,
@@ -163,8 +166,12 @@ export function createAnalyticsStore(id, useDependencies) {
 
     const balanceCacheKey = computed(() => getBalanceSnapshot().cacheKey)
     const balanceSeries = computed(
-      () => balanceCache.value[balanceCacheKey.value] ?? BALANCE_METRICS.map((metric) => ({ id: metric, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })),
+      () => balanceCache.value[balanceCacheKey.value] ?? FINANCIAL_TREND_METRICS.filter((metric) => metric !== 'expenses').map((metric) => ({ id: metric, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })),
     )
+    const financialTrend = computed(() => ({
+      ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: new Date() }),
+      expenses: summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: new Date() }),
+    }))
 
     async function fetchTransactions({ force = false } = {}) {
       const isReady = ['ready', 'empty'].includes(categoryState.status) && ['ready', 'empty'].includes(flowState.status)
@@ -293,6 +300,7 @@ export function createAnalyticsStore(id, useDependencies) {
           return {
             id: metric,
             ...result,
+            currentPoint: hasCompleteCurrentTotal ? { x: snapshot.end, value: currentTotal } : null,
             missingCurrencies: [...new Set([...result.missingCurrencies, ...currentAmounts.map(({ converted }) => converted.missingCurrency).filter(Boolean)])],
             warnings,
           }
@@ -344,6 +352,7 @@ export function createAnalyticsStore(id, useDependencies) {
       categoryState,
       flowState,
       balanceSeries,
+      financialTrend,
       categoryRanking,
       categoryRankingItems,
       categorySummary,

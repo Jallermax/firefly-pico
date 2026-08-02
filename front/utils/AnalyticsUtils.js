@@ -294,6 +294,61 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
   return { requestedMonths: averageMonths, usedMonths, monthKeys, series }
 }
 
+const totalForMonth = (ledger, key) => Object.values(ledger.months?.[key]?.categories ?? {}).reduce((total, category) => total + category.amount, 0)
+
+const totalByDay = (categories, predicate) =>
+  Object.values(categories ?? {}).reduce((total, category) => total + Object.entries(category.byDay ?? {}).reduce((categoryTotal, [day, value]) => categoryTotal + (predicate(Number(day)) ? value : 0), 0), 0)
+
+export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
+  const monthKeys = completedMonthKeys({ today, averageMonths, ledgerStartMonth: ledger.ledgerStartMonth })
+  const usedMonths = monthKeys.length
+  const currentMonthKey = monthKey(today)
+  const todayDay = today.getDate()
+  const currentCategories = ledger.months?.[currentMonthKey]?.categories
+  const actualPoints = monthKeys.map((key) => ({ x: key, value: totalForMonth(ledger, key), kind: 'actual' }))
+  const currentActual = totalByDay(currentCategories, (day) => day <= todayDay)
+  const remainderTotal = monthKeys.reduce((total, key) => total + totalByDay(ledger.months?.[key]?.categories, (day) => day > todayDay), 0)
+  const forecastAvailable = usedMonths >= 2
+
+  return {
+    requestedMonths: averageMonths,
+    usedMonths,
+    actualPoints,
+    currentActual,
+    currentForecast: forecastAvailable ? currentActual + remainderTotal / usedMonths : null,
+    forecastAvailable,
+  }
+}
+
+const lastMonthlyPoints = (points) =>
+  points
+    .filter((point) => /^\d{4}-\d{2}-\d{2}$/.test(point.x) && Number.isFinite(point.value))
+    .sort((left, right) => left.x.localeCompare(right.x))
+    .reduce((months, point) => ({ ...months, [point.x.slice(0, 7)]: point }), {})
+
+export function summarizeBalanceMovements({ balanceSeries, months, today }) {
+  const currentMonth = startOfMonth(today)
+  const monthKeys = Array.from({ length: months }, (_, index) => monthKey(subMonths(currentMonth, months - index - 1)))
+
+  return {
+    monthKeys,
+    series: balanceSeries.map(({ id, points, currentPoint }) => {
+      const monthlyPoints = lastMonthlyPoints(points)
+      const currentDate = currentPoint?.x ?? null
+      const currentTotal = Number.isFinite(currentPoint?.value) ? currentPoint.value : null
+      const movementPoints = monthKeys.flatMap((key) => {
+        const previousKey = monthKey(subMonths(new Date(key + '-01T00:00:00'), 1))
+        const previous = monthlyPoints[previousKey]
+        const isCurrentMonth = key === monthKey(today)
+        const current = isCurrentMonth ? (currentTotal === null ? null : { value: currentTotal }) : monthlyPoints[key]
+        return previous && current ? [{ x: key, value: current.value - previous.value, kind: isCurrentMonth ? 'partial' : 'actual' }] : []
+      })
+
+      return { id, currentTotal, currentDate, points: movementPoints }
+    }),
+  }
+}
+
 export function rankCategoryIds({ ledger, averageMonths, today }) {
   const monthKeys = completedMonthKeys({ today, averageMonths, ledgerStartMonth: ledger.ledgerStartMonth })
   const categoryIds = unique(monthKeys.flatMap((key) => Object.keys(ledger.months?.[key]?.categories ?? {})))

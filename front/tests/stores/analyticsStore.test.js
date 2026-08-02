@@ -222,6 +222,46 @@ test('marks a weekly final point unverified when no account value exists for its
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [{ type: 'current-balance-unverified', sampleDate, currentDate: format(new Date(), 'yyyy-MM-dd') }])
 })
 
+test('derives financial trends from three account requests and the transaction ledger', async () => {
+  const today = new Date()
+  const checking = activeAsset()
+  const savings = {
+    id: 'savings',
+    attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'savingAsset' }, include_net_worth: true, currency_code: 'USD', current_balance: '200' },
+  }
+  accountStore.accountList = [checking, savings, debitLiability()]
+  accountResponse = async ({ accountIds }) => {
+    const sampleDate = format(subDays(today, 3), 'yyyy-MM-dd')
+    if (accountIds.includes('loan')) return chartResponse(-225, sampleDate)
+    if (accountIds.includes('savings') && !accountIds.includes('checking')) return chartResponse(175, sampleDate)
+    return chartResponse(275, sampleDate)
+  }
+  const checkingAccount = { attributes: { type: { fireflyCode: 'asset' } } }
+  const expenseAccount = { attributes: { type: { fireflyCode: 'expense' } } }
+  const expense = (id, amount, date, categoryId) => ({
+    id,
+    attributes: { transactions: [{ amount: String(amount), currency_code: 'USD', date, category_id: categoryId, accountSource: checkingAccount, accountDestination: expenseAccount }] },
+  })
+  transactionResult = [
+    expense('three-months-ago', 100, new Date(today.getFullYear(), today.getMonth() - 3, 20), 'food'),
+    expense('two-months-ago', 20, new Date(today.getFullYear(), today.getMonth() - 2, 20), 'rent'),
+    expense('last-month', 30, new Date(today.getFullYear(), today.getMonth() - 1, 20), 'food'),
+    expense('current', 10, new Date(today.getFullYear(), today.getMonth(), 1), 'food'),
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(accountRequests.length, 3)
+  assert.equal(accountRequests.some(({ accountIds }) => accountIds.includes('expenses')), false)
+  assert.equal(accountRequests[0].start, format(new Date(today.getFullYear(), today.getMonth() - 3, 1), 'yyyy-MM-dd'))
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 300 })
+  assert.equal(store.financialTrend.series.find(({ id }) => id === 'netWorth').currentTotal, 300)
+  assert.deepEqual(store.financialTrend.expenses.actualPoints.map(({ value }) => value), [100, 20, 30])
+  assert.equal(store.financialTrend.expenses.currentActual, 10)
+  assert.equal(store.financialTrend.expenses.currentForecast, 60)
+})
+
 test('exposes ranked category items with completed-window net totals', async () => {
   const checking = { attributes: { type: { fireflyCode: 'asset' } } }
   const expense = { attributes: { type: { fireflyCode: 'expense' } } }
