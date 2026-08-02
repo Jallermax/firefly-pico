@@ -1,28 +1,29 @@
 # Extended Analytics Page Design
 
-Date: 2026-08-01
+Date: 2026-08-02
 
-Status: Design approved in conversation; awaiting review of this written specification
+Status: Revised UX design approved in conversation; awaiting review of this written specification
 
 Target branch: `personal/extended-analytics`
 
 ## Summary
 
-Add a dedicated `/analytics` page for deeper historical and forward-looking analysis without changing the existing month-focused dashboard. The page has three cards:
+Provide a dedicated `/analytics` page for deeper historical and forward-looking analysis without changing the existing month-focused dashboard. The page has three full-width cards:
 
-1. Balance trends: net worth, savings, and debt over 3, 6, or 12 months.
+1. Financial trends: selectable monthly net-worth change, savings change, debt change, and total expenses over 3, 6, or 12 months, with current account totals kept in summary tiles.
 2. Category spending: selectable category histories, completed-month averages over 3, 6, 12, or 24 months, and a separately identified current-month forecast.
 3. Money flow: a monthly flow from income, withdrawn savings, prior excess, and new debt into expenses, savings deposits, debt repayment, and new excess.
 
-The first implementation is personal-fork functionality. It uses Firefly III's existing account-chart and transaction APIs through Pico's proxy, adds no database schema, and adds no chart dependency.
+The implementation is personal-fork functionality. It uses Firefly III's existing account-chart and transaction APIs through Pico's proxy, adds no database schema, and adds no chart dependency. This revision responds to inspection of the implemented page with live Firefly data: the balance card is hidden by an Atom-timestamp parsing failure, the desktop two-column layout compresses the charts, the mobile category summary clips horizontally, and the money-flow detail is too dense.
 
 ## Goals
 
-- Make net worth, savings, and debt direction visible over useful time windows.
+- Make monthly net-worth, savings, debt, and expense movement comparable over useful time windows while preserving the latest account totals.
 - Show exact values at any chart position, including all visible series on a shared vertical crosshair.
 - Make category-level spending history usable for estimating future spending.
 - Keep completed history, current actuals, and current forecast visually and semantically distinct.
 - Explain how this month's resources moved between income, past resources, spending, saving, debt, and remaining excess.
+- Improve hierarchy, spacing, typography, and progressive disclosure so the page remains readable on mobile and desktop.
 - Preserve Pico's mobile-first interaction model, desktop shell, dark theme, localization, and repository conventions.
 - Avoid the many-small-request pattern that made historical balance work unsuitable for the main dashboard.
 
@@ -30,7 +31,7 @@ The first implementation is personal-fork functionality. It uses Firefly III's e
 
 - Replacing or broadening the existing dashboard's monthly cards.
 - A generic report builder, arbitrary formulas, or user-authored chart definitions.
-- Projecting net worth, savings, or debt beyond the latest known balance.
+- Projecting net worth, savings, or debt beyond the latest known balance. The partial current-month movement is actual, not forecast.
 - Predicting income, category mix, or money flow beyond the explicitly defined category forecast.
 - Changing Firefly III records, Pico's database, authentication, or backend proxy semantics.
 - Adding a charting npm package.
@@ -50,8 +51,9 @@ The first implementation is personal-fork functionality. It uses Firefly III's e
 
 ### Periods
 
-- Balance ranges: 3, 6, and 12 trailing months through today.
-- Balance sampling: daily for 3 months; weekly for 6 and 12 months.
+- Financial-trend ranges: 3, 6, and 12 trailing calendar months through the current partial month.
+- Account-history requests retain daily sampling for 3 months and weekly sampling for 6 and 12 months, then use the final valid balance in each calendar month to calculate month-over-month movement. The request includes the prior month-end baseline needed for the first displayed movement.
+- The current month is a separately styled partial period. Account movements use latest actual balances; total expenses show actual-to-date plus the approved remainder-of-month forecast. The selected 3/6/12-month range is also the completed-history window for this total-expense forecast.
 - Category average windows: 3, 6, 12, and 24 completed calendar months.
 - The current month is never included in a completed-month average.
 - Money flow initially opens on the current calendar month and supports month navigation within the loaded 24-completed-month history.
@@ -89,16 +91,13 @@ The remainder calculation uses calendar dates strictly after today's day-of-mont
 
 Mobile is one column in this order:
 
-1. Balance trends
+1. Financial trends
 2. Category spending
 3. Money flow
 
-Desktop uses:
+Desktop uses the same full-width stack in a centered content region approximately 1,100-1,200px wide. Category spending and money flow are never squeezed side by side. Mobile must not require horizontal scrolling inside any card.
 
-- balance trends at full content width; then
-- category spending and money flow side by side when space permits, falling back to one column at the existing content-width boundary.
-
-Each section uses a Vant inset cell group/card, small typography, 6-10px rounding, existing CSS variables, and Pico's soft-shadow language. Styles live in the shared theme files, with explicit dark-theme treatment for any fixed color.
+Each section uses a Vant inset cell group/card, compact but readable typography, 6-10px rounding, existing CSS variables, and Pico's soft-shadow language. Every card presents its title and one-line purpose, primary controls, visualization, key values, then collapsed calculation details. Loading, error, retry, and empty states remain card-local. Styles live in the shared theme files, with explicit dark-theme treatment for any fixed color.
 
 The screenshots under `docs/local/zenmoney_charts_references/` are visual references for compact financial density, combined balance lines, category comparison, and flow storytelling. They are not a mandate to copy Zenmoney's navigation, colors, controls, or chart implementation; Pico's established design language remains authoritative.
 
@@ -107,7 +106,7 @@ The screenshots under `docs/local/zenmoney_charts_references/` are visual refere
 ### Ownership boundaries
 
 - `dashboardStore.js` remains responsible for the existing dashboard only.
-- A new `analyticsStore.js` owns route-lazy request state, cached raw responses for the active analytics session, selected periods/categories/month, and independent card errors.
+- `analyticsStore.js` owns route-lazy request state, cached raw responses for the active analytics session, selected periods/metrics/categories/month, and independent card errors.
 - `AnalyticsUtils.js` contains deterministic normalization and aggregation. It receives plain account/transaction objects plus dates and returns chart-ready plain objects; it does not access Pinia, the router, axios, or the DOM.
 - Repository classes own HTTP details.
 - Reusable chart components own SVG geometry and input behavior, but no financial rules.
@@ -120,11 +119,13 @@ account and currency stores
         |
         +--> analyticsStore account groups
         |         |
-        |         +--> AccountRepository chart requests --> AnalyticsUtils --> balance chart
+        |         +--> AccountRepository chart requests --> AnalyticsUtils --> monthly account movement
         |
 TransactionRepository: current month + 24 completed months, paginated once
         |
         +--> AnalyticsUtils category buckets/averages/forecast --> category chart
+        |                                                   |
+        |                                                   +--> total monthly expense movement
         |
         +--> AnalyticsUtils monthly flow ledger -------------> money-flow chart
 ```
@@ -159,9 +160,9 @@ The store retains the raw JSON:API transactions for the current page session. Th
 
 Each card has its own `idle/loading/ready/empty/error` state and retry action. A failed balance request does not hide category or flow results. Refresh retries failed or stale sources while keeping successful cards visible until replacements arrive.
 
-Only lightweight UI preferences may persist in local storage, such as the last selected periods and category IDs. Raw account history, transactions, calculated balances, and errors remain session state.
+Only lightweight UI preferences may persist in local storage, such as the last selected periods, metric IDs, and category IDs. Raw account history, transactions, calculated balances, and errors remain session state.
 
-## Balance Trends
+## Financial Trends
 
 ### Source normalization
 
@@ -178,29 +179,36 @@ The Firefly account-chart response is normalized to:
 
 For each requested account and point:
 
-1. Prefer the account line's primary-currency entry when present.
-2. Otherwise use its native-currency entry and current Pico rate conversion.
-3. Normalize the result into the selected display currency.
-4. Align all accounts on the union of requested dates, carrying the most recent known balance forward only after that account's first returned point. Time before an account's first returned point is not invented.
+1. Accept Firefly's Atom timestamp keys, such as `2026-08-02T00:00:00+00:00`, and date-only keys, validating and canonicalizing both to the source calendar date `YYYY-MM-DD` without local-time conversion.
+2. Prefer the account line's `primary_currency_code` entry when present, while retaining compatibility with the previously observed `pc_currency_code` field.
+3. Otherwise use its native-currency entry and current Pico rate conversion.
+4. Normalize the result into the selected display currency.
+5. Align all accounts on the union of requested dates, carrying the most recent known balance forward only after that account's first returned point. Time before an account's first returned point is not invented.
 
 The current endpoint value and the final chart point are validated against the corresponding account's `current_balance` or `current_debt`, allowing for the selected sampling date and currency conversion. A sign or material-value mismatch produces a visible partial-data warning and logs diagnostic context in development; it is not silently repaired.
 
-### Aggregation
+### Aggregation and monthly movement
 
 - Net worth sums the Firefly signed balance contribution of each included account.
 - Savings sums the signed balances of savings-role asset accounts.
 - Debt converts each included account's signed balance to a non-negative amount owed. For debit-direction liabilities and credit-card assets, the owed amount is `max(0, -signedNetWorthContribution)`. The normalization helper owns any Firefly account-type sign adaptation before this formula, and fixtures must cover both account classes.
+- For each account metric, a completed month's plotted movement is that month-end total minus the preceding month-end total.
+- Current-month account movement is the latest actual total minus the preceding completed month-end total and is visibly labeled partial.
+- Positive debt movement means debt grew; negative debt movement means debt was repaid. Debt-aware summary color treats growth as deterioration and repayment as improvement.
+- Total expenses are the existing transaction ledger's monthly net consumption across all categories. Transfers, savings movements, debt payments, and configured non-expense transactions remain excluded. Refunds reduce the month in which they occur.
+- Completed months show actual total expenses. The current month shows actual-to-date and a dashed forecast continuation using the approved remainder-of-month formula and selected 3/6/12-month history window.
 - Zero is a valid point. Missing is not zero.
 
-The card displays the latest amount and absolute/percentage change from the first valid point for every enabled series. Percentage change is omitted when the first amount is zero.
+Summary tiles display the latest actual Net worth, Savings, and Debt totals rather than replacing them with movements. A fourth tile shows current total-expense actual and forecast. Movement summaries identify the latest completed month separately from the current partial month.
 
 ### Controls and visual encoding
 
 - Segmented period control: 3M / 6M / 12M.
-- Series toggles: Net worth / Savings / Debt.
-- All three may be shown together; at least one must remain selected.
+- A category-style facet button reports `N selected` and opens a searchable checkbox list for Net worth change, Savings change, Debt change, and Total expenses.
+- All four may be shown together; at least one must remain selected. Invalid or obsolete persisted selections are repaired safely.
 - Each series has a stable semantic color plus a distinct marker/line treatment so color is not the only identifier.
-- Actual balance lines never use forecast styling.
+- Actual account-movement lines never use forecast styling. Only the current total-expense forecast uses a dashed segment and forecast marker.
+- Hover, touch, or keyboard inspection shows a vertical guide and exact values for every selected series at the active month.
 
 ## Category Spending
 
@@ -245,6 +253,9 @@ The ledger-history boundary is the earliest transaction date in the loaded inter
 - Its forecast continuation uses a dashed segment and forecast marker, never an unqualified actual point.
 - A compact comparison shows each selected category's completed-month average, current actual, and current forecast.
 - When forecast history is insufficient, the forecast point/segment is absent rather than set equal to actual.
+- On desktop, the compact comparison is an aligned table with right-aligned tabular currency values. On mobile, it becomes stacked category rows showing category, current actual, historical average, and forecast without a minimum-width table or horizontal clipping.
+- Controls and selected-state behavior align with Financial trends. Chart labels and tooltips use stronger contrast and readable 11-13px text.
+- Repeated assumption notes are consolidated into one collapsed `How this is calculated` disclosure. Missing-rate, short-history, and other data-quality warnings stay visible outside the disclosure.
 
 ### Drilldown
 
@@ -299,10 +310,12 @@ The utility returns exact contributing split IDs for each non-residual node and 
 
 ### Visualization and drilldown
 
-- Use a compact native SVG flow diagram with labeled source and destination nodes and proportional bands.
+- Use a compact native SVG flow diagram with labeled source and destination nodes and proportional bands. It uses the full card width, with horizontal flow on desktop and a purpose-built vertical flow on mobile rather than shrinking the desktop geometry.
 - Keep labels and amounts visible outside narrow bands; never require hover to understand the diagram.
-- On narrow mobile screens, the diagram may stack vertically while preserving source-to-destination direction.
-- Provide an equivalent accessible list immediately adjacent to the SVG.
+- Increase node, amount, and connection-label size and contrast enough to remain readable in both themes.
+- Keep the balanced/not-balanced result visible beside the primary monthly summary.
+- Collapse detailed reconciliation by default.
+- Put the equivalent exact-value list behind an `Exact values` disclosure. The SVG retains an accessible summary and the disclosure provides the full non-visual/tabular equivalent on demand without duplicating every value in the default visual hierarchy.
 - Selecting a non-residual node opens the exact contributing transaction IDs.
 - Selecting a residual opens a small formula explanation, since it has no direct transaction set.
 
@@ -318,6 +331,7 @@ Every multi-series line chart uses the same inspection component and behavior:
 - Tapping outside the chart dismisses a pinned inspection.
 - Keyboard focus exposes the chart; Left/Right arrows move through points, Home/End jump to edges, and Escape dismisses the pinned point.
 - Tooltip placement flips near chart edges and stays within the card.
+- Tooltip rows clearly separate marker, series name, right-aligned tabular amount, and `Actual`, `Forecast`, `Partial`, or `Estimated at current rates` qualifiers.
 - The selected point and all displayed values are announced through an accessible live region.
 - Series markers remain visible at the crosshair; touch targets are larger than their visual markers.
 
@@ -326,14 +340,14 @@ The flow chart does not use a date crosshair, but it follows the same exact-amou
 ## Empty, Partial, Loading, and Error States
 
 - Each card loads independently with a skeleton or compact spinner inside its card.
-- No matching accounts: explain which account rule produced no series.
+- No matching accounts: explain which account rule produced no series, including when the Financial trends chart itself is absent.
 - No category spending: keep controls visible and show a localized empty state.
 - Insufficient forecast history: show current actual and the minimum two-month requirement.
 - Short history: show `Based on X of N months`.
 - Missing exchange rate: omit affected series/nodes, show involved currency codes, and offer retry after rates sync.
 - Request failure: keep other cards usable and provide a card-local retry.
 - Partial pagination failure: do not present incomplete category/flow aggregates as complete; mark both transaction-derived cards failed while preserving any balance result.
-- Flow conservation failure: show the audit totals and suppress the misleading SVG.
+- Flow conservation failure: show the audit totals and suppress the misleading SVG. Successful reconciliation details remain collapsed by default.
 - Stale cached request: retain the previous visible result during retry and label it until refreshed.
 
 ## Accessibility and Localization
@@ -343,7 +357,7 @@ The flow chart does not use a date crosshair, but it follows the same exact-amou
 - Colors meet theme contrast expectations and are supplemented by line patterns, markers, labels, and accessible names.
 - Controls have visible focus states and usable touch targets.
 - Charts include a concise text summary. The crosshair live region and flow list provide non-visual access to exact values.
-- Motion is subtle and is disabled when the existing profile animation setting is off.
+- Motion is subtle, short, and disabled when the existing profile animation setting is off.
 
 ## Candidate Implementation Files
 
@@ -383,7 +397,11 @@ Use Node's built-in test runner; add no test dependency. Fixtures cover:
 
 - account membership for net worth, savings, debit liabilities, credit liabilities, and credit cards;
 - signed net-worth aggregation and non-negative debt normalization;
+- Firefly Atom-timestamp and date-only chart keys canonicalizing to date-only points without a timezone day shift;
+- `primary_currency_code` plus compatibility with the previously observed currency-code field;
 - daily/weekly point alignment, missing leading history, and valid zero balances;
+- month-end extraction and month-over-month net-worth, savings, and debt movement, including the prior-period baseline and current partial month;
+- monthly total expenses derived from the same normalized ledger as category spending;
 - historical primary values, current-rate fallback, and missing-rate omission;
 - split transactions and uncategorized spending;
 - refunds reducing category spending and net-refund flow behavior;
@@ -398,12 +416,12 @@ Use Node's built-in test runner; add no test dependency. Fixtures cover:
 
 ### Component and interaction checks
 
-- One, two, and three visible balance series.
+- One through four visible Financial trends series, category-style metric selection, persisted-selection repair, and the at-least-one rule.
 - Category selection, six-series limit, average-window switching, and current forecast treatment.
 - Crosshair hover, click pin, touch drag/release pin, outside dismissal, edge flipping, and keyboard navigation.
 - Actual, forecast, and current-rate-estimated labels.
 - Independent loading, empty, error, short-history, missing-rate, and partial-success states.
-- Flow node selection, residual formula, and accessible equivalent list.
+- Flow node selection, residual formula, collapsed reconciliation, and disclosed accessible exact-value list.
 
 ### Repository verification
 
@@ -415,18 +433,20 @@ npm run build
 node --test tests/utils/AnalyticsUtils.test.js
 ```
 
-Parse every changed locale JSON file. Run `git diff --check`. Manually inspect mobile and desktop layouts in both light and dark themes, including pointer and touch interaction. Where local Firefly data does not exercise an edge case, use deterministic component fixtures and record that boundary instead of claiming live proof.
+Parse every changed locale JSON file. Run `git diff --check`. Use the actual running app in Chrome to inspect mobile and desktop layouts in both light and dark themes, including pointer and touch interaction. Acceptance requires no horizontal clipping, unreadable labels, hidden Financial trends card, or unexpected console errors. Where local Firefly data does not exercise an edge case, use deterministic component fixtures and record that boundary instead of claiming live proof.
 
 ## Acceptance Criteria
 
 - `/analytics` is reachable through the approved mobile and desktop navigation without adding a sixth mobile tab.
-- Net worth, savings, and debt match the confirmed account membership rules and can be shown separately or together for 3/6/12 months.
+- Financial trends shows selectable monthly net-worth change, savings change, debt change, and total expenses for 3/6/12 months while retaining latest actual account totals in summary tiles.
 - 3-month balance data is daily; 6/12-month data is weekly.
 - A crosshair exposes the exact amount of every visible series and works with pointer, touch, and keyboard.
 - Category history supports category faceting and 3/6/12/24 completed-month averages.
 - Current-month actual and forecast are distinct, and forecast implements the approved remainder-of-month formula with a two-month minimum.
 - Category averages count zero-spend months after ledger history begins and exclude time before available history.
 - Money flow conserves the approved equation, nets savings/debt direction, treats cards correctly, and exposes exact drilldowns or residual formulas.
+- All three cards are full-width in a centered desktop stack; mobile category summaries do not clip, and mobile money flow uses readable vertical geometry.
+- Calculation and exact-value detail is progressively disclosed while data-quality and reconciliation status remain visible.
 - Historical currency values are preferred; every current-rate fallback is visibly labeled; missing rates are never treated as zero.
 - Cards fail independently and partial success remains useful.
 - All new labels are localized, themes are coherent, no dependency or database migration is added, and lint/build/utility tests pass.
@@ -452,5 +472,7 @@ Rollback requires removing the analytics route/page/components/store/utility/tes
 - **Account sign differences:** centralize sign normalization, test debit liabilities and credit cards separately, and compare the latest normalized point with current account fields.
 - **Split/refund double counting:** classify at split level and retain exact IDs plus an auditable flow ledger.
 - **Unreadable mobile charts:** cap visible category series, use a crosshair with all exact amounts, and allow edge-aware pinned tooltips.
+- **Dense analytics hierarchy:** stack all cards at full width, replace the mobile category table with labeled rows, use vertical mobile flow geometry, and collapse secondary calculation details.
+- **Live Firefly date shape:** normalize validated Atom keys to their source calendar date at the analytics boundary and cover the API-shaped response in utility and store tests.
 - **Misleading partial data:** isolate card errors, treat incomplete pagination as failure, and surface `Based on X of N months`.
 - **Upstream scope mismatch:** keep the feature personal first and isolate generally reusable primitives in separate commits.
