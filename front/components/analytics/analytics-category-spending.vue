@@ -33,53 +33,55 @@
 
       <multi-series-line-chart :series="chartSeries" :value-formatter="formatNumberForDashboard" :aria-label="$t('analytics.category.chart_label')" @select-point="onSelectPoint" />
 
-      <div v-if="appStore.isDesktopLayout" class="analytics-category-summary-scroll">
+      <div v-if="summaryPresentation.layout === 'desktop'" class="analytics-category-summary-scroll">
         <div class="analytics-category-summary">
           <div class="analytics-category-summary-header">
-            <span>{{ $t('category') }}</span>
-            <span>{{ $t('analytics.common.average') }}</span>
-            <span>{{ $t('analytics.category.current_actual') }}</span>
-            <span>{{ $t('analytics.category.current_forecast') }}</span>
+            <span>{{ summaryPresentation.labels.category }}</span>
+            <span>{{ summaryPresentation.labels.average }}</span>
+            <span>{{ summaryPresentation.labels.currentActual }}</span>
+            <span>{{ summaryPresentation.labels.currentForecast }}</span>
           </div>
-          <div v-for="item in summaries" :key="item.id" class="analytics-category-summary-row">
+          <div v-for="item in summaryPresentation.rows" :key="item.id" class="analytics-category-summary-row">
             <span class="analytics-category-summary-label"><span class="analytics-chart-legend-marker" :style="{ backgroundColor: item.color }" />{{ item.label }}</span>
             <strong>{{ item.averageLabel }}</strong>
             <strong>{{ item.currentActualLabel }}</strong>
-            <strong v-if="item.forecastAvailable">{{ item.forecastLabel }}</strong>
-            <span v-else class="analytics-category-insufficient">{{ $t('analytics.category.insufficient_history') }}</span>
+            <strong v-if="item.forecastAvailable">{{ item.currentForecastLabel }}</strong>
+            <span v-else class="analytics-category-insufficient">{{ item.currentForecastLabel }}</span>
           </div>
         </div>
       </div>
       <div v-else class="analytics-category-summary-mobile">
-        <div v-for="item in summaries" :key="item.id" class="analytics-category-summary-mobile-row">
+        <div v-for="item in summaryPresentation.rows" :key="item.id" class="analytics-category-summary-mobile-row">
           <div class="analytics-category-summary-label"><span class="analytics-chart-legend-marker" :style="{ backgroundColor: item.color }" />{{ item.label }}</div>
           <dl class="analytics-category-summary-mobile-values">
             <div>
-              <dt>{{ $t('analytics.common.average') }}</dt>
+              <dt>{{ summaryPresentation.labels.average }}</dt>
               <dd>{{ item.averageLabel }}</dd>
             </div>
             <div>
-              <dt>{{ $t('analytics.category.current_actual') }}</dt>
+              <dt>{{ summaryPresentation.labels.currentActual }}</dt>
               <dd>{{ item.currentActualLabel }}</dd>
             </div>
             <div>
-              <dt>{{ $t('analytics.category.current_forecast') }}</dt>
-              <dd>{{ item.forecastAvailable ? item.forecastLabel : $t('analytics.category.insufficient_history') }}</dd>
+              <dt>{{ summaryPresentation.labels.currentForecast }}</dt>
+              <dd>{{ item.currentForecastLabel }}</dd>
             </div>
           </dl>
         </div>
       </div>
 
-      <div v-if="summary.usedMonths !== summary.requestedMonths" class="analytics-assumption-note">
+      <div v-if="readyPresentation.showShortHistory" class="analytics-assumption-note">
         {{ $t('analytics.common.based_on_months', { used: summary.usedMonths, requested: summary.requestedMonths }) }}
       </div>
-      <details class="analytics-calculation-details">
+      <details v-if="readyPresentation.showCalculation" class="analytics-calculation-details">
         <summary>{{ $t('analytics.common.how_calculated') }}</summary>
         <p>{{ $t('analytics.category.definition') }}</p>
         <p>{{ $t('analytics.category.current_month_separate') }}</p>
       </details>
-      <div v-if="summary.isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
-      <div v-if="summary.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: summary.missingCurrencies.join(', ') }) }}</div>
+      <div v-if="readyPresentation.showEstimatedRates" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
+      <div v-if="readyPresentation.showMissingRates" class="analytics-warning">
+        {{ $t('analytics.common.missing_rates', { currencies: readyPresentation.missingCurrencies.join(', ') }) }}
+      </div>
     </template>
 
     <template v-if="analyticsStore.categoryState.status !== 'loading' && (analyticsStore.categoryState.status === 'empty' || chartSeries.length === 0)">
@@ -123,6 +125,7 @@ import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useAppStore } from '~/stores/appStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
+import { buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '~/utils/AnalyticsCategoryPresentationUtils.js'
 import { ANALYTICS_UNCATEGORIZED_ID } from '~/utils/AnalyticsUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
@@ -151,13 +154,14 @@ const currentMonthLabel = computed(() => formatMonthKey(currentMonthKey.value))
 const categoryLabel = (categoryId) =>
   categoryId === ANALYTICS_UNCATEGORIZED_ID ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[categoryId]) || categoryId
 const formatCurrency = (value) => `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}`
-const toChartPoint = (point, kind) => ({
-  ...point,
-  xLabel: point.xLabel ?? formatMonthKey(point.x),
-  valueLabel: formatCurrency(point.value),
-  kind,
-  isEstimated: analyticsStore.categorySummary.isEstimated,
-})
+const toChartPoint = (point, kind) =>
+  decorateCategoryChartPoint(point, {
+    kind,
+    fallbackXLabel: formatMonthKey(point.x),
+    currencyCode: analyticsStore.displayCurrencyCode,
+    formatNumber: formatNumberForDashboard,
+    isEstimated: analyticsStore.categorySummary.isEstimated,
+  })
 
 const chartSeries = computed(() =>
   (summary.value?.series ?? []).slice(0, 6).map((category, index) => ({
@@ -197,6 +201,27 @@ const summaries = computed(() =>
     currentActualLabel: formatCurrency(category.currentActual),
     forecastLabel: category.forecastAvailable ? formatCurrency(category.currentForecast) : null,
   })),
+)
+const summaryPresentation = computed(() =>
+  buildCategorySummaryPresentation({
+    summaries: summaries.value,
+    isDesktopLayout: appStore.isDesktopLayout,
+    labels: {
+      category: t('category'),
+      average: t('analytics.common.average'),
+      currentActual: t('analytics.category.current_actual'),
+      currentForecast: t('analytics.category.current_forecast'),
+      insufficientHistory: t('analytics.category.insufficient_history'),
+    },
+  }),
+)
+const readyPresentation = computed(() =>
+  buildCategoryReadyPresentation({
+    usedMonths: summary.value.usedMonths,
+    requestedMonths: summary.value.requestedMonths,
+    isEstimated: summary.value.isEstimated,
+    missingCurrencies: summary.value.missingCurrencies ?? [],
+  }),
 )
 const facetItems = computed(() => {
   const rankedItems = analyticsStore.categoryRankingItems
