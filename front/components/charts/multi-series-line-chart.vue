@@ -2,7 +2,7 @@
   <div ref="root" class="analytics-line-chart">
     <svg
       class="analytics-line-chart-svg"
-      viewBox="0 0 1000 320"
+      :viewBox="layout.viewBox"
       role="application"
       :aria-label="ariaLabel"
       tabindex="0"
@@ -15,10 +15,20 @@
     >
       <g aria-hidden="true">
         <template v-for="line in gridLines" :key="line.y">
-          <line class="analytics-chart-grid" x1="88" x2="976" :y1="line.y" :y2="line.y" />
-          <text class="analytics-chart-axis-label" x="80" :y="line.y + 4" text-anchor="end">{{ line.label }}</text>
+          <line class="analytics-chart-grid" :x1="layout.gridX1" :x2="layout.gridX2" :y1="line.y" :y2="line.y" />
+          <text class="analytics-chart-axis-label" :x="layout.yAxisLabelX" :y="line.y + 4" text-anchor="end" :style="{ fontSize: layout.axisFontSize + 'px' }">{{ line.label }}</text>
         </template>
-        <text v-for="label in xAxisLabels" :key="label.key" class="analytics-chart-axis-label" :x="label.x" y="310" :text-anchor="label.anchor">{{ label.label }}</text>
+        <text
+          v-for="label in xAxisLabels"
+          :key="label.key"
+          class="analytics-chart-axis-label"
+          :x="label.x"
+          :y="layout.xAxisY"
+          :text-anchor="label.anchor"
+          :style="{ fontSize: layout.axisFontSize + 'px' }"
+        >
+          {{ label.label }}
+        </text>
       </g>
 
       <template v-for="item in geometry.series" :key="item.id">
@@ -40,7 +50,7 @@
             'analytics-chart-marker-hollow': item.marker === 'hollow',
             'analytics-chart-marker-forecast': point.kind === 'forecast',
           }"
-          :d="markerPath(item.marker, point.x, point.y, 7)"
+          :d="markerPath(item.marker, point.x, point.y, layout.markerSize)"
           :fill="markerFill(item, point)"
           :stroke="item.color"
           :stroke-dasharray="markerDash(point)"
@@ -48,13 +58,13 @@
       </template>
 
       <g v-if="selectedIndex >= 0">
-        <line class="analytics-chart-crosshair" :x1="selectedX" :x2="selectedX" y1="16" y2="282" />
+        <line class="analytics-chart-crosshair" :x1="selectedX" :x2="selectedX" :y1="layout.crosshairY1" :y2="layout.crosshairY2" />
         <path
           v-for="item in selectedValues"
           :key="item.seriesId"
           class="analytics-chart-marker analytics-chart-marker-selected"
           :class="{ 'analytics-chart-marker-cross': item.marker === 'cross', 'analytics-chart-marker-hollow': item.marker === 'hollow' }"
-          :d="markerPath(item.marker, item.x, item.y, 10)"
+          :d="markerPath(item.marker, item.x, item.y, layout.selectedMarkerSize)"
           :fill="markerFill(item, item.point)"
           :stroke="item.color"
           :stroke-dasharray="markerDash(item.point)"
@@ -77,12 +87,18 @@
 </template>
 
 <script setup>
-import { onClickOutside } from '@vueuse/core'
-import { buildLineChartGeometry, buildLineChartLiveDescription, lineChartPointQualifierKeys, lineChartPointsAtX, nearestChartPointIndex, persistentLineChartPoints } from '~/utils/ChartUtils.js'
+import { onClickOutside, useElementSize } from '@vueuse/core'
+import { useAppStore } from '~/stores/appStore.js'
+import {
+  buildLineChartGeometry,
+  buildLineChartLayout,
+  buildLineChartLiveDescription,
+  lineChartPointQualifierKeys,
+  lineChartPointsAtX,
+  nearestChartPointIndex,
+  persistentLineChartPoints,
+} from '~/utils/ChartUtils.js'
 
-const CHART_WIDTH = 1000
-const CHART_HEIGHT = 320
-const CHART_PADDING = { top: 16, right: 24, bottom: 38, left: 88 }
 const GRID_LINE_COUNT = 5
 
 const props = defineProps({
@@ -106,7 +122,9 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'select-point'])
 const { t } = useI18n()
+const appStore = useAppStore()
 const root = ref(null)
+const { width: renderedWidth } = useElementSize(root)
 const selectedIndex = ref(-1)
 const isPinned = ref(props.pinned)
 const isKeyboardSelection = ref(false)
@@ -114,20 +132,21 @@ const isDragging = ref(false)
 const pointerStartedOnPinnedIndex = ref(-1)
 
 const visibleSeries = computed(() => props.series.filter((item) => item.visible !== false))
+const layout = computed(() => buildLineChartLayout({ isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
 const geometry = computed(() =>
   buildLineChartGeometry({
     series: visibleSeries.value,
-    width: CHART_WIDTH,
-    height: CHART_HEIGHT,
-    padding: CHART_PADDING,
+    width: layout.value.width,
+    height: layout.value.height,
+    padding: layout.value.padding,
   }),
 )
 const pointCount = computed(() => geometry.value.xValues.length)
 const selectedXValue = computed(() => geometry.value.xValues[selectedIndex.value])
 const selectedX = computed(() => {
   if (selectedIndex.value < 0) return 0
-  const innerWidth = CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right
-  return CHART_PADDING.left + (selectedIndex.value / Math.max(1, pointCount.value - 1)) * innerWidth
+  const innerWidth = layout.value.width - layout.value.padding.left - layout.value.padding.right
+  return layout.value.padding.left + (selectedIndex.value / Math.max(1, pointCount.value - 1)) * innerWidth
 })
 const selectedXLabel = computed(() => {
   const key = selectedXValue.value
@@ -152,7 +171,7 @@ const gridLines = computed(() =>
   Array.from({ length: GRID_LINE_COUNT }, (_, index) => {
     const ratio = index / (GRID_LINE_COUNT - 1)
     return {
-      y: CHART_PADDING.top + ratio * (CHART_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom),
+      y: layout.value.padding.top + ratio * (layout.value.height - layout.value.padding.top - layout.value.padding.bottom),
       label: props.valueFormatter(geometry.value.yMax - ratio * (geometry.value.yMax - geometry.value.yMin)),
     }
   }),
@@ -165,7 +184,7 @@ const xAxisLabels = computed(() => {
     const point = geometry.value.series.flatMap((item) => item.points).find((candidate) => candidate.key === key)
     return {
       key,
-      x: CHART_PADDING.left + (index / Math.max(1, pointCount.value - 1)) * (CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right),
+      x: layout.value.padding.left + (index / Math.max(1, pointCount.value - 1)) * (layout.value.width - layout.value.padding.left - layout.value.padding.right),
       label: point?.xLabel ?? '',
       anchor: index === 0 ? 'start' : index === pointCount.value - 1 ? 'end' : 'middle',
     }
@@ -224,8 +243,8 @@ const pointerIndex = (event) => {
     clientX: event.clientX,
     left: bounds.left,
     width: bounds.width,
-    viewBoxWidth: CHART_WIDTH,
-    padding: CHART_PADDING,
+    viewBoxWidth: layout.value.width,
+    padding: layout.value.padding,
     pointCount: pointCount.value,
   })
 }

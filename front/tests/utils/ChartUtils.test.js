@@ -273,6 +273,39 @@ test('line geometry assigns six persistent non-color marker treatments to every 
   assert.equal(geometry.series[0].segments[0].dashed, true)
 })
 
+test('responsive line chart layout keeps axis labels and persistent markers readable', () => {
+  assert.equal(typeof ChartUtils.buildLineChartLayout, 'function')
+
+  const cases = [
+    { isDesktop: false, renderedWidth: 358 },
+    { isDesktop: true, renderedWidth: 500 },
+    { isDesktop: false, renderedWidth: 700 },
+    { isDesktop: false, renderedWidth: 800 },
+    { isDesktop: true, renderedWidth: 1168 },
+  ].map(({ isDesktop, renderedWidth }) => ({ isDesktop, renderedWidth, layout: ChartUtils.buildLineChartLayout({ isDesktop, renderedWidth }) }))
+
+  for (const { layout, renderedWidth } of cases) {
+    const renderedScale = renderedWidth / layout.width
+    const renderedFontSize = layout.axisFontSize * renderedScale
+    const renderedMarkerDiameter = layout.markerSize * 2 * renderedScale
+
+    assert.ok(renderedFontSize >= 11 && renderedFontSize <= 13, `${renderedWidth}px renders ${renderedFontSize}px axis text`)
+    assert.ok(renderedMarkerDiameter >= 9, `${renderedWidth}px renders ${renderedMarkerDiameter}px persistent markers`)
+    assert.equal(layout.viewBox, `0 0 ${layout.width} ${layout.height}`)
+    assert.equal(layout.gridX1, layout.padding.left)
+    assert.equal(layout.gridX2, layout.width - layout.padding.right)
+    assert.equal(layout.crosshairY1, layout.padding.top)
+    assert.equal(layout.crosshairY2, layout.height - layout.padding.bottom)
+    assert.ok(layout.xAxisY > layout.crosshairY2 && layout.xAxisY <= layout.height)
+  }
+
+  for (const { isDesktop, layout, renderedWidth } of cases.filter(({ isDesktop }) => !isDesktop)) {
+    const mobileRenderedHeight = layout.height * (renderedWidth / layout.width)
+    assert.equal(isDesktop, false)
+    assert.ok(mobileRenderedHeight >= 235 && mobileRenderedHeight <= 245, `${renderedWidth}px mobile chart renders ${mobileRenderedHeight}px tall`)
+  }
+})
+
 test('money flow uses compact top-to-bottom mobile geometry', () => {
   const geometry = buildMoneyFlowGeometry({
     sources: [

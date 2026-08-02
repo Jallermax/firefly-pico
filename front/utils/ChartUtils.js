@@ -17,6 +17,28 @@ export function nearestChartPointIndex({ clientX, left, width, viewBoxWidth, pad
   })
 }
 
+export function buildLineChartLayout({ isDesktop, renderedWidth }) {
+  const width = Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : isDesktop ? 1000 : 360
+  const height = isDesktop ? 320 : 240
+  const padding = isDesktop ? { top: 16, right: 24, bottom: 38, left: 88 } : { top: 16, right: 12, bottom: 34, left: 64 }
+
+  return {
+    width,
+    height,
+    viewBox: `0 0 ${width} ${height}`,
+    padding,
+    gridX1: padding.left,
+    gridX2: width - padding.right,
+    yAxisLabelX: padding.left - 8,
+    xAxisY: height - 10,
+    crosshairY1: padding.top,
+    crosshairY2: height - padding.bottom,
+    axisFontSize: isDesktop ? 11 : 12,
+    markerSize: isDesktop ? 4.5 : 5,
+    selectedMarkerSize: isDesktop ? 7 : 8,
+  }
+}
+
 export function buildLineChartGeometry({ series, width, height, padding }) {
   const xValues = [...new Set(series.flatMap((item) => item.points.map((point) => point.x)))].sort()
   const values = series.flatMap((item) => item.points.map((point) => point.value)).filter(Number.isFinite)
