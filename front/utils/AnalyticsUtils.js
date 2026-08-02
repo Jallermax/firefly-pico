@@ -57,12 +57,12 @@ const splitDirection = (item) => {
 const splitMonthKey = (item) => {
   const date = item?.date instanceof Date ? item.date : new Date(item?.date)
   if (Number.isNaN(date.getTime())) return null
-  return date.toISOString().slice(0, 7)
+  return format(date, 'yyyy-MM')
 }
 
 const splitDay = (item) => {
   const date = item?.date instanceof Date ? item.date : new Date(item?.date)
-  return Number.isNaN(date.getTime()) ? null : date.getUTCDate()
+  return Number.isNaN(date.getTime()) ? null : date.getDate()
 }
 
 export function buildCategoryLedger({ transactions, displayCurrencyCode, primaryCurrencyCode, rates }) {
@@ -94,12 +94,15 @@ export function buildCategoryLedger({ transactions, displayCurrencyCode, primary
 
       const categoryId = item.category_id ?? ANALYTICS_UNCATEGORIZED_ID
       const month = (months[monthKey] ??= { categories: {} })
-      const category = (month.categories[categoryId] ??= { amount: 0, byDay: {}, transactionIds: [] })
+      const category = (month.categories[categoryId] ??= { amount: 0, byDay: {}, transactionIds: [], transactionIdsByDay: {} })
       const value = direction * converted.value
       category.amount += value
       category.byDay[day] = (category.byDay[day] ?? 0) + value
       category.transactionIds.push(transaction.id)
       category.transactionIds = unique(category.transactionIds)
+      const transactionIdsByDay = (category.transactionIdsByDay[day] ??= [])
+      transactionIdsByDay.push(transaction.id)
+      category.transactionIdsByDay[day] = unique(transactionIdsByDay)
       isEstimated ||= converted.isEstimated
     }
   }
@@ -120,7 +123,7 @@ const completedMonthKeys = ({ today, averageMonths, ledgerStartMonth }) => {
   return ledgerStartMonth ? requested.filter((key) => key >= ledgerStartMonth) : []
 }
 
-const categoryForMonth = (ledger, key, categoryId) => ledger.months?.[key]?.categories?.[categoryId] ?? { amount: 0, byDay: {}, transactionIds: [] }
+const categoryForMonth = (ledger, key, categoryId) => ledger.months?.[key]?.categories?.[categoryId] ?? { amount: 0, byDay: {}, transactionIds: [], transactionIdsByDay: {} }
 
 export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, today }) {
   const monthKeys = completedMonthKeys({ today, averageMonths, ledgerStartMonth: ledger.ledgerStartMonth })
@@ -133,6 +136,8 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
     const completedTotal = completed.reduce((total, category) => total + category.amount, 0)
     const remainderTotal = completed.reduce((total, category) => total + Object.entries(category.byDay).reduce((monthTotal, [day, value]) => monthTotal + (Number(day) > todayDay ? value : 0), 0), 0)
     const averageRemainderAfterToday = usedMonths > 0 ? remainderTotal / usedMonths : 0
+    const currentActual = Object.entries(current.byDay).reduce((total, [day, value]) => total + (Number(day) <= todayDay ? value : 0), 0)
+    const currentTransactionIds = unique(Object.entries(current.transactionIdsByDay ?? {}).flatMap(([day, transactionIds]) => (Number(day) <= todayDay ? transactionIds : [])))
 
     return {
       id: categoryId,
@@ -142,9 +147,9 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
         transactionIds: categoryForMonth(ledger, key, categoryId).transactionIds,
       })),
       average: usedMonths > 0 ? completedTotal / usedMonths : null,
-      currentActual: current.amount,
-      currentTransactionIds: current.transactionIds,
-      currentForecast: usedMonths >= 2 ? current.amount + averageRemainderAfterToday : null,
+      currentActual,
+      currentTransactionIds,
+      currentForecast: usedMonths >= 2 ? currentActual + averageRemainderAfterToday : null,
       forecastAvailable: usedMonths >= 2,
     }
   })

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
@@ -48,6 +49,43 @@ const checking = typedAccount({ type: 'asset' })
 const otherChecking = typedAccount({ type: 'asset' })
 const card = typedAccount({ type: 'asset', role: 'ccAsset' })
 const expense = typedAccount({ type: 'expense' })
+
+const ledgerBucketInTimezone = ({ timeZone, dateParts }) => {
+  const analyticsUrl = new URL('../../utils/AnalyticsUtils.js', import.meta.url).href
+  const script = `
+    import { buildCategoryLedger } from ${JSON.stringify(analyticsUrl)}
+
+    const account = (type) => ({ attributes: { type: { fireflyCode: type } } })
+    const ledger = buildCategoryLedger({
+      displayCurrencyCode: 'USD',
+      primaryCurrencyCode: 'USD',
+      rates: { USD: 1 },
+      transactions: [{
+        id: 'boundary',
+        attributes: {
+          transactions: [{
+            amount: '1',
+            primary_amount: null,
+            currency_code: 'USD',
+            date: new Date(${dateParts.join(', ')}),
+            accountSource: account('asset'),
+            accountDestination: account('expense'),
+            category_id: 'food',
+          }],
+        },
+      }],
+    })
+    const category = ledger.months[ledger.ledgerStartMonth].categories.food
+    console.log(JSON.stringify({ month: ledger.ledgerStartMonth, days: Object.keys(category.byDay) }))
+  `
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+    encoding: 'utf8',
+    env: { ...process.env, TZ: timeZone },
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  return JSON.parse(result.stdout.trim())
+}
 
 test('groups active net-worth, savings, debit liabilities, and credit cards', () => {
   const groups = getAnalyticsAccountGroups([
@@ -186,13 +224,22 @@ test('category ledger counts purchases, subtracts refunds, preserves uncategoriz
   assert.equal(ledger.months['2026-01'].categories[ANALYTICS_UNCATEGORIZED_ID].amount, 15)
 })
 
+for (const { timeZone, dateParts, expected } of [
+  { timeZone: 'Pacific/Kiritimati', dateParts: [2026, 1, 1, 0, 30], expected: { month: '2026-02', days: ['1'] } },
+  { timeZone: 'America/Los_Angeles', dateParts: [2026, 0, 31, 23, 30], expected: { month: '2026-01', days: ['31'] } },
+]) {
+  test(`category ledger uses local calendar month and day in ${timeZone}`, () => {
+    assert.deepEqual(ledgerBucketInTimezone({ timeZone, dateParts }), expected)
+  })
+}
+
 test('completed-month averages count zero months only after ledger history begins', () => {
   const ledger = {
     ledgerStartMonth: '2026-01',
     months: {
       '2026-01': { categories: { food: { amount: 90, byDay: { 5: 40, 25: 50 }, transactionIds: ['jan'] } } },
       '2026-03': { categories: { food: { amount: 30, byDay: { 8: 10, 20: 20 }, transactionIds: ['mar'] } } },
-      '2026-04': { categories: { food: { amount: 12, byDay: { 8: 12 }, transactionIds: ['apr'] } } },
+      '2026-04': { categories: { food: { amount: 12, byDay: { 8: 12 }, transactionIds: ['apr'], transactionIdsByDay: { 8: ['apr'] } } } },
     },
   }
 
@@ -235,6 +282,31 @@ test('forecast is absent with fewer than two completed months', () => {
   assert.equal(summary.usedMonths, 1)
   assert.equal(summary.series[0].currentForecast, null)
   assert.equal(summary.series[0].forecastAvailable, false)
+})
+
+test('current actual, drilldown IDs, and forecast base include only splits through today', () => {
+  const ledger = buildCategoryLedger({
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    transactions: [
+      transaction('jan-later', [split({ amount: 40, date: '2026-01-20', source: checking, destination: expense, categoryId: 'food' })]),
+      transaction('mar-later', [split({ amount: 20, date: '2026-03-20', source: checking, destination: expense, categoryId: 'food' })]),
+      transaction('current-past', [split({ amount: 10, date: '2026-04-05', source: checking, destination: expense, categoryId: 'food' })]),
+      transaction('current-future', [split({ amount: 90, date: '2026-04-20', source: checking, destination: expense, categoryId: 'food' })]),
+    ],
+  })
+
+  const summary = summarizeCategoryWindow({
+    ledger,
+    categoryIds: ['food'],
+    averageMonths: 3,
+    today: new Date('2026-04-10T12:00:00Z'),
+  })
+
+  assert.equal(summary.series[0].currentActual, 10)
+  assert.deepEqual(summary.series[0].currentTransactionIds, ['current-past'])
+  assert.equal(summary.series[0].currentForecast, 30)
 })
 
 test('category ranking uses the selected completed-month window', () => {
