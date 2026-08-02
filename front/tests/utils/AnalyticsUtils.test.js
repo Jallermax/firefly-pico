@@ -208,6 +208,30 @@ test('uses exact primary chart entries when available', () => {
   })
 })
 
+test('normalizes Firefly Atom chart keys without shifting the source day', () => {
+  const result = normalizeBalanceSeries({
+    metric: 'netWorth',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: {},
+    chartLines: [{ primary_currency_code: 'USD', pc_entries: { '2026-08-02T00:00:00+00:00': '125' } }],
+  })
+
+  assert.deepEqual(result.points, [{ x: '2026-08-02', value: 125 }])
+})
+
+test('ignores invalid account-chart date keys', () => {
+  const result = normalizeBalanceSeries({
+    metric: 'netWorth',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    chartLines: [{ currency_code: 'USD', entries: { invalid: '10', '2026-08-02': '20' } }],
+  })
+
+  assert.deepEqual(result.points, [{ x: '2026-08-02', value: 20 }])
+})
+
 test('category ledger counts purchases, subtracts refunds, preserves uncategorized, and keeps group IDs', () => {
   const ledger = buildCategoryLedger({
     displayCurrencyCode: 'USD',

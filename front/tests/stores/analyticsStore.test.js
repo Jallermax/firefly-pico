@@ -185,6 +185,19 @@ test('initializes a fallback currency with one request per non-empty group and r
   assert.equal(accountRequests.length, 1)
 })
 
+test('normalizes a current Firefly chart timestamp before validating balances', async () => {
+  const date = format(new Date(), 'yyyy-MM-dd')
+  const atomDate = date + 'T00:00:00+00:00'
+  accountResponse = async () => chartResponse(100, atomDate)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const netWorth = store.balanceSeries.find(({ id }) => id === 'netWorth')
+  assert.deepEqual(netWorth.points, [{ x: date, value: 100 }])
+  assert.deepEqual(netWorth.warnings, [])
+})
+
 test('validates debit liabilities against current debt', async () => {
   accountStore.accountList = [debitLiability()]
   accountResponse = async () => chartResponse(-200)

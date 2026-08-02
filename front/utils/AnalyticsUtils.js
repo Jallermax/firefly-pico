@@ -308,7 +308,7 @@ const entriesForLine = ({ line, primaryCurrencyCode }) => {
   if (line?.pc_entries && Object.keys(line.pc_entries).length > 0) {
     return {
       entries: line.pc_entries,
-      currencyCode: line.pc_currency_code ?? primaryCurrencyCode,
+      currencyCode: line.primary_currency_code ?? line.pc_currency_code ?? primaryCurrencyCode,
       isPrimary: true,
     }
   }
@@ -319,12 +319,19 @@ const entriesForLine = ({ line, primaryCurrencyCode }) => {
   }
 }
 
+const normalizeChartDateKey = (value) => {
+  const match = String(value ?? '').match(/^(\d{4}-\d{2}-\d{2})(?:$|T)/)
+  return match?.[1] ?? null
+}
+
 export function normalizeBalanceSeries({ chartLines, metric, displayCurrencyCode, primaryCurrencyCode, rates }) {
   const normalizedLines = chartLines.map((line) => {
     const source = entriesForLine({ line, primaryCurrencyCode })
     const points = Object.entries(source.entries)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([x, amount]) => {
+      .map(([x, amount]) => ({ x: normalizeChartDateKey(x), amount }))
+      .filter(({ x }) => x)
+      .sort((left, right) => left.x.localeCompare(right.x))
+      .map(({ x, amount }) => {
         const converted = convertAnalyticsAmount({
           amount,
           currencyCode: source.currencyCode,
