@@ -24,6 +24,7 @@ let accountResponse = async () => ({ status: 200, data: [] })
 let transactionResult = []
 let transactionResponse = async () => ({ ok: true, data: transactionResult })
 let analyticsStore = null
+let now = new Date()
 
 class AccountRepository {
   async getChartOverview(options) {
@@ -82,6 +83,7 @@ const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   getCurrencyDecimalPlaces: (value) => Currency.getDecimalPlaces(value),
   getExcludedTransactionFilters: () => [],
   isResponseSuccess: (response) => [200, 204].includes(response?.status),
+  getNow: () => now,
 }))
 
 const activeAsset = () => ({
@@ -133,6 +135,7 @@ const waitFor = async (predicate) => {
 }
 
 beforeEach(() => {
+  now = new Date()
   setActivePinia(createPinia())
   dashboardStore.dashboardCurrency = usd
   accountStore.accountList = [activeAsset()]
@@ -222,8 +225,8 @@ test('marks a weekly final point unverified when no account value exists for its
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [{ type: 'current-balance-unverified', sampleDate, currentDate: format(new Date(), 'yyyy-MM-dd') }])
 })
 
-test('uses a same-day debt chart actual when direct current debt is missing and preserves zero change', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+test('uses a same-day debt chart actual when direct current debt is missing and preserves zero change', async () => {
+  now = new Date('2026-08-10T12:00:00')
   accountStore.accountList = [
     {
       ...debitLiability(),
@@ -247,8 +250,8 @@ test('uses a same-day debt chart actual when direct current debt is missing and 
   )
 })
 
-test('uses a current-month daily debt actual without replacing longer-window weekly history', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+test('uses a current-month daily debt actual without replacing longer-window weekly history', async () => {
+  now = new Date('2026-08-10T12:00:00')
   storageOverrides.set('analyticsBalancePeriod', 6)
   accountStore.accountList = [
     {
@@ -281,8 +284,8 @@ test('uses a current-month daily debt actual without replacing longer-window wee
   assert.equal(trendSeries.currentChange, -53)
 })
 
-test('does not cache longer-window balances when the current-month auxiliary request fails', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+test('does not cache longer-window balances when the current-month auxiliary request fails', async () => {
+  now = new Date('2026-08-10T12:00:00')
   storageOverrides.set('analyticsBalancePeriod', 6)
   accountStore.accountList = [
     {
@@ -307,8 +310,8 @@ test('does not cache longer-window balances when the current-month auxiliary req
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, { x: '2026-08-10', value: 147 })
 })
 
-test('keeps a newer currency result current while an older auxiliary debt request finishes', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+test('keeps a newer currency result current while an older auxiliary debt request finishes', async () => {
+  now = new Date('2026-08-10T12:00:00')
   storageOverrides.set('analyticsBalancePeriod', 6)
   accountStore.accountList = [
     {
@@ -368,8 +371,8 @@ test('keeps a prior-month debt chart actual out of current totals when direct cu
   )
 })
 
-test('retains estimation and staleness metadata on a current-month debt chart fallback', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+test('retains estimation and staleness metadata on a current-month debt chart fallback', async () => {
+  now = new Date('2026-08-10T12:00:00')
   accountStore.accountList = [
     {
       ...debitLiability(),

@@ -36,6 +36,7 @@ export function createAnalyticsStore(id, useDependencies) {
       getCurrencyDecimalPlaces,
       getExcludedTransactionFilters,
       isResponseSuccess,
+      getNow = () => new Date(),
     } = useDependencies()
 
     const balancePeriod = useStoredValue('analyticsBalancePeriod', 3)
@@ -68,7 +69,7 @@ export function createAnalyticsStore(id, useDependencies) {
         storedFinancialTrendView.value = FINANCIAL_TREND_VIEWS.includes(view) ? view : 'balances'
       },
     })
-    const selectedFlowMonth = ref(startOfMonth(new Date()))
+    const selectedFlowMonth = ref(startOfMonth(getNow()))
 
     const balanceState = reactive({ status: 'idle', error: null, isStale: false })
     const categoryState = reactive({ status: 'idle', error: null, isStale: false })
@@ -103,12 +104,12 @@ export function createAnalyticsStore(id, useDependencies) {
       rankCategoryIds({
         ledger: categoryLedger.value,
         averageMonths: categoryAverageMonths.value,
-        today: new Date(),
+        today: getNow(),
       }),
     )
     const currentMonthCategoryIds = computed(() => {
       const rankedIds = new Set(categoryRanking.value)
-      const currentCategories = categoryLedger.value.months?.[format(new Date(), 'yyyy-MM')]?.categories ?? {}
+      const currentCategories = categoryLedger.value.months?.[format(getNow(), 'yyyy-MM')]?.categories ?? {}
       return Object.keys(currentCategories)
         .filter((id) => !rankedIds.has(id))
         .sort((left, right) => currentCategories[right].amount - currentCategories[left].amount || left.localeCompare(right))
@@ -118,7 +119,7 @@ export function createAnalyticsStore(id, useDependencies) {
         ledger: categoryLedger.value,
         categoryIds: normalizedSelectedCategoryIds.value,
         averageMonths: categoryAverageMonths.value,
-        today: new Date(),
+        today: getNow(),
       }),
       isEstimated: categoryLedger.value.isEstimated,
       missingCurrencies: categoryLedger.value.missingCurrencies,
@@ -146,7 +147,7 @@ export function createAnalyticsStore(id, useDependencies) {
       }),
     )
     const flowMonthMin = computed(() => (categoryLedger.value.ledgerStartMonth ? startOfMonth(parseISO(categoryLedger.value.ledgerStartMonth + '-01')) : null))
-    const flowMonthMax = computed(() => startOfMonth(new Date()))
+    const flowMonthMax = computed(() => startOfMonth(getNow()))
 
     function getBalanceSnapshot() {
       const groups = Object.fromEntries(
@@ -173,7 +174,7 @@ export function createAnalyticsStore(id, useDependencies) {
       const currencyCodes = [displayCode, primaryCode, ...BALANCE_METRICS.flatMap((metric) => groups[metric].map(({ currencyCode }) => currencyCode))].filter(Boolean).sort()
       const relevantRates = Object.fromEntries([...new Set(currencyCodes)].map((currencyCode) => [currencyCode, rateSnapshot[currencyCode] ?? null]))
       const months = Number(balancePeriod.value)
-      const today = new Date()
+      const today = getNow()
       const groupIds = Object.fromEntries(BALANCE_METRICS.map((metric) => [metric, groups[metric].map(({ id }) => id).sort()]))
       const cacheKey = JSON.stringify({ period: months, displayCurrencyCode: displayCode, primaryCurrencyCode: primaryCode, rates: relevantRates, groups: groupIds })
       return {
@@ -196,8 +197,8 @@ export function createAnalyticsStore(id, useDependencies) {
         FINANCIAL_TREND_METRICS.filter((metric) => metric !== 'expenses').map((metric) => ({ id: metric, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })),
     )
     const financialTrend = computed(() => ({
-      ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: new Date() }),
-      expenses: summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: new Date() }),
+      ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() }),
+      expenses: summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() }),
     }))
 
     async function fetchTransactions({ force = false } = {}) {
@@ -212,7 +213,7 @@ export function createAnalyticsStore(id, useDependencies) {
       Object.assign(flowState, { status: 'loading', error: null, isStale: hasExistingData })
 
       const request = (async () => {
-        const today = new Date()
+        const today = getNow()
         const query = [`date_after:${DateUtils.dateToString(startOfMonth(subMonths(today, 24)))}`, `date_before:${DateUtils.dateToString(today)}`, ...getExcludedTransactionFilters()]
         const filters = [{ field: 'query', value: query.join(' ') }]
         const repository = createTransactionRepository()
