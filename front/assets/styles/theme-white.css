@@ -2351,3 +2351,113 @@ body {
     height: 9px;
     border-radius: 50%;
 }
+
+.analytics-card {
+    break-inside: avoid;
+    overflow: visible;
+}
+
+.analytics-card-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.analytics-series-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 16px 8px;
+}
+
+.analytics-series-toggle {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 25px;
+    background: var(--van-background-2-5);
+    color: var(--van-text-color-2);
+    cursor: pointer;
+}
+
+.analytics-series-toggle.active {
+    box-shadow: inset 0 0 0 2px currentColor;
+    color: var(--van-text-color);
+}
+
+.analytics-card-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 160px;
+    gap: 8px;
+    padding: 16px;
+    color: var(--van-text-color-2);
+    text-align: center;
+}
+
+.analytics-card-state-compact {
+    min-height: auto;
+    justify-content: flex-start;
+    padding: 0 16px 8px;
+}
+
+.analytics-metric-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    padding: 0 16px 12px;
+}
+
+.analytics-metric-summary {
+    padding: 10px;
+    border-radius: 8px;
+    background: var(--van-background-2-5);
+}
+
+.analytics-metric-summary-title,
+.analytics-metric-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.analytics-metric-summary-title {
+    margin-bottom: 6px;
+    color: var(--van-text-color);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.analytics-metric-summary-row {
+    justify-content: space-between;
+    color: var(--van-text-color-2);
+    font-size: 11px;
+}
+
+.analytics-metric-summary-row strong {
+    color: var(--van-text-color);
+    font-size: 12px;
+}
+
+.analytics-metric-summary-row.success strong {
+    color: var(--van-success-color);
+}
+
+.analytics-metric-summary-row.danger strong {
+    color: var(--van-danger-color);
+}
+
+.analytics-assumption-note,
+.analytics-warning {
+    margin: 0 16px 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: var(--van-text-color-2);
+    background: var(--van-background-2-5);
+    font-size: 11px;
+}
+
+.analytics-warning {
+    color: var(--van-danger-color);
+}

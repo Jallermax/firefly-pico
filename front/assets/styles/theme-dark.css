@@ -517,3 +517,9 @@
 .van-theme-dark .analytics-chart-single-point {
     stroke: var(--van-background-2);
 }
+
+.van-theme-dark .analytics-metric-summary,
+.van-theme-dark .analytics-assumption-note,
+.van-theme-dark .analytics-warning {
+    background: var(--van-background-3);
+}
