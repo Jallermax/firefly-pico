@@ -534,3 +534,32 @@
 .van-theme-dark .analytics-forecast-detail-row {
     background: var(--van-background-3);
 }
+
+.van-theme-dark .analytics-flow-bus {
+    fill: #444;
+    stroke: #666;
+}
+
+.van-theme-dark .analytics-flow-node text,
+.van-theme-dark .analytics-flow-bus-label {
+    fill: var(--van-text-color);
+}
+
+.van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-band-hit {
+    stroke: #64b5f6;
+    opacity: 0.28;
+}
+
+.van-theme-dark .analytics-flow-month-button,
+.van-theme-dark .analytics-flow-list button,
+.van-theme-dark .analytics-flow-unbalanced,
+.van-theme-dark .analytics-flow-audit,
+.van-theme-dark .analytics-flow-residual-details p {
+    background: var(--van-background-3);
+}
+
+.van-theme-dark .analytics-flow-audit-section h4,
+.van-theme-dark .analytics-flow-details-header,
+.van-theme-dark .analytics-flow-residual-result {
+    border-color: #444;
+}
