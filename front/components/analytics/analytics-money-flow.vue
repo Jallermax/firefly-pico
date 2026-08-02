@@ -143,7 +143,7 @@ const canPrevious = computed(() => monthMin.value !== null && selectedMonth.valu
 const canNext = computed(() => selectedMonth.value.getTime() < monthMax.value.getTime())
 const selectedMonthLabel = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(selectedMonth.value))
 const hasNodes = computed(() => flow.value.sources.length + flow.value.destinations.length > 0)
-const hasRetainedData = computed(() => analyticsStore.flowState.isStale && hasNodes.value)
+const hasRetainedData = computed(() => analyticsStore.flowState.isStale)
 const isBlockingLoading = computed(() => analyticsStore.flowState.status === 'loading' && !hasRetainedData.value)
 const isBlockingError = computed(() => analyticsStore.flowState.status === 'error' && !hasRetainedData.value)
 const formatCurrency = (value) => `${formatNumberForDashboard(Number(value) || 0)} ${analyticsStore.displayCurrencyCode}`
