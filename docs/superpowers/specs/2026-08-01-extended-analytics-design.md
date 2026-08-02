@@ -192,11 +192,14 @@ The current endpoint value and the final chart point are validated against the c
 - Net worth sums the Firefly signed balance contribution of each included account.
 - Savings sums the signed balances of savings-role asset accounts.
 - Debt converts each included account's signed balance to a non-negative amount owed. For debit-direction liabilities and credit-card assets, the owed amount is `max(0, -signedNetWorthContribution)`. The normalization helper owns any Firefly account-type sign adaptation before this formula, and fixtures must cover both account classes.
-- For each account metric, a completed month's plotted movement is that month-end total minus the preceding month-end total.
-- Current-month account movement is the latest actual total minus the preceding completed month-end total and is visibly labeled partial.
+- For each account metric, derive both the completed month-end total and that month's movement from the preceding month-end total. Carry the latest known account total through a month with no later sample, but only after the first returned source point; genuinely missing history is not invented.
+- The selected 3/6/12-month window means that many completed calendar months, plus the current month shown separately. Fetch one additional preceding month to calculate the oldest movement baseline.
+- Current-month account movement is the latest actual total minus the preceding completed month-end total and is visibly labeled partial. An unchanged current account total is an explicit zero point, not a missing point.
 - Positive debt movement means debt grew; negative debt movement means debt was repaid. Debt-aware summary color treats growth as deterioration and repayment as improvement.
 - Total expenses are the existing transaction ledger's monthly net consumption across all categories. Transfers, savings movements, debt payments, and configured non-expense transactions remain excluded. Refunds reduce the month in which they occur.
 - Completed months show actual total expenses. The current month shows actual-to-date and a dashed forecast continuation using the approved remainder-of-month formula and selected 3/6/12-month history window.
+- The average monthly change for each selected account metric is calculated from the completed months in the selected window; the partial current month is excluded. Total expenses show their average monthly amount over the same completed-month window.
+- Each account metric has a current-month forecast when at least two completed movements are available. Forecast movement is the completed-window average monthly change; forecast month-end total is the preceding completed month-end total plus that average. The latest actual current point remains separate, with a dashed segment to the forecast point.
 - Zero is a valid point. Missing is not zero.
 
 Summary tiles display the latest actual Net worth, Savings, and Debt totals rather than replacing them with movements. A fourth tile shows current total-expense actual and forecast. Movement summaries identify the latest completed month separately from the current partial month.
@@ -204,10 +207,10 @@ Summary tiles display the latest actual Net worth, Savings, and Debt totals rath
 ### Controls and visual encoding
 
 - Segmented period control: 3M / 6M / 12M.
-- A category-style facet button reports `N selected` and opens a searchable checkbox list for Net worth change, Savings change, Debt change, and Total expenses.
-- All four may be shown together; at least one must remain selected. Invalid or obsolete persisted selections are repaired safely.
+- A compact `Balances / Monthly change` selector switches the Financial trends chart without adding another card. `Balances` includes Net worth, Savings, and Debt. `Monthly change` includes Net worth change, Savings change, Debt change, and Total expenses.
+- A category-style facet button reports `N selected` and opens a searchable checkbox list for the metrics available in the active view. Every metric in that view may be shown together; at least one must remain selected. The two views retain independent valid selections, and invalid or obsolete persisted values are repaired safely.
 - Each series has a stable semantic color plus a distinct marker/line treatment so color is not the only identifier.
-- Actual account-movement lines never use forecast styling. Only the current total-expense forecast uses a dashed segment and forecast marker.
+- Completed and current-actual segments use solid styling. Every selected metric's current-month forecast uses a dashed segment and forecast marker.
 - Hover, touch, or keyboard inspection shows a vertical guide and exact values for every selected series at the active month.
 
 ## Category Spending

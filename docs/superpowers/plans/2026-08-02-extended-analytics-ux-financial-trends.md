@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Repair the live Financial trends card, add selectable monthly net-worth, savings, debt, and expense movement, and make all analytics cards readable and smooth on mobile and desktop.
+**Goal:** Repair the live Financial trends card, add selectable monthly totals and changes for net worth, savings, debt, and expenses, and make all analytics cards readable and smooth on mobile and desktop.
 
 **Architecture:** Keep Firefly account-chart data and the normalized transaction ledger as separate sources, then combine their derived monthly series only at the analytics store/presentation boundary. Preserve the existing account request groups (`netWorth`, `savings`, `debt`) while adding `expenses` only to the selectable Financial trends metrics. Reuse the native SVG charts and add no backend route, database change, or chart dependency.
 
@@ -17,7 +17,7 @@
 - Keep `BALANCE_METRICS = ['netWorth', 'savings', 'debt']` limited to account grouping and account-chart requests; `expenses` is transaction-derived.
 - Treat credit-card purchases as expenses plus debt growth and credit-card payments as debt repayment, not spending.
 - Exclude savings transfers, debt payments, ordinary transfers, and configured dashboard exclusions from total expenses.
-- Keep current-month actual account movement separate from the expense forecast; do not forecast net worth, savings, or debt.
+- Keep completed months, the current partial point, and the current-month forecast visually distinct. Forecast every selected account metric from the completed-month average and retain the expense remainder-of-month forecast.
 - Use shared theme files and all 11 locale JSON files; do not add scoped styles or hard-coded user-facing labels.
 - Preserve card-local loading/error/retry/stale/empty states and exact pointer/touch/keyboard chart inspection.
 - Verify real mobile/desktop and light/dark states in Chrome before completion.
@@ -476,7 +476,75 @@ git add front/components/analytics/analytics-category-spending.vue front/assets/
 git commit -m "refactor: improve analytics layout readability"
 ```
 
-### Task 5: Simplify and enlarge the money-flow presentation
+### Task 5: Add balance/change views, averages, zero points, and account forecasts
+
+**Files:**
+- Modify: `front/utils/AnalyticsUtils.js`
+- Modify: `front/stores/analyticsStoreFactory.js`
+- Modify: `front/components/analytics/analytics-balance-trends.vue`
+- Modify: `front/utils/ChartUtils.js` only if shared chart presentation needs another deterministic helper
+- Modify: `front/assets/styles/theme-white.css`
+- Modify: `front/assets/styles/theme-dark.css`
+- Modify: all files under `front/i18n/locales/`
+- Test: `front/tests/utils/AnalyticsUtils.test.js`
+- Test: `front/tests/stores/analyticsStore.test.js`
+- Test: `front/tests/utils/ChartUtils.test.js` when applicable
+
+**Interfaces:**
+- Consumes: normalized account totals, the explicit current account total, the transaction-derived expense ledger, selected 3/6/12-month window, and two independent facet selections.
+- Produces: `Balances / Monthly change` views; completed totals and changes; explicit current actuals including zero; completed-window averages; and dashed current-month forecasts for every selected metric.
+
+- [ ] **Step 1: Add failing aggregation tests**
+
+Cover an exact three-completed-month window plus the current month and one preceding baseline. Prove that a sparse month carries forward the latest known account total only after the first source point, an unchanged current total emits `{ value: 0, kind: 'partial' }`, and the completed changes exclude the current partial point from their average.
+
+For completed changes `[20, 0, 10]`, assert an average change of `10`, a forecast change of `10`, and a forecast total equal to the preceding completed month-end total plus `10`. Require at least two completed movements before an account forecast is available. Add `average` to `summarizeTotalExpenseWindow` using only completed months.
+
+- [ ] **Step 2: Fetch the full calculation window and expose both series**
+
+Treat `balancePeriod` as the number of completed months. Request one additional preceding month for the oldest movement baseline and retain the current explicit total. Extend `summarizeBalanceMovements(...)` so each account series returns:
+
+```js
+{
+  id,
+  totalPoints,
+  changePoints,
+  currentTotal,
+  currentChange,
+  averageChange,
+  forecastChange,
+  forecastTotal,
+  forecastAvailable,
+}
+```
+
+Completed total/change points are `kind: 'actual'`; the current total/change points are always emitted as `kind: 'partial'` when the current total and preceding completed total are known, including a numeric zero. Do not manufacture zero when the source baseline or current total is genuinely unavailable.
+
+- [ ] **Step 3: Persist independent view and facet choices**
+
+Add a normalized stored Financial trends view with values `balances` and `changes`, defaulting to `balances`. Retain the existing four-metric selection for `changes` and add an independently repaired three-account-metric selection for `balances`; neither selection may become empty. Keep `BALANCE_METRICS` account-only and never issue an account request for `expenses`.
+
+- [ ] **Step 4: Present totals, changes, averages, and forecasts**
+
+Add a compact localized `Balances / Monthly change` selector above the 3M/6M/12M control. In `balances`, chart selected Net worth/Savings/Debt month-end totals. In `changes`, chart their monthly changes plus Total expenses. For every selected account metric, append a real `{ kind: 'forecast' }` point at the current forecast x-position so the native chart draws a dashed segment; do not use `inspectionOnly` as a substitute. Total expenses retain their existing remainder-of-month forecast.
+
+At the active forecast guide, every selected series must expose an exact formatted value. Summary rows show the relevant current actual, completed-window average monthly change (or average monthly spending for expenses), and forecast. Keep partial, forecast, estimated-rate, stale, missing-rate, and validation qualifiers/warnings intact.
+
+- [ ] **Step 5: Add production-consumed presentation coverage, localize, verify, and commit**
+
+Use dependency-free tests against production-consumed utilities/store contracts to prove both modes, independent selection repair, localized labels supplied to the view, explicit zero current points, and a forecast point/segment for every selected account metric. Update all 11 locale files and both themes without adding dependencies or scoped styles.
+
+Run from `front/`:
+
+```bash
+npm run test:analytics
+npm run build
+git diff --check
+```
+
+Run scoped ESLint/Prettier for every touched JS/Vue file and parse all 11 locales. Commit with `feat: add financial trend totals and forecasts`.
+
+### Task 6: Simplify and enlarge the money-flow presentation
 
 **Files:**
 - Modify: `front/utils/ChartUtils.js`
@@ -562,14 +630,14 @@ git add front/utils/ChartUtils.js front/tests/utils/ChartUtils.test.js front/com
 git commit -m "refactor: improve money flow readability"
 ```
 
-### Task 6: Integrated real-data verification and final repairs
+### Task 7: Integrated real-data verification and final repairs
 
 **Files:**
 - Modify only files already listed above when a verified regression requires a repair.
 - Verify: all analytics tests, all locales, production build, contribution preflight, and live Chrome UI.
 
 **Interfaces:**
-- Consumes: the completed five implementation commits and the running local Firefly/Pico environment.
+- Consumes: the completed six implementation tasks and the running local Firefly/Pico environment.
 - Produces: evidence that the approved design works with real data across interaction modes and themes.
 
 - [ ] **Step 1: Run deterministic verification from `front/`**
@@ -595,10 +663,12 @@ Open `/analytics` with the real signed-in app and verify:
 
 ```text
 Financial trends renders with no console RangeError or secondary undefined-length error
-3M / 6M / 12M changes the monthly points
-metric facet can show one through four series and never reaches zero selected
+Balances / Monthly change switches totals and deltas without losing either view's selection
+3M / 6M / 12M changes the completed-window points and displayed averages
+each metric facet can show all available series and never reaches zero selected
 hover/click shows one vertical line and exact values for all series present at that month
-latest account totals remain visible separately from movement
+unchanged current account movement renders as an explicit zero point
+every selected metric has a dashed forecast segment and exact forecast value
 all three cards are full-width and calculation details start collapsed
 ```
 
