@@ -509,3 +509,11 @@
         color: #64b5f6; /* Lighter blue for dark theme */
     }
 }
+
+.van-theme-dark .analytics-chart-tooltip {
+    box-shadow: rgba(0, 0, 0, 0.55) 0 3px 8px;
+}
+
+.van-theme-dark .analytics-chart-single-point {
+    stroke: var(--van-background-2);
+}

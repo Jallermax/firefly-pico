@@ -2252,3 +2252,102 @@ body {
         display: none;
     }
 }
+
+.analytics-line-chart {
+    position: relative;
+    min-height: 240px;
+    user-select: none;
+}
+
+.analytics-line-chart-svg {
+    display: block;
+    width: 100%;
+    min-height: 240px;
+    overflow: visible;
+    touch-action: pan-y;
+}
+
+.analytics-line-chart-svg:focus-visible {
+    outline: 2px solid var(--primary-action);
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+
+.analytics-chart-grid {
+    stroke: var(--van-border-color);
+    stroke-width: 1;
+}
+
+.analytics-chart-axis-label {
+    fill: var(--van-text-color-3);
+    font-size: 20px;
+}
+
+.analytics-chart-line {
+    stroke-width: 4;
+    stroke-linecap: round;
+}
+
+.analytics-chart-single-point {
+    stroke: var(--van-background-2);
+    stroke-width: 2;
+}
+
+.analytics-chart-crosshair {
+    stroke: var(--van-text-color-2);
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+}
+
+.analytics-chart-tooltip {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 1;
+    max-width: min(280px, 80%);
+    padding: 10px;
+    border-radius: 8px;
+    color: var(--van-text-color);
+    background: var(--van-background-2);
+    box-shadow: rgba(0, 0, 0, 0.24) 0 3px 8px;
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.analytics-chart-tooltip.right {
+    right: 12px;
+    left: auto;
+}
+
+.analytics-chart-tooltip.interactive {
+    pointer-events: auto;
+}
+
+.analytics-chart-tooltip-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 5px 4px;
+    border: 0;
+    border-radius: 6px;
+    color: var(--van-text-color);
+    background: transparent;
+    font-size: 12px;
+    text-align: left;
+}
+
+.analytics-chart-tooltip-row:hover,
+.analytics-chart-tooltip-row:focus-visible {
+    outline: none;
+    background: var(--van-background-3);
+    box-shadow: 0 0 0 2px var(--primary-action);
+}
+
+.analytics-chart-legend-marker {
+    flex: 0 0 auto;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+}
