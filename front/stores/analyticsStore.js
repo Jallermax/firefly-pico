@@ -47,6 +47,9 @@ export const useAnalyticsStore = defineStore('analytics', () => {
   const balanceCache = ref({})
   const transactions = ref([])
   const categorySelectionInitialized = ref(false)
+  const balanceRequests = new Map()
+  let balanceRequestSequence = 0
+  let activeBalanceRequestToken = null
 
   const displayCurrencyCode = computed(() => dashboardStore.dashboardCurrencyCode)
   const primaryCurrencyCode = computed(() => Currency.getCode(currencyStore.defaultCurrency))
@@ -94,18 +97,48 @@ export const useAnalyticsStore = defineStore('analytics', () => {
   const flowMonthMin = computed(() => (categoryLedger.value.ledgerStartMonth ? startOfMonth(parseISO(categoryLedger.value.ledgerStartMonth + '-01')) : null))
   const flowMonthMax = computed(() => startOfMonth(new Date()))
 
-  const balanceCacheKey = computed(() => {
-    const groups = Object.fromEntries(BALANCE_METRICS.map((metric) => [metric, accountGroups.value[metric].map((account) => account.id).sort()]))
-    const currencyCodes = [
-      displayCurrencyCode.value,
-      primaryCurrencyCode.value,
-      ...BALANCE_METRICS.flatMap((metric) => accountGroups.value[metric].map((account) => Account.getCurrencyCode(account) ?? account?.attributes?.currency_code)),
-    ]
-      .filter(Boolean)
-      .sort()
-    const relevantRates = Object.fromEntries([...new Set(currencyCodes)].map((currencyCode) => [currencyCode, rates.value[currencyCode] ?? null]))
-    return JSON.stringify({ period: Number(balancePeriod.value), displayCurrencyCode: displayCurrencyCode.value, primaryCurrencyCode: primaryCurrencyCode.value, rates: relevantRates, groups })
-  })
+  function getBalanceSnapshot() {
+    const groups = Object.fromEntries(
+      BALANCE_METRICS.map((metric) => [
+        metric,
+        accountGroups.value[metric].map((account) => {
+          const type = account?.attributes?.type?.fireflyCode ?? account?.attributes?.type
+          const direction = account?.attributes?.liability_direction?.fireflyCode ?? account?.attributes?.liability_direction
+          const usesCurrentDebt = metric === 'debt' && type === 'liabilities' && direction === 'debit'
+          const currentDate = account?.attributes?.current_balance_date
+          return {
+            id: account.id,
+            currencyCode: Account.getCurrencyCode(account) ?? account?.attributes?.currency_code,
+            currentAmount: usesCurrentDebt ? account?.attributes?.current_debt : Account.getBalance(account),
+            currentDate: currentDate instanceof Date ? DateUtils.dateToString(currentDate) : currentDate?.slice(0, 10),
+            usesCurrentDebt,
+          }
+        }),
+      ]),
+    )
+    const displayCode = displayCurrencyCode.value
+    const primaryCode = primaryCurrencyCode.value
+    const rateSnapshot = { ...rates.value }
+    const currencyCodes = [displayCode, primaryCode, ...BALANCE_METRICS.flatMap((metric) => groups[metric].map(({ currencyCode }) => currencyCode))].filter(Boolean).sort()
+    const relevantRates = Object.fromEntries([...new Set(currencyCodes)].map((currencyCode) => [currencyCode, rateSnapshot[currencyCode] ?? null]))
+    const months = Number(balancePeriod.value)
+    const today = new Date()
+    const groupIds = Object.fromEntries(BALANCE_METRICS.map((metric) => [metric, groups[metric].map(({ id }) => id).sort()]))
+    const cacheKey = JSON.stringify({ period: months, displayCurrencyCode: displayCode, primaryCurrencyCode: primaryCode, rates: relevantRates, groups: groupIds })
+    return {
+      cacheKey,
+      groups,
+      start: DateUtils.dateToString(subMonths(today, months)),
+      end: DateUtils.dateToString(today),
+      period: months === 3 ? '1D' : '1W',
+      displayCurrencyCode: displayCode,
+      primaryCurrencyCode: primaryCode,
+      rates: rateSnapshot,
+      decimalPlaces: displayCurrencyDecimalPlaces.value,
+    }
+  }
+
+  const balanceCacheKey = computed(() => getBalanceSnapshot().cacheKey)
   const balanceSeries = computed(() => balanceCache.value[balanceCacheKey.value] ?? BALANCE_METRICS.map((id) => ({ id, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })))
 
   async function fetchTransactions({ force = false } = {}) {
@@ -145,66 +178,91 @@ export const useAnalyticsStore = defineStore('analytics', () => {
   }
 
   async function fetchBalances({ force = false } = {}) {
-    const cacheKey = balanceCacheKey.value
-    const cached = balanceCache.value[cacheKey]
+    const snapshot = getBalanceSnapshot()
+    const cached = balanceCache.value[snapshot.cacheKey]
     if (cached && !force) {
       Object.assign(balanceState, { status: cached.some(({ points }) => points.length > 0) ? 'ready' : 'empty', error: null, isStale: false })
       return
     }
 
     const hasExistingData = Boolean(cached?.some(({ points }) => points.length > 0))
-    Object.assign(balanceState, { status: 'loading', error: null, isStale: hasExistingData })
-
-    const today = new Date()
-    const start = DateUtils.dateToString(subMonths(today, Number(balancePeriod.value)))
-    const end = DateUtils.dateToString(today)
-    const period = Number(balancePeriod.value) === 3 ? '1D' : '1W'
-    const repository = new AccountRepository()
-    const responses = await Promise.all(
-      BALANCE_METRICS.map(async (metric) => {
-        const accountIds = accountGroups.value[metric].map((account) => account.id)
-        if (accountIds.length === 0) return { metric, response: null }
-        const response = await repository.getChartOverview({ start, end, period, accountIds })
-        return { metric, response }
-      }),
-    )
-
-    if (responses.some(({ response }) => response && !ResponseUtils.isSuccess(response))) {
-      Object.assign(balanceState, { status: 'error', error: new Error('Analytics balance request failed'), isStale: hasExistingData })
-      return
+    const existingRequest = balanceRequests.get(snapshot.cacheKey)
+    if (existingRequest) {
+      activeBalanceRequestToken = existingRequest.token
+      Object.assign(balanceState, { status: 'loading', error: null, isStale: hasExistingData })
+      return existingRequest.promise
     }
 
-    const normalized = responses.map(({ metric, response }) => {
-      const result = normalizeBalanceSeries({
-        chartLines: response?.data ?? [],
-        metric,
-        displayCurrencyCode: displayCurrencyCode.value,
-        primaryCurrencyCode: primaryCurrencyCode.value,
-        rates: rates.value,
-      })
-      const currentAmounts = accountGroups.value[metric].map((account) =>
-        convertAnalyticsAmount({
-          amount: Account.getBalance(account),
-          currencyCode: Account.getCurrencyCode(account) ?? account?.attributes?.currency_code,
-          primaryAmount: null,
-          primaryCurrencyCode: primaryCurrencyCode.value,
-          displayCurrencyCode: displayCurrencyCode.value,
-          rates: rates.value,
+    const requestToken = ++balanceRequestSequence
+    activeBalanceRequestToken = requestToken
+    Object.assign(balanceState, { status: 'loading', error: null, isStale: hasExistingData })
+
+    const request = (async () => {
+      const repository = new AccountRepository()
+      const responses = await Promise.all(
+        BALANCE_METRICS.map(async (metric) => {
+          const accountIds = snapshot.groups[metric].map(({ id }) => id)
+          if (accountIds.length === 0) return { metric, response: null }
+          const response = await repository.getChartOverview({ start: snapshot.start, end: snapshot.end, period: snapshot.period, accountIds })
+          return { metric, response }
         }),
       )
-      const currentTotal = currentAmounts.reduce((total, converted) => total + (metric === 'debt' ? Math.max(0, -(converted.value ?? 0)) : (converted.value ?? 0)), 0)
-      const finalPoint = result.points.at(-1)
-      const tolerance = 0.5 * 10 ** -displayCurrencyDecimalPlaces.value
-      const isCurrentSample = finalPoint?.x === end
-      const hasCompleteCurrentTotal = currentAmounts.every(({ value }) => value !== null)
-      const hasMismatch = hasCompleteCurrentTotal && isCurrentSample && (Math.sign(finalPoint.value) !== Math.sign(currentTotal) || Math.abs(finalPoint.value - currentTotal) > tolerance)
-      const warnings = hasMismatch ? [{ type: 'current-balance-mismatch', sampleDate: finalPoint.x, chartValue: finalPoint.value, currentValue: currentTotal }] : []
+      const ownsCurrentState = () => activeBalanceRequestToken === requestToken && balanceCacheKey.value === snapshot.cacheKey
 
-      return { id: metric, ...result, missingCurrencies: [...new Set([...result.missingCurrencies, ...currentAmounts.map(({ missingCurrency }) => missingCurrency).filter(Boolean)])], warnings }
-    })
+      if (responses.some(({ response }) => response && !ResponseUtils.isSuccess(response))) {
+        if (ownsCurrentState()) Object.assign(balanceState, { status: 'error', error: new Error('Analytics balance request failed'), isStale: hasExistingData })
+        return
+      }
 
-    balanceCache.value = { ...balanceCache.value, [cacheKey]: normalized }
-    Object.assign(balanceState, { status: normalized.some(({ points }) => points.length > 0) ? 'ready' : 'empty', error: null, isStale: false })
+      const normalized = responses.map(({ metric, response }) => {
+        const result = normalizeBalanceSeries({
+          chartLines: response?.data ?? [],
+          metric,
+          displayCurrencyCode: snapshot.displayCurrencyCode,
+          primaryCurrencyCode: snapshot.primaryCurrencyCode,
+          rates: snapshot.rates,
+        })
+        const currentAmounts = snapshot.groups[metric].map((account) => ({
+          account,
+          converted: convertAnalyticsAmount({
+            amount: account.currentAmount,
+            currencyCode: account.currencyCode,
+            primaryAmount: null,
+            primaryCurrencyCode: snapshot.primaryCurrencyCode,
+            displayCurrencyCode: snapshot.displayCurrencyCode,
+            rates: snapshot.rates,
+          }),
+        }))
+        const currentTotal = currentAmounts.reduce(
+          (total, { account, converted }) =>
+            total + (metric === 'debt' ? (account.usesCurrentDebt ? Math.max(0, converted.value ?? 0) : Math.max(0, -(converted.value ?? 0))) : (converted.value ?? 0)),
+          0,
+        )
+        const finalPoint = result.points.at(-1)
+        const tolerance = 0.5 * 10 ** -snapshot.decimalPlaces
+        const hasCompleteCurrentTotal = currentAmounts.every(({ converted }) => converted.value !== null)
+        const hasSampleDateTruth = snapshot.groups[metric].every(({ currentDate }) => currentDate === finalPoint?.x || (!currentDate && finalPoint?.x === snapshot.end))
+        const hasMismatch =
+          finalPoint && hasCompleteCurrentTotal && hasSampleDateTruth && (Math.sign(finalPoint.value) !== Math.sign(currentTotal) || Math.abs(finalPoint.value - currentTotal) > tolerance)
+        const warnings =
+          hasCompleteCurrentTotal && finalPoint && !hasSampleDateTruth
+            ? [{ type: 'current-balance-unverified', sampleDate: finalPoint.x, currentDate: snapshot.end }]
+            : hasMismatch
+              ? [{ type: 'current-balance-mismatch', sampleDate: finalPoint.x, chartValue: finalPoint.value, currentValue: currentTotal }]
+              : []
+
+        return { id: metric, ...result, missingCurrencies: [...new Set([...result.missingCurrencies, ...currentAmounts.map(({ converted }) => converted.missingCurrency).filter(Boolean)])], warnings }
+      })
+
+      balanceCache.value = { ...balanceCache.value, [snapshot.cacheKey]: normalized }
+      if (ownsCurrentState()) Object.assign(balanceState, { status: normalized.some(({ points }) => points.length > 0) ? 'ready' : 'empty', error: null, isStale: false })
+    })()
+    balanceRequests.set(snapshot.cacheKey, { token: requestToken, promise: request })
+    try {
+      return await request
+    } finally {
+      if (balanceRequests.get(snapshot.cacheKey)?.token === requestToken) balanceRequests.delete(snapshot.cacheKey)
+    }
   }
 
   async function init() {
