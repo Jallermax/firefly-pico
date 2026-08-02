@@ -38,6 +38,7 @@ export const useAnalyticsStore = defineStore('analytics', () => {
   const balancePeriod = useLocalStorage('analyticsBalancePeriod', 3)
   const categoryAverageMonths = useLocalStorage('analyticsCategoryAverageMonths', 6)
   const selectedCategoryIds = useLocalStorage('analyticsSelectedCategoryIds', [])
+  const normalizedSelectedCategoryIds = computed(() => [...new Set((Array.isArray(selectedCategoryIds.value) ? selectedCategoryIds.value : []).filter(Boolean))].slice(0, 6))
   const visibleBalanceMetrics = useLocalStorage('analyticsVisibleBalanceMetrics', ['netWorth', 'savings', 'debt'])
   const selectedFlowMonth = ref(startOfMonth(new Date()))
 
@@ -77,13 +78,19 @@ export const useAnalyticsStore = defineStore('analytics', () => {
   const categorySummary = computed(() => ({
     ...summarizeCategoryWindow({
       ledger: categoryLedger.value,
-      categoryIds: selectedCategoryIds.value,
+      categoryIds: normalizedSelectedCategoryIds.value,
       averageMonths: categoryAverageMonths.value,
       today: new Date(),
     }),
     isEstimated: categoryLedger.value.isEstimated,
     missingCurrencies: categoryLedger.value.missingCurrencies,
   }))
+  const categoryRankingItems = computed(() =>
+    categoryRanking.value.map((id) => ({
+      id,
+      amount: categorySummary.value.monthKeys.reduce((total, key) => total + (categoryLedger.value.months?.[key]?.categories?.[id]?.amount ?? 0), 0),
+    })),
+  )
   const selectedFlow = computed(() =>
     buildMonthlyMoneyFlow({
       transactions: transactions.value,
@@ -171,7 +178,7 @@ export const useAnalyticsStore = defineStore('analytics', () => {
 
     if (!categorySelectionInitialized.value) {
       const validCategoryIds = new Set([...Object.keys(categoryStore.categoryDictionary), ANALYTICS_UNCATEGORIZED_ID])
-      const validSelection = selectedCategoryIds.value.filter((categoryId) => validCategoryIds.has(categoryId))
+      const validSelection = normalizedSelectedCategoryIds.value.filter((categoryId) => validCategoryIds.has(categoryId))
       selectedCategoryIds.value = validSelection.length > 0 ? validSelection : categoryRanking.value.slice(0, 5)
       categorySelectionInitialized.value = true
     }
@@ -301,6 +308,7 @@ export const useAnalyticsStore = defineStore('analytics', () => {
     flowState,
     balanceSeries,
     categoryRanking,
+    categoryRankingItems,
     categorySummary,
     selectedFlow,
     flowMonthMin,

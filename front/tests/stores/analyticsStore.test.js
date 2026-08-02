@@ -3,7 +3,7 @@ import { registerHooks } from 'node:module'
 import test, { afterEach, beforeEach, mock } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, reactive, ref } from 'vue'
-import { format, subDays } from 'date-fns'
+import { format, subDays, subMonths } from 'date-fns'
 
 const frontUrl = new URL('../../', import.meta.url)
 registerHooks({
@@ -29,6 +29,7 @@ const appStore = { syncEverythingIfOld: async () => {} }
 const accountRequests = []
 const storageOverrides = new Map()
 let accountResponse = async () => ({ status: 200, data: [] })
+let transactionResult = []
 let analyticsStore = null
 
 class AccountRepository {
@@ -48,7 +49,7 @@ class TransactionRepository {
   }
 
   async getAllWithMergeResult() {
-    return { ok: true, data: [] }
+    return { ok: true, data: transactionResult }
   }
 }
 
@@ -142,6 +143,7 @@ beforeEach(() => {
   accountRequests.length = 0
   storageOverrides.clear()
   accountResponse = async () => chartResponse(100)
+  transactionResult = []
 })
 
 afterEach(() => analyticsStore?.$dispose())
@@ -205,4 +207,44 @@ test('marks a weekly final point unverified when no account value exists for its
   await store.init()
 
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [{ type: 'current-balance-unverified', sampleDate, currentDate: format(new Date(), 'yyyy-MM-dd') }])
+})
+
+test('exposes ranked category items with completed-window net totals', async () => {
+  const checking = { attributes: { type: { fireflyCode: 'asset' } } }
+  const expense = { attributes: { type: { fireflyCode: 'expense' } } }
+  const split = (amount, date, categoryId, source = checking, destination = expense) => ({
+    amount: String(amount),
+    currency_code: 'USD',
+    date,
+    category_id: categoryId,
+    accountSource: source,
+    accountDestination: destination,
+  })
+  const completedMonth = subMonths(new Date(), 1)
+  const olderCompletedMonth = subMonths(new Date(), 2)
+  transactionResult = [
+    { id: 'food', attributes: { transactions: [split(90, completedMonth, 'food')] } },
+    { id: 'food-refund', attributes: { transactions: [split(20, completedMonth, 'food', expense, checking)] } },
+    { id: 'rent', attributes: { transactions: [split(100, olderCompletedMonth, 'rent')] } },
+    { id: 'current-food', attributes: { transactions: [split(500, new Date(), 'food')] } },
+  ]
+  categoryStore.categoryDictionary = { food: { id: 'food' }, rent: { id: 'rent' } }
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.categoryRanking, ['rent', 'food'])
+  assert.deepEqual(store.categoryRankingItems, [
+    { id: 'rent', amount: 100 },
+    { id: 'food', amount: 70 },
+  ])
+})
+
+test('treats a corrupted persisted category selection as empty', async () => {
+  storageOverrides.set('analyticsSelectedCategoryIds', 'corrupt')
+  const store = (analyticsStore = useAnalyticsStore())
+
+  assert.deepEqual(store.categorySummary.series, [])
+  await store.init()
+  assert.deepEqual(store.selectedCategoryIds, [])
 })

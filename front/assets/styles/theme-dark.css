@@ -523,3 +523,14 @@
 .van-theme-dark .analytics-warning {
     background: var(--van-background-3);
 }
+
+.van-theme-dark .analytics-category-facet-header,
+.van-theme-dark .analytics-category-facet-row,
+.van-theme-dark .analytics-category-summary-row {
+    border-color: #444;
+}
+
+.van-theme-dark .analytics-category-summary,
+.van-theme-dark .analytics-forecast-detail-row {
+    background: var(--van-background-3);
+}
