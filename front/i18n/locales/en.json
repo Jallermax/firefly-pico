@@ -47,6 +47,7 @@
       "average_monthly_spending": "Average monthly spending",
       "forecast_total": "Forecast total",
       "forecast_change": "Forecast change",
+      "insufficient_history": "At least two completed months are required for a forecast.",
       "latest": "Latest",
       "change": "Change",
       "empty": "No matching balance accounts",

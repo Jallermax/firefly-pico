@@ -47,6 +47,7 @@
       "average_monthly_spending": "Gasto mensal médio",
       "forecast_total": "Total previsto",
       "forecast_change": "Variação prevista",
+      "insufficient_history": "São necessários pelo menos dois meses concluídos para uma previsão.",
       "latest": "Mais recente",
       "change": "Variação",
       "empty": "Nenhuma conta de saldo correspondente",

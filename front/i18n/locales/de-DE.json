@@ -47,6 +47,7 @@
       "average_monthly_spending": "Durchschnittliche monatliche Ausgaben",
       "forecast_total": "Prognostizierter Gesamtwert",
       "forecast_change": "Prognostizierte Veränderung",
+      "insufficient_history": "Für eine Prognose sind mindestens zwei abgeschlossene Monate erforderlich.",
       "latest": "Aktuell",
       "change": "Veränderung",
       "empty": "Keine passenden Saldenkonten",

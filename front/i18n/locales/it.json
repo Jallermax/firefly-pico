@@ -47,6 +47,7 @@
       "average_monthly_spending": "Spesa mensile media",
       "forecast_total": "Totale previsto",
       "forecast_change": "Variazione prevista",
+      "insufficient_history": "Per una previsione sono necessari almeno due mesi completati.",
       "latest": "Più recente",
       "change": "Variazione",
       "empty": "Nessun conto di saldo corrispondente",

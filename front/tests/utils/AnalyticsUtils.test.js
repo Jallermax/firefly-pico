@@ -168,6 +168,16 @@ test('omits amounts when a required rate is missing', () => {
   )
 })
 
+test('keeps absent source amounts missing instead of coercing them to zero', () => {
+  for (const amount of [null, undefined, '   ']) {
+    assert.deepEqual(convertAnalyticsAmount({ amount, currencyCode: 'USD', primaryAmount: null, primaryCurrencyCode: 'USD', displayCurrencyCode: 'USD', rates: { USD: 1 } }), {
+      value: null,
+      isEstimated: false,
+      missingCurrency: null,
+    })
+  }
+})
+
 test('aligns dates, carries forward only after first history, and normalizes debt owed', () => {
   const result = normalizeBalanceSeries({
     metric: 'debt',
@@ -475,6 +485,18 @@ test('builds localized balance and change chart series with real account forecas
       ],
     },
   ])
+})
+
+test('distinguishes insufficient forecast history from a genuinely missing forecast value', () => {
+  assert.equal(typeof AnalyticsUtils.formatFinancialTrendForecastValue, 'function')
+  const formatValue = (value) => (Number.isFinite(value) ? `${value} USD` : '—')
+
+  assert.equal(
+    AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: false, value: null, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }),
+    'Localized two-month minimum',
+  )
+  assert.equal(AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: true, value: null, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }), '—')
+  assert.equal(AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: true, value: 25, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }), '25 USD')
 })
 
 test('summarizes total expense from every category and forecasts only with two completed months', () => {

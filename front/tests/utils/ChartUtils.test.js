@@ -70,6 +70,35 @@ test('line geometry preserves gaps instead of joining across missing values', ()
   assert.deepEqual(geometry.series[0].segments, [{ path: 'M 63.33333333333333 20 L 90 10', dashed: true }])
 })
 
+test('forecast segment connects from its own last actual when another series adds the missing current x', () => {
+  const geometry = buildLineChartGeometry({
+    width: 100,
+    height: 60,
+    padding: { top: 10, right: 10, bottom: 10, left: 10 },
+    series: [
+      {
+        id: 'missing-current',
+        points: [
+          { x: '2026-07', value: 100, kind: 'actual' },
+          { x: '2026-08:forecast', value: 110, kind: 'forecast' },
+        ],
+      },
+      {
+        id: 'complete',
+        points: [
+          { x: '2026-07', value: 20, kind: 'actual' },
+          { x: '2026-08', value: 25, kind: 'partial' },
+          { x: '2026-08:forecast', value: 30, kind: 'forecast' },
+        ],
+      },
+    ],
+  })
+
+  assert.equal(geometry.series[0].segments.length, 1)
+  assert.equal(geometry.series[0].segments[0].dashed, true)
+  assert.equal(geometry.series[1].segments.filter(({ dashed }) => dashed).length, 1)
+})
+
 test('inspection-only points align tooltip values without drawing a line', () => {
   const geometry = buildLineChartGeometry({
     width: 100,

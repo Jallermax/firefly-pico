@@ -32,10 +32,16 @@ export function getAnalyticsAccountKind(account) {
 }
 
 export function convertAnalyticsAmount({ amount, currencyCode, primaryAmount, primaryCurrencyCode, displayCurrencyCode, rates }) {
-  const hasPrimary = primaryAmount !== null && primaryAmount !== undefined && primaryCurrencyCode
-  const sourceAmount = Number(hasPrimary ? primaryAmount : amount)
+  const hasAmount = (value) => value !== null && value !== undefined && (typeof value !== 'string' || value.trim() !== '')
+  const hasPrimary = hasAmount(primaryAmount) && primaryCurrencyCode
+  const sourceAmountValue = hasPrimary ? primaryAmount : amount
   const sourceCurrency = hasPrimary ? primaryCurrencyCode : currencyCode
 
+  if (!hasAmount(sourceAmountValue)) {
+    return { value: null, isEstimated: false, missingCurrency: null }
+  }
+
+  const sourceAmount = Number(sourceAmountValue)
   if (!Number.isFinite(sourceAmount) || !sourceCurrency || !displayCurrencyCode) {
     return { value: null, isEstimated: false, missingCurrency: sourceCurrency ?? displayCurrencyCode ?? null }
   }
@@ -340,6 +346,7 @@ export function summarizeBalanceMovements({ balanceSeries, months, today }) {
     series: balanceSeries.map(({ id, points, currentPoint }) => {
       const monthlyPoints = lastMonthlyPoints(points)
       const currentTotal = Number.isFinite(currentPoint?.value) ? currentPoint.value : null
+      const currentEstimate = currentPoint?.isEstimated ? { isEstimated: true } : {}
       const sourceMonthKeys = Object.keys(monthlyPoints).sort()
       const totalForKey = (key) => {
         const sourceKey = sourceMonthKeys.filter((sourceMonthKey) => sourceMonthKey <= key).at(-1)
@@ -352,14 +359,14 @@ export function summarizeBalanceMovements({ balanceSeries, months, today }) {
           const value = totalForKey(key)
           return value === null ? [] : [{ x: key, value, kind: 'actual' }]
         }),
-        ...(currentTotal === null || precedingCompletedTotal === null ? [] : [{ x: currentMonthKey, value: currentTotal, kind: 'partial' }]),
+        ...(currentTotal === null || precedingCompletedTotal === null ? [] : [{ x: currentMonthKey, value: currentTotal, kind: 'partial', ...currentEstimate }]),
       ]
       const changePoints = monthKeys.flatMap((key) => {
         const previousKey = monthKey(subMonths(new Date(key + '-01T00:00:00'), 1))
         const previous = totalForKey(previousKey)
         const isCurrentMonth = key === currentMonthKey
         const current = isCurrentMonth ? currentTotal : totalForKey(key)
-        return previous === null || current === null ? [] : [{ x: key, value: current - previous, kind: isCurrentMonth ? 'partial' : 'actual' }]
+        return previous === null || current === null ? [] : [{ x: key, value: current - previous, kind: isCurrentMonth ? 'partial' : 'actual', ...(isCurrentMonth ? currentEstimate : {}) }]
       })
       const completedChanges = changePoints.filter(({ kind }) => kind === 'actual')
       const averageChange = completedChanges.length > 0 ? completedChanges.reduce((total, point) => total + point.value, 0) / completedChanges.length : null
@@ -415,6 +422,10 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
       },
     ]
   })
+}
+
+export function formatFinancialTrendForecastValue({ forecastAvailable, value, formatValue, insufficientHistoryLabel }) {
+  return forecastAvailable ? formatValue(value) : insufficientHistoryLabel
 }
 
 export function rankCategoryIds({ ledger, averageMonths, today }) {

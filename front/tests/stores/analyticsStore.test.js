@@ -222,6 +222,66 @@ test('marks a weekly final point unverified when no account value exists for its
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [{ type: 'current-balance-unverified', sampleDate, currentDate: format(new Date(), 'yyyy-MM-dd') }])
 })
 
+test('keeps a missing current account balance out of current totals and changes', async () => {
+  const previousMonthEnd = format(new Date(new Date().getFullYear(), new Date().getMonth(), 0), 'yyyy-MM-dd')
+  accountStore.accountList = [
+    {
+      ...activeAsset(),
+      attributes: { ...activeAsset().attributes, current_balance: null, current_balance_date: previousMonthEnd },
+    },
+  ]
+  accountResponse = async () => chartResponse(130, previousMonthEnd)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'netWorth')
+  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'netWorth')
+  assert.equal(sourceSeries.currentPoint, null)
+  assert.equal(trendSeries.currentTotal, null)
+  assert.equal(trendSeries.currentChange, null)
+  assert.equal(
+    trendSeries.totalPoints.some(({ kind }) => kind === 'partial'),
+    false,
+  )
+  assert.equal(
+    trendSeries.changePoints.some(({ kind }) => kind === 'partial'),
+    false,
+  )
+})
+
+test('keeps current-rate estimation on current points without marking exact history estimated', async () => {
+  const today = new Date()
+  const previousMonthEnd = format(new Date(today.getFullYear(), today.getMonth(), 0), 'yyyy-MM-dd')
+  accountStore.accountList = [
+    {
+      ...activeAsset(),
+      attributes: { ...activeAsset().attributes, currency_code: 'EUR', current_balance: '90', current_balance_date: previousMonthEnd },
+    },
+  ]
+  accountResponse = async () => ({ status: 200, data: [{ primary_currency_code: 'USD', pc_entries: { [previousMonthEnd]: '100' } }] })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'netWorth')
+  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'netWorth')
+  assert.equal(sourceSeries.isEstimated, false)
+  assert.deepEqual(sourceSeries.currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 100, isEstimated: true })
+  assert.deepEqual(
+    trendSeries.totalPoints.find(({ kind }) => kind === 'partial'),
+    { x: format(today, 'yyyy-MM'), value: 100, kind: 'partial', isEstimated: true },
+  )
+  assert.equal(
+    trendSeries.totalPoints.filter(({ kind }) => kind === 'actual').every(({ isEstimated }) => isEstimated === undefined),
+    true,
+  )
+  assert.deepEqual(
+    trendSeries.changePoints.find(({ kind }) => kind === 'partial'),
+    { x: format(today, 'yyyy-MM'), value: 0, kind: 'partial', isEstimated: true },
+  )
+})
+
 test('defaults to all financial metrics and preserves valid legacy selections', () => {
   const freshStore = (analyticsStore = useAnalyticsStore())
   assert.deepEqual(freshStore.visibleFinancialMetrics, ['netWorth', 'savings', 'debt', 'expenses'])

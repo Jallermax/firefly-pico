@@ -47,6 +47,7 @@
       "average_monthly_spending": "Cheltuieli lunare medii",
       "forecast_total": "Total prognozat",
       "forecast_change": "Modificare prognozată",
+      "insufficient_history": "Sunt necesare cel puțin două luni încheiate pentru o prognoză.",
       "latest": "Cel mai recent",
       "change": "Modificare",
       "empty": "Nu există conturi de sold corespunzătoare",

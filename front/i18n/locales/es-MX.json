@@ -47,6 +47,7 @@
       "average_monthly_spending": "Gasto mensual promedio",
       "forecast_total": "Total pronosticado",
       "forecast_change": "Cambio pronosticado",
+      "insufficient_history": "Se requieren al menos dos meses completados para generar un pronóstico.",
       "latest": "Más reciente",
       "change": "Cambio",
       "empty": "No hay cuentas de saldo que coincidan",

@@ -47,6 +47,7 @@
       "average_monthly_spending": "Dépenses mensuelles moyennes",
       "forecast_total": "Total prévu",
       "forecast_change": "Variation prévue",
+      "insufficient_history": "Au moins deux mois terminés sont nécessaires pour établir une prévision.",
       "latest": "Dernier",
       "change": "Variation",
       "empty": "Aucun compte de solde correspondant",

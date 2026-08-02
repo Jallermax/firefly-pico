@@ -47,6 +47,7 @@
       "average_monthly_spending": "평균 월별 지출",
       "forecast_total": "예측 합계",
       "forecast_change": "예측 변동",
+      "insufficient_history": "예측하려면 완료된 월이 두 개 이상 필요합니다.",
       "latest": "최신",
       "change": "변화",
       "empty": "일치하는 잔액 계좌가 없습니다",

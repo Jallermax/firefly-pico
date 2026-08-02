@@ -86,7 +86,7 @@
 import { format, parseISO } from 'date-fns'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
-import { buildFinancialTrendChartSeries } from '~/utils/AnalyticsUtils.js'
+import { buildFinancialTrendChartSeries, formatFinancialTrendForecastValue } from '~/utils/AnalyticsUtils.js'
 import { decorateLineChartPoint, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 
@@ -155,8 +155,8 @@ const chartSeries = computed(() =>
   })
     .filter((series) => (series.id === 'expenses' ? hasExpenseResult.value : hasBalanceResult.value))
     .map((series) => {
-      const isEstimated = series.id === 'expenses' ? analyticsStore.categorySummary.isEstimated : analyticsStore.balanceSeries.find((item) => item.id === series.id)?.isEstimated
-      return { ...series, points: series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, isEstimated)) }
+      const isSeriesEstimated = series.id === 'expenses' ? analyticsStore.categorySummary.isEstimated : analyticsStore.balanceSeries.find((item) => item.id === series.id)?.isEstimated
+      return { ...series, points: series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, point.isEstimated || isSeriesEstimated)) }
     })
     .filter((series) => series.points.length),
 )
@@ -171,7 +171,15 @@ const accountSummaries = computed(() => {
       rows: [
         { label: t(isBalances ? 'analytics.balance.current_total' : 'analytics.balance.current_change'), value: formatCurrency(isBalances ? series?.currentTotal : series?.currentChange) },
         { label: t('analytics.balance.average_monthly_change'), value: formatCurrency(series?.averageChange) },
-        { label: t(isBalances ? 'analytics.balance.forecast_total' : 'analytics.balance.forecast_change'), value: formatCurrency(isBalances ? series?.forecastTotal : series?.forecastChange) },
+        {
+          label: t(isBalances ? 'analytics.balance.forecast_total' : 'analytics.balance.forecast_change'),
+          value: formatFinancialTrendForecastValue({
+            forecastAvailable: series?.forecastAvailable,
+            value: isBalances ? series?.forecastTotal : series?.forecastChange,
+            formatValue: formatCurrency,
+            insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
+          }),
+        },
       ],
     }
   })
@@ -185,7 +193,15 @@ const expenseSummary = computed(() => {
     rows: [
       { label: t('analytics.balance.current_actual'), value: formatCurrency(expenses.currentActual) },
       { label: t('analytics.balance.average_monthly_spending'), value: formatCurrency(expenses.average) },
-      { label: t('analytics.balance.current_forecast'), value: formatCurrency(expenses.currentForecast) },
+      {
+        label: t('analytics.balance.current_forecast'),
+        value: formatFinancialTrendForecastValue({
+          forecastAvailable: expenses.forecastAvailable,
+          value: expenses.currentForecast,
+          formatValue: formatCurrency,
+          insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
+        }),
+      },
     ],
   }
 })
@@ -194,7 +210,9 @@ const summaries = computed(() => [...accountSummaries.value, ...(expenseSummary.
 const selectedAccountSourceSeries = computed(() =>
   selectedAccountMetrics.value.map((metric) => analyticsStore.balanceSeries.find((series) => series.id === metric.id) ?? { isEstimated: false, missingCurrencies: [], warnings: [] }),
 )
-const isEstimated = computed(() => selectedAccountSourceSeries.value.some((series) => series.isEstimated) || (expensesSelected.value && analyticsStore.categorySummary.isEstimated))
+const isEstimated = computed(
+  () => selectedAccountSourceSeries.value.some((series) => series.isEstimated || series.currentPoint?.isEstimated) || (expensesSelected.value && analyticsStore.categorySummary.isEstimated),
+)
 const missingCurrencies = computed(() => [
   ...new Set([...selectedAccountSourceSeries.value.flatMap((series) => series.missingCurrencies), ...(expensesSelected.value ? (analyticsStore.categorySummary.missingCurrencies ?? []) : [])]),
 ])

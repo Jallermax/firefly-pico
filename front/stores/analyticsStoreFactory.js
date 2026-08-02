@@ -314,6 +314,7 @@ export function createAnalyticsStore(id, useDependencies) {
           const finalPoint = result.points.at(-1)
           const tolerance = 0.5 * 10 ** -snapshot.decimalPlaces
           const hasCompleteCurrentTotal = currentAmounts.every(({ converted }) => converted.value !== null)
+          const isCurrentEstimated = currentAmounts.some(({ converted }) => converted.isEstimated)
           const hasSampleDateTruth = snapshot.groups[metric].every(({ currentDate }) => currentDate === finalPoint?.x || (!currentDate && finalPoint?.x === snapshot.end))
           const hasMismatch =
             finalPoint && hasCompleteCurrentTotal && hasSampleDateTruth && (Math.sign(finalPoint.value) !== Math.sign(currentTotal) || Math.abs(finalPoint.value - currentTotal) > tolerance)
@@ -327,7 +328,7 @@ export function createAnalyticsStore(id, useDependencies) {
           return {
             id: metric,
             ...result,
-            currentPoint: hasCompleteCurrentTotal ? { x: snapshot.end, value: currentTotal } : null,
+            currentPoint: hasCompleteCurrentTotal ? { x: snapshot.end, value: currentTotal, ...(isCurrentEstimated ? { isEstimated: true } : {}) } : null,
             missingCurrencies: [...new Set([...result.missingCurrencies, ...currentAmounts.map(({ converted }) => converted.missingCurrency).filter(Boolean)])],
             warnings,
           }

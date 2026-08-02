@@ -47,6 +47,7 @@
       "average_monthly_spending": "月均支出",
       "forecast_total": "预测总额",
       "forecast_change": "预测变动",
+      "insufficient_history": "至少需要两个已结束月份才能进行预测。",
       "latest": "最新",
       "change": "变化",
       "empty": "没有符合条件的余额账户",
