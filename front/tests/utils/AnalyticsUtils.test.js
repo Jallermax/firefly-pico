@@ -268,6 +268,23 @@ test('completed-month averages count zero months only after ledger history begin
   assert.equal(summary.series[0].forecastAvailable, true)
 })
 
+for (const averageMonths of [3, 6, 12, 24]) {
+  test(`completed ${averageMonths}-month window excludes the current month`, () => {
+    const summary = summarizeCategoryWindow({
+      ledger: { ledgerStartMonth: '2024-04', months: {} },
+      categoryIds: ['food'],
+      averageMonths,
+      today: new Date('2026-04-10T12:00:00Z'),
+    })
+
+    assert.equal(summary.requestedMonths, averageMonths)
+    assert.equal(summary.usedMonths, averageMonths)
+    assert.equal(summary.monthKeys.length, averageMonths)
+    assert.equal(summary.monthKeys.at(-1), '2026-03')
+    assert.equal(summary.monthKeys.includes('2026-04'), false)
+  })
+}
+
 test('forecast is absent with fewer than two completed months', () => {
   const summary = summarizeCategoryWindow({
     ledger: {
@@ -365,6 +382,11 @@ test('money flow treats card purchases as expense plus new debt and card payment
     savingsDeposited: 300,
     newExcess: 450,
   })
+  assert.equal(flow.audit.priorExcessUsed, 0)
+  assert.equal(flow.audit.newExcess, 450)
+  assert.equal(flow.audit.sourceTotal, 1050)
+  assert.equal(flow.audit.destinationTotal, 1050)
+  assert.equal(flow.audit.equationDifference, 0)
   assert.equal(flow.isBalanced, true)
   assert.deepEqual(flow.audit.debtIncreaseIds, ['card-buy'])
   assert.deepEqual(flow.audit.debtRepaymentIds, ['card-pay'])
@@ -393,6 +415,10 @@ test('money flow nets savings and debt, cancels internal transfers, and exposes 
   assert.equal(flow.audit.debtRepaid, 0)
   assert.equal(flow.audit.netRefunds, 30)
   assert.equal(flow.audit.priorExcessUsed, 30)
+  assert.equal(flow.audit.newExcess, 0)
+  assert.equal(flow.audit.sourceTotal, 60)
+  assert.equal(flow.audit.destinationTotal, 60)
+  assert.equal(flow.audit.equationDifference, 0)
   assert.equal(flow.isBalanced, true)
 })
 

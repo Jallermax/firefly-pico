@@ -146,7 +146,7 @@ const hasNodes = computed(() => flow.value.sources.length + flow.value.destinati
 const hasRetainedData = computed(() => analyticsStore.flowState.isStale)
 const isBlockingLoading = computed(() => analyticsStore.flowState.status === 'loading' && !hasRetainedData.value)
 const isBlockingError = computed(() => analyticsStore.flowState.status === 'error' && !hasRetainedData.value)
-const formatCurrency = (value) => `${formatNumberForDashboard(Number(value) || 0)} ${analyticsStore.displayCurrencyCode}`
+const formatCurrency = (value) => [formatNumberForDashboard(Number(value) || 0), analyticsStore.displayCurrencyCode].filter(Boolean).join(' ')
 const auditLabel = (id) => t(`analytics.flow.audit.${id.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`)
 const enrichNodes = (nodes, side) =>
   nodes.map((node) => ({
