@@ -248,6 +248,7 @@ test('derives financial trends from three account requests and the transaction l
     expense('last-month', 30, new Date(today.getFullYear(), today.getMonth() - 1, 20), 'food'),
     expense('current', 10, new Date(today.getFullYear(), today.getMonth(), 1), 'food'),
   ]
+  const expectedForecast = today.getDate() < 20 ? 60 : 10
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
@@ -265,7 +266,7 @@ test('derives financial trends from three account requests and the transaction l
     [100, 20, 30],
   )
   assert.equal(store.financialTrend.expenses.currentActual, 10)
-  assert.equal(store.financialTrend.expenses.currentForecast, 60)
+  assert.equal(store.financialTrend.expenses.currentForecast, expectedForecast)
 })
 
 test('exposes ranked category items with completed-window net totals', async () => {
