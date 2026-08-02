@@ -68,6 +68,26 @@ test('line geometry preserves gaps instead of joining across missing values', ()
   assert.deepEqual(geometry.series[0].segments, [{ path: 'M 63.33333333333333 20 L 90 10', dashed: true }])
 })
 
+test('inspection-only points align tooltip values without drawing a line', () => {
+  const geometry = buildLineChartGeometry({
+    width: 100,
+    height: 60,
+    padding: { top: 10, right: 10, bottom: 10, left: 10 },
+    series: [
+      {
+        id: 'balance',
+        points: [
+          { x: '2026-08', value: 10 },
+          { x: '2026-08:forecast', value: 10, inspectionOnly: true },
+        ],
+      },
+    ],
+  })
+
+  assert.deepEqual(geometry.xValues, ['2026-08', '2026-08:forecast'])
+  assert.deepEqual(geometry.series[0].segments, [])
+})
+
 test('line geometry assigns six persistent non-color marker treatments to every finite point', () => {
   const geometry = buildLineChartGeometry({
     width: 100,

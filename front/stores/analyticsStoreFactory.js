@@ -42,7 +42,17 @@ export function createAnalyticsStore(id, useDependencies) {
     const selectedCategoryIds = useStoredValue('analyticsSelectedCategoryIds', [])
     const persistedSelectedCategoryIds = computed(() => [...new Set((Array.isArray(selectedCategoryIds.value) ? selectedCategoryIds.value : []).filter(Boolean))])
     const normalizedSelectedCategoryIds = computed(() => persistedSelectedCategoryIds.value.slice(0, CATEGORY_SERIES_LIMIT))
-    const visibleBalanceMetrics = useStoredValue('analyticsVisibleBalanceMetrics', ['netWorth', 'savings', 'debt'])
+    const storedVisibleFinancialMetrics = useStoredValue('analyticsVisibleBalanceMetrics', FINANCIAL_TREND_METRICS)
+    const normalizeFinancialMetrics = (metrics) => {
+      const normalized = [...new Set((Array.isArray(metrics) ? metrics : []).filter((metric) => FINANCIAL_TREND_METRICS.includes(metric)))]
+      return normalized.length > 0 ? normalized : ['netWorth']
+    }
+    const visibleFinancialMetrics = computed({
+      get: () => normalizeFinancialMetrics(storedVisibleFinancialMetrics.value),
+      set: (metrics) => {
+        storedVisibleFinancialMetrics.value = normalizeFinancialMetrics(metrics)
+      },
+    })
     const selectedFlowMonth = ref(startOfMonth(new Date()))
 
     const balanceState = reactive({ status: 'idle', error: null, isStale: false })
@@ -348,7 +358,7 @@ export function createAnalyticsStore(id, useDependencies) {
       balancePeriod,
       categoryAverageMonths,
       selectedCategoryIds,
-      visibleBalanceMetrics,
+      visibleFinancialMetrics,
       selectedFlowMonth,
       balanceState,
       categoryState,

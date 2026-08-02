@@ -32,7 +32,7 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
     const points = item.points.map((point) => ({ ...point, x: xAt(point.x), y: Number.isFinite(point.value) ? yAt(point.value) : null, key: point.x, marker }))
     const segments = points.slice(1).flatMap((point, index) => {
       const previous = points[index]
-      if (previous.y === null || point.y === null || xValues.indexOf(point.key) - xValues.indexOf(previous.key) !== 1) return []
+      if (previous.y === null || point.y === null || previous.inspectionOnly || point.inspectionOnly || xValues.indexOf(point.key) - xValues.indexOf(previous.key) !== 1) return []
       return [{ path: 'M ' + previous.x + ' ' + previous.y + ' L ' + point.x + ' ' + point.y, dashed: point.kind === 'forecast' }]
     })
     return {

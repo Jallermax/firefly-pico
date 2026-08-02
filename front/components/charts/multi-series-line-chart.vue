@@ -65,11 +65,12 @@
     <div v-if="selectedIndex >= 0" class="analytics-chart-tooltip" :class="{ right: tooltipOnRight, interactive: isPinned || isKeyboardSelection }">
       <div class="font-weight-600">{{ selectedXLabel }}</div>
       <button v-for="item in selectedValues" :key="item.seriesId" type="button" class="analytics-chart-tooltip-row" :tabindex="isPinned || isKeyboardSelection ? 0 : -1" @click="emitPoint(item)">
-        <span class="analytics-chart-legend-marker" :style="{ backgroundColor: item.color }" />
+        <span class="analytics-chart-legend-marker" :class="'analytics-chart-legend-marker-' + item.marker" :style="{ backgroundColor: item.color }" />
         <span class="flex-1">{{ item.label }}</span>
-        <span>{{ item.point.valueLabel }}</span>
-        <span v-if="item.point.kind === 'forecast'">{{ $t('analytics.common.forecast') }}</span>
-        <span v-if="item.point.isEstimated">{{ $t('analytics.common.estimated_current_rates') }}</span>
+        <span class="analytics-chart-tooltip-amount">{{ item.point.valueLabel }}</span>
+        <span v-if="item.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.forecast') }}</span>
+        <span v-if="item.point.kind === 'partial'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.partial') }}</span>
+        <span v-if="item.point.isEstimated" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.estimated_current_rates') }}</span>
       </button>
     </div>
 
@@ -181,14 +182,18 @@ const xAxisLabels = computed(() => {
 const liveDescription = computed(() => {
   if (selectedIndex.value < 0) return ''
   const values = selectedValues.value.map((item) => {
-    const qualifiers = [item.point.kind === 'forecast' ? t('analytics.common.forecast') : null, item.point.isEstimated ? t('analytics.common.estimated_current_rates') : null].filter(Boolean)
+    const qualifiers = [
+      item.point.kind === 'forecast' ? t('analytics.common.forecast') : null,
+      item.point.kind === 'partial' ? t('analytics.common.partial') : null,
+      item.point.isEstimated ? t('analytics.common.estimated_current_rates') : null,
+    ].filter(Boolean)
     return [item.label, item.point.valueLabel, ...qualifiers].filter(Boolean).join(', ')
   })
   return [selectedXLabel.value, ...values].filter(Boolean).join('. ')
 })
 
 const persistentPoints = (item) => {
-  const points = item.points.filter((point) => point.y !== null)
+  const points = item.points.filter((point) => point.y !== null && !point.inspectionOnly)
   if (points.length <= 12) return points
   const step = Math.ceil(points.length / 12)
   let lastActualIndex = -1

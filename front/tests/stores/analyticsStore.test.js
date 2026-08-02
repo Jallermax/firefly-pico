@@ -222,6 +222,26 @@ test('marks a weekly final point unverified when no account value exists for its
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [{ type: 'current-balance-unverified', sampleDate, currentDate: format(new Date(), 'yyyy-MM-dd') }])
 })
 
+test('defaults to all financial metrics and preserves valid legacy selections', () => {
+  const freshStore = (analyticsStore = useAnalyticsStore())
+  assert.deepEqual(freshStore.visibleFinancialMetrics, ['netWorth', 'savings', 'debt', 'expenses'])
+
+  freshStore.$dispose()
+  setActivePinia(createPinia())
+  storageOverrides.set('analyticsVisibleBalanceMetrics', ['savings', 'netWorth'])
+  const legacyStore = (analyticsStore = useAnalyticsStore())
+  assert.deepEqual(legacyStore.visibleFinancialMetrics, ['savings', 'netWorth'])
+})
+
+test('repairs persisted financial metrics and keeps at least one valid selection', () => {
+  storageOverrides.set('analyticsVisibleBalanceMetrics', ['debt', 'unknown', 'debt'])
+  const store = (analyticsStore = useAnalyticsStore())
+  assert.deepEqual(store.visibleFinancialMetrics, ['debt'])
+
+  store.visibleFinancialMetrics = []
+  assert.deepEqual(store.visibleFinancialMetrics, ['netWorth'])
+})
+
 test('derives financial trends from three account requests and the transaction ledger', async () => {
   const today = new Date()
   const checking = activeAsset()

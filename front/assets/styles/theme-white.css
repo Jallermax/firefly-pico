@@ -2336,6 +2336,7 @@ body {
 .analytics-chart-tooltip-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     width: 100%;
     gap: 6px;
     margin-top: 4px;
@@ -2362,6 +2363,35 @@ body {
     border-radius: 50%;
 }
 
+.analytics-chart-legend-marker-square {
+    border-radius: 1px;
+}
+
+.analytics-chart-legend-marker-diamond {
+    border-radius: 1px;
+    transform: rotate(45deg) scale(0.85);
+}
+
+.analytics-chart-legend-marker-triangle {
+    border-radius: 0;
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.analytics-chart-tooltip-amount {
+    color: var(--van-text-color);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.analytics-chart-tooltip-qualifier {
+    flex: 1 0 calc(100% - 15px);
+    margin-inline-start: 15px;
+    color: var(--van-text-color-3);
+    font-size: 10px;
+}
+
 .analytics-card {
     break-inside: avoid;
     overflow: visible;
@@ -2373,26 +2403,81 @@ body {
     gap: 10px;
 }
 
-.analytics-series-toggles {
-    display: flex;
+.analytics-card-subtitle {
+    margin-top: 2px;
+    color: var(--van-text-color-3);
+    font-size: 11px;
+    font-weight: 400;
+    text-transform: none;
+}
+
+.analytics-balance-card-title {
     flex-wrap: wrap;
-    gap: 6px;
+}
+
+.analytics-balance-periods {
+    display: flex;
+    justify-content: flex-end;
     padding: 0 16px 8px;
 }
 
-.analytics-series-toggle {
+.analytics-metric-facet-button {
     min-height: 32px;
     padding: 0 12px;
     border: 0;
     border-radius: 25px;
+    color: var(--van-text-color);
     background: var(--van-background-2-5);
-    color: var(--van-text-color-2);
     cursor: pointer;
 }
 
-.analytics-series-toggle.active {
-    box-shadow: inset 0 0 0 2px currentColor;
+.analytics-metric-facet-popup {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
+}
+
+.analytics-metric-facet-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--van-border-color);
+}
+
+.analytics-metric-facet-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+}
+
+.analytics-metric-facet-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    gap: 10px;
+    padding: 6px 4px;
+    border: 0;
+    border-bottom: 1px solid var(--van-border-color);
     color: var(--van-text-color);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.analytics-metric-facet-row[aria-disabled='true'] {
+    cursor: not-allowed;
+}
+
+.analytics-metric-facet-button:focus-visible,
+.analytics-metric-facet-row:focus-visible {
+    outline: 2px solid var(--primary-action);
+    outline-offset: -2px;
 }
 
 .analytics-card-state {
@@ -2470,6 +2555,27 @@ body {
 
 .analytics-warning {
     color: var(--van-danger-color);
+}
+
+.analytics-calculation-details {
+    margin: 0 16px 8px;
+    border-radius: 6px;
+    color: var(--van-text-color-2);
+    background: var(--van-background-2-5);
+    font-size: 11px;
+    overflow: hidden;
+}
+
+.analytics-calculation-details summary {
+    min-height: 36px;
+    padding: 9px 10px;
+    color: var(--van-text-color);
+    cursor: pointer;
+}
+
+.analytics-calculation-details p {
+    margin: 0;
+    padding: 0 10px 8px;
 }
 
 .analytics-category-card-title {
@@ -2900,6 +3006,19 @@ body {
     .analytics-category-periods {
         justify-content: flex-start;
         overflow-x: auto;
+    }
+
+    .analytics-balance-periods {
+        justify-content: flex-start;
+        overflow-x: auto;
+    }
+
+    .analytics-metric-facet {
+        width: 100%;
+    }
+
+    .analytics-metric-facet-button {
+        width: 100%;
     }
 
     .analytics-flow-month-controls {
