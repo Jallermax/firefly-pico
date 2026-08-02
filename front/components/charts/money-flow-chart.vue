@@ -13,7 +13,7 @@
         @keydown.space.prevent="emit('select-node', node)"
       >
         <title>{{ node.ariaLabel }}</title>
-        <path :d="node.path" class="analytics-flow-band-hit" :style="{ strokeWidth: Math.max(44, node.width) }" />
+        <path :d="node.path" class="analytics-flow-band-hit" vector-effect="non-scaling-stroke" :style="{ strokeWidth: Math.max(44, node.width) }" />
         <path :d="node.path" class="analytics-flow-band" :style="{ strokeWidth: node.width, stroke: node.color }" />
         <text :x="node.labelX" :y="node.labelY" :text-anchor="node.textAnchor">{{ node.label }} · {{ node.valueLabel }}</text>
       </g>
@@ -33,7 +33,7 @@
         @keydown.space.prevent="emit('select-node', node)"
       >
         <title>{{ node.ariaLabel }}</title>
-        <path :d="node.path" class="analytics-flow-band-hit" :style="{ strokeWidth: Math.max(44, node.width) }" />
+        <path :d="node.path" class="analytics-flow-band-hit" vector-effect="non-scaling-stroke" :style="{ strokeWidth: Math.max(44, node.width) }" />
         <path :d="node.path" class="analytics-flow-band" :style="{ strokeWidth: node.width, stroke: node.color }" />
         <text :x="node.labelX" :y="node.labelY" :text-anchor="node.textAnchor">{{ node.label }} · {{ node.valueLabel }}</text>
       </g>

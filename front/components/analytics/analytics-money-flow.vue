@@ -26,7 +26,7 @@
         <span>{{ $t('analytics.flow.error') }}</span>
         <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
       </div>
-      <div v-else-if="analyticsStore.flowState.status === 'loading' && analyticsStore.flowState.isStale" class="analytics-assumption-note">{{ $t('analytics.common.stale') }}</div>
+      <div v-if="analyticsStore.flowState.isStale && ['loading', 'error'].includes(analyticsStore.flowState.status)" class="analytics-assumption-note">{{ $t('analytics.common.stale') }}</div>
 
       <div v-if="!flow.isBalanced" class="analytics-flow-unbalanced" role="alert">
         <strong>{{ $t('analytics.flow.audit.unbalanced') }}</strong>
