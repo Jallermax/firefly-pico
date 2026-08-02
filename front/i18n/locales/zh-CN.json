@@ -78,6 +78,7 @@
     },
     "flow": {
       "title": "资金流向",
+      "subtitle": "本月资金从何而来、流向何处",
       "chart_label": "所选月份的资金来源和去向",
       "previous_month": "上个月",
       "next_month": "下个月",

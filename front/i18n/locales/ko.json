@@ -78,6 +78,7 @@
     },
     "flow": {
       "title": "자금 흐름",
+      "subtitle": "이번 달 자금의 출처와 사용처",
       "chart_label": "선택한 월의 자금 출처와 사용처",
       "previous_month": "이전 월",
       "next_month": "다음 월",

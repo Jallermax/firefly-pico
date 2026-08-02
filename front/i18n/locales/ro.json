@@ -78,6 +78,7 @@
     },
     "flow": {
       "title": "Flux de bani",
+      "subtitle": "De unde au venit banii acestei luni și unde au mers",
       "chart_label": "Sursele și destinațiile banilor pentru luna selectată",
       "previous_month": "Luna anterioară",
       "next_month": "Luna următoare",

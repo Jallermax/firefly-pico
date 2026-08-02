@@ -2803,6 +2803,10 @@ body {
     flex-wrap: wrap;
 }
 
+.analytics-flow-heading {
+    min-width: 180px;
+}
+
 .analytics-flow-month-controls {
     display: flex;
     align-items: center;
@@ -2850,7 +2854,8 @@ body {
 .analytics-flow-svg {
     display: block;
     width: 100%;
-    min-height: 260px;
+    height: auto;
+    aspect-ratio: 1000 / 520;
     overflow: visible;
 }
 
@@ -2859,11 +2864,19 @@ body {
     outline: none;
 }
 
-.analytics-flow-node text,
+.analytics-flow-node-label,
 .analytics-flow-bus-label {
     fill: var(--van-text-color);
     font-size: 13px;
     font-weight: 600;
+    pointer-events: none;
+}
+
+.analytics-flow-node-amount {
+    fill: var(--van-text-color-2);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
     pointer-events: none;
 }
 
@@ -2904,7 +2917,7 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px 10px;
     margin: 0;
-    padding: 8px 0 0;
+    padding: 0 10px 10px;
     list-style: none;
 }
 
@@ -2919,6 +2932,7 @@ body {
     color: var(--van-text-color);
     background: var(--van-background-2-5);
     font-size: 12px;
+    font-variant-numeric: tabular-nums;
     text-align: left;
     cursor: pointer;
 }
@@ -2938,14 +2952,20 @@ body {
     background: var(--van-background-2-5);
 }
 
-.analytics-flow-audit {
+.analytics-flow-audit,
+.analytics-flow-values {
     margin: 0 16px 12px;
     border-radius: 8px;
     background: var(--van-background-2-5);
     overflow: hidden;
 }
 
-.analytics-flow-audit summary {
+.analytics-flow-values {
+    margin: 8px 0 0;
+}
+
+.analytics-flow-audit summary,
+.analytics-flow-values summary {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2955,6 +2975,12 @@ body {
     color: var(--van-text-color);
     font-size: 12px;
     cursor: pointer;
+}
+
+.analytics-flow-audit summary:focus-visible,
+.analytics-flow-values summary:focus-visible {
+    outline: 2px solid var(--primary-action);
+    outline-offset: -2px;
 }
 
 .analytics-flow-audit summary strong.success {
@@ -2991,7 +3017,15 @@ body {
 
 .analytics-flow-audit-row strong {
     color: var(--van-text-color);
+    font-variant-numeric: tabular-nums;
     text-align: right;
+}
+
+.analytics-flow-definition {
+    margin: 0;
+    padding: 2px 10px 10px;
+    color: var(--van-text-color-2);
+    font-size: 11px;
 }
 
 .analytics-flow-residual-details {
@@ -3031,7 +3065,7 @@ body {
 }
 
 .analytics-flow-mobile .analytics-flow-svg {
-    min-height: 430px;
+    aspect-ratio: 360 / 620;
 }
 
 .analytics-flow-mobile .analytics-flow-list {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex } from '../../utils/ChartUtils.js'
+import { buildLineChartGeometry, buildMoneyFlowGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../utils/ChartUtils.js'
 import * as ChartUtils from '../../utils/ChartUtils.js'
 import { buildFinancialTrendChartSeries } from '../../utils/AnalyticsUtils.js'
 
@@ -270,4 +270,58 @@ test('line geometry assigns six persistent non-color marker treatments to every 
     true,
   )
   assert.equal(geometry.series[0].segments[0].dashed, true)
+})
+
+test('money flow uses compact top-to-bottom mobile geometry', () => {
+  const geometry = buildMoneyFlowGeometry({
+    sources: [
+      { id: 'income', value: 75 },
+      { id: 'newDebt', value: 25 },
+    ],
+    destinations: [{ id: 'expenses', value: 100 }],
+    total: 100,
+    isDesktop: false,
+  })
+
+  assert.equal(geometry.viewBox, '0 0 360 620')
+  assert.ok(geometry.sources.every((node) => node.labelY < geometry.bus.y && node.path && node.width <= 48))
+  assert.ok(geometry.destinations.every((node) => node.labelY > geometry.bus.y + geometry.bus.height && node.path && node.width <= 48))
+  assert.equal(geometry.sources[0].textAnchor, 'start')
+  assert.equal(geometry.sources[1].textAnchor, 'end')
+  const sourceStartY = Number(geometry.sources[0].path.match(/^M \S+ (\S+)/)?.[1])
+  const destinationEndY = Number(geometry.destinations[0].path.match(/ (\S+)$/)?.[1])
+  assert.ok(sourceStartY - geometry.sources[0].amountY >= 30)
+  assert.ok(geometry.destinations[0].labelY - destinationEndY >= 48)
+})
+
+test('money flow retains left-to-right desktop geometry', () => {
+  const geometry = buildMoneyFlowGeometry({
+    sources: [{ id: 'income', value: 100 }],
+    destinations: [{ id: 'expenses', value: 100 }],
+    total: 100,
+    isDesktop: true,
+  })
+
+  assert.equal(geometry.viewBox, '0 0 1000 520')
+  assert.ok(geometry.sources[0].labelX < geometry.bus.x)
+  assert.ok(geometry.destinations[0].labelX > geometry.bus.x + geometry.bus.width)
+  assert.equal(geometry.sources[0].width, 180)
+  assert.equal(geometry.destinations[0].width, 180)
+  const sourceStartX = Number(geometry.sources[0].path.match(/^M (\S+)/)?.[1])
+  const destinationEndX = Number(geometry.destinations[0].path.match(/ (\S+) \S+$/)?.[1])
+  assert.ok(sourceStartX - geometry.sources[0].labelX >= geometry.sources[0].width / 2 + 20)
+  assert.ok(geometry.destinations[0].labelX - destinationEndX >= geometry.destinations[0].width / 2 + 20)
+})
+
+test('money flow presentation suppresses an unbalanced diagram without hiding its audit', () => {
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: false, hasNodes: true }), {
+    showChart: false,
+    showEmpty: false,
+    showUnbalancedAudit: true,
+  })
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: true, hasNodes: false }), {
+    showChart: false,
+    showEmpty: true,
+    showUnbalancedAudit: false,
+  })
 })

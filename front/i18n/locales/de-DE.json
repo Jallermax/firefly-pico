@@ -78,6 +78,7 @@
     },
     "flow": {
       "title": "Geldfluss",
+      "subtitle": "Woher das Geld dieses Monats kam und wohin es floss",
       "chart_label": "Geldquellen und -ziele für den ausgewählten Monat",
       "previous_month": "Vorheriger Monat",
       "next_month": "Nächster Monat",

@@ -1,7 +1,10 @@
 <template>
   <van-cell-group inset class="analytics-card analytics-money-flow-card">
     <div class="van-cell-group-title analytics-card-title analytics-flow-card-title">
-      <span class="flex-1">{{ $t('analytics.flow.title') }}</span>
+      <div class="analytics-flow-heading flex-1">
+        <div>{{ $t('analytics.flow.title') }}</div>
+        <div class="analytics-card-subtitle">{{ $t('analytics.flow.subtitle') }}</div>
+      </div>
       <div class="analytics-flow-month-controls">
         <button type="button" class="analytics-flow-month-button" :disabled="!canPrevious" :aria-label="$t('analytics.flow.previous_month')" @click="moveMonth(-1)">
           <app-icon :icon="TablerIconConstants.leftArrow" :size="18" />
@@ -28,24 +31,20 @@
       </div>
       <div v-if="analyticsStore.flowState.isStale && ['loading', 'error'].includes(analyticsStore.flowState.status)" class="analytics-assumption-note">{{ $t('analytics.common.stale') }}</div>
 
-      <div v-if="!flow.isBalanced" class="analytics-flow-unbalanced" role="alert">
+      <div v-if="presentation.showUnbalancedAudit" class="analytics-flow-unbalanced" role="alert">
         <strong>{{ $t('analytics.flow.audit.unbalanced') }}</strong>
-        <div class="analytics-flow-audit-row">
-          <span>{{ $t('analytics.flow.audit.source_total') }}</span
-          ><strong>{{ formatCurrency(flow.audit.sourceTotal) }}</strong>
-        </div>
-        <div class="analytics-flow-audit-row">
-          <span>{{ $t('analytics.flow.audit.destination_total') }}</span
-          ><strong>{{ formatCurrency(flow.audit.destinationTotal) }}</strong>
-        </div>
-        <div class="analytics-flow-audit-row">
-          <span>{{ $t('analytics.flow.audit.equation_difference') }}</span
-          ><strong>{{ formatCurrency(flow.audit.equationDifference) }}</strong>
-        </div>
+        <span>{{ $t('analytics.flow.not_balanced') }}</span>
+        <section v-for="section in auditSections" :key="section.id" class="analytics-flow-audit-section">
+          <h4>{{ section.label }}</h4>
+          <div v-for="row in section.rows" :key="row.id" class="analytics-flow-audit-row">
+            <span>{{ row.label }}</span
+            ><strong>{{ formatCurrency(row.value) }}</strong>
+          </div>
+        </section>
       </div>
-      <div v-else-if="!hasNodes" class="analytics-card-state analytics-flow-empty">{{ $t('analytics.flow.empty') }}</div>
+      <div v-else-if="presentation.showEmpty" class="analytics-card-state analytics-flow-empty">{{ $t('analytics.flow.empty') }}</div>
       <money-flow-chart
-        v-else
+        v-if="presentation.showChart"
         :sources="sources"
         :destinations="destinations"
         :total="flow.total"
@@ -54,27 +53,26 @@
         @select-node="onSelectNode"
       />
 
-      <details class="analytics-flow-audit" open>
+      <details class="analytics-flow-audit">
         <summary>
           <span>{{ $t('analytics.flow.audit.title') }}</span>
           <strong :class="flow.isBalanced ? 'success' : 'danger'">{{ flow.isBalanced ? $t('analytics.flow.audit.balanced') : $t('analytics.flow.audit.unbalanced') }}</strong>
         </summary>
-        <section v-for="section in auditSections" :key="section.id" class="analytics-flow-audit-section">
+        <section v-for="section in flow.isBalanced ? auditSections : []" :key="section.id" class="analytics-flow-audit-section">
           <h4>{{ section.label }}</h4>
           <div v-for="row in section.rows" :key="row.id" class="analytics-flow-audit-row">
             <span>{{ row.label }}</span
             ><strong>{{ formatCurrency(row.value) }}</strong>
           </div>
         </section>
+        <p class="analytics-flow-definition">{{ $t('analytics.flow.definition') }}</p>
       </details>
 
-      <div class="analytics-assumption-note">{{ $t('analytics.flow.definition') }}</div>
       <div v-if="flow.isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
       <div v-if="flow.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: flow.missingCurrencies.join(', ') }) }}</div>
     </template>
 
     <template v-if="isBlockingLoading || isBlockingError">
-      <div class="analytics-assumption-note">{{ $t('analytics.flow.definition') }}</div>
       <div v-if="flow.isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
       <div v-if="flow.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: flow.missingCurrencies.join(', ') }) }}</div>
     </template>
@@ -109,6 +107,7 @@ import RouteConstants from '~/constants/RouteConstants.js'
 import TablerIconConstants from '~/constants/TablerIconConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
+import { resolveMoneyFlowPresentation } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
@@ -143,6 +142,7 @@ const canPrevious = computed(() => monthMin.value !== null && selectedMonth.valu
 const canNext = computed(() => selectedMonth.value.getTime() < monthMax.value.getTime())
 const selectedMonthLabel = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(selectedMonth.value))
 const hasNodes = computed(() => flow.value.sources.length + flow.value.destinations.length > 0)
+const presentation = computed(() => resolveMoneyFlowPresentation({ isBalanced: flow.value.isBalanced, hasNodes: hasNodes.value }))
 const hasRetainedData = computed(() => analyticsStore.flowState.isStale)
 const isBlockingLoading = computed(() => analyticsStore.flowState.status === 'loading' && !hasRetainedData.value)
 const isBlockingError = computed(() => analyticsStore.flowState.status === 'error' && !hasRetainedData.value)

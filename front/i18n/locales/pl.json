@@ -78,6 +78,7 @@
     },
     "flow": {
       "title": "Przepływ pieniędzy",
+      "subtitle": "Skąd pochodziły pieniądze w tym miesiącu i dokąd trafiły",
       "chart_label": "Źródła i przeznaczenie pieniędzy w wybranym miesiącu",
       "previous_month": "Poprzedni miesiąc",
       "next_month": "Następny miesiąc",

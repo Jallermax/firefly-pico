@@ -99,3 +99,75 @@ export function resolveFinancialTrendSourceState({ hasAccountSelection, expenses
     selectedSourcesSettled: (!hasAccountSelection || ['ready', 'empty'].includes(balanceState.status)) && (!expensesSelected || ['ready', 'empty'].includes(expenseState.status)),
   }
 }
+
+const moneyFlowBandWidth = (value, total, maxWidth) => Math.max(4, clamp(Math.max(0, Number(value)) / Math.max(1, Number(total)), 0, 1) * maxWidth)
+const moneyFlowLabelPosition = (index, count, start, end) => (count <= 1 ? (start + end) / 2 : start + (index / (count - 1)) * (end - start))
+const moneyFlowAnchors = (nodes, total, maxWidth, center) => {
+  const widths = nodes.map(({ value }) => moneyFlowBandWidth(value, total, maxWidth))
+  let offset = center - widths.reduce((sum, width) => sum + width, 0) / 2
+  return widths.map((width) => {
+    const anchor = offset + width / 2
+    offset += width
+    return { anchor, width }
+  })
+}
+
+export function buildMoneyFlowGeometry({ sources, destinations, total, isDesktop }) {
+  const bus = isDesktop
+    ? { x: 478, y: 40, width: 44, height: 440, labelX: 500, labelY: 260, transform: 'rotate(-90 500 260)' }
+    : { x: 24, y: 286, width: 312, height: 48, labelX: 180, labelY: 315, transform: null }
+  const geometryFor = (nodes, side) => {
+    const anchors = moneyFlowAnchors(nodes, total, isDesktop ? 180 : 48, isDesktop ? 260 : 180)
+    return nodes.map((node, index) => {
+      const { anchor, width } = anchors[index]
+      if (isDesktop) {
+        const labelY = moneyFlowLabelPosition(index, nodes.length, 72, 448)
+        const isSource = side === 'source'
+        return {
+          ...node,
+          side,
+          width,
+          path: isSource ? `M 340 ${labelY} C 390 ${labelY}, 430 ${anchor}, 478 ${anchor}` : `M 522 ${anchor} C 570 ${anchor}, 610 ${labelY}, 660 ${labelY}`,
+          labelX: isSource ? 225 : 775,
+          labelY,
+          amountX: isSource ? 225 : 775,
+          amountY: labelY + 18,
+          textAnchor: isSource ? 'end' : 'start',
+        }
+      }
+
+      const isLeft = index % 2 === 0
+      const isSource = side === 'source'
+      const labelY = isSource ? moneyFlowLabelPosition(index, nodes.length, 38, 206) : moneyFlowLabelPosition(index, nodes.length, 410, 578)
+      const pathX = isLeft ? 132 : 228
+      return {
+        ...node,
+        side,
+        width,
+        path: isSource
+          ? `M ${pathX} ${labelY + 48} C ${pathX} ${labelY + 70}, ${anchor} 246, ${anchor} ${bus.y}`
+          : `M ${anchor} ${bus.y + bus.height} C ${anchor} 374, ${pathX} ${labelY - 48}, ${pathX} ${labelY - 48}`,
+        labelX: isLeft ? 16 : 344,
+        labelY,
+        amountX: isLeft ? 16 : 344,
+        amountY: labelY + 17,
+        textAnchor: isLeft ? 'start' : 'end',
+      }
+    })
+  }
+
+  return {
+    viewBox: isDesktop ? '0 0 1000 520' : '0 0 360 620',
+    bus,
+    sources: geometryFor(sources, 'source'),
+    destinations: geometryFor(destinations, 'destination'),
+  }
+}
+
+export function resolveMoneyFlowPresentation({ isBalanced, hasNodes }) {
+  return {
+    showChart: isBalanced && hasNodes,
+    showEmpty: isBalanced && !hasNodes,
+    showUnbalancedAudit: !isBalanced,
+  }
+}

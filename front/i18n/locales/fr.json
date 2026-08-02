@@ -78,6 +78,7 @@
     },
     "flow": {
       "title": "Flux d’argent",
+      "subtitle": "D’où vient l’argent de ce mois et où il est allé",
       "chart_label": "Sources et destinations de l’argent pour le mois sélectionné",
       "previous_month": "Mois précédent",
       "next_month": "Mois suivant",

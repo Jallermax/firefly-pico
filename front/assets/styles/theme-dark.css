@@ -563,9 +563,13 @@
     stroke: #666;
 }
 
-.van-theme-dark .analytics-flow-node text,
+.van-theme-dark .analytics-flow-node-label,
 .van-theme-dark .analytics-flow-bus-label {
     fill: var(--van-text-color);
+}
+
+.van-theme-dark .analytics-flow-node-amount {
+    fill: var(--van-text-color-2);
 }
 
 .van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-band-hit {
@@ -577,8 +581,14 @@
 .van-theme-dark .analytics-flow-list button,
 .van-theme-dark .analytics-flow-unbalanced,
 .van-theme-dark .analytics-flow-audit,
+.van-theme-dark .analytics-flow-values,
 .van-theme-dark .analytics-flow-residual-details p {
     background: var(--van-background-3);
+}
+
+.van-theme-dark .analytics-flow-audit summary:focus-visible,
+.van-theme-dark .analytics-flow-values summary:focus-visible {
+    outline-color: #64b5f6;
 }
 
 .van-theme-dark .analytics-flow-audit-section h4,
