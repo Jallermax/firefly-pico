@@ -539,13 +539,19 @@
 .van-theme-dark .analytics-category-facet-row,
 .van-theme-dark .analytics-metric-facet-header,
 .van-theme-dark .analytics-metric-facet-row,
-.van-theme-dark .analytics-category-summary-row {
+.van-theme-dark .analytics-category-summary-row,
+.van-theme-dark .analytics-category-summary-mobile-row {
     border-color: #444;
 }
 
 .van-theme-dark .analytics-category-summary,
+.van-theme-dark .analytics-category-summary-mobile,
 .van-theme-dark .analytics-forecast-detail-row {
     background: var(--van-background-3);
+}
+
+.van-theme-dark .analytics-calculation-details summary:focus-visible {
+    outline-color: #64b5f6;
 }
 
 .van-theme-dark .analytics-flow-bus {

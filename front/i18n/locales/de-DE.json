@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "Ausgaben nach Kategorie",
+      "subtitle": "Vergleiche Durchschnittswerte abgeschlossener Monate mit Istwert und Prognose dieses Monats.",
       "chart_label": "Ausgaben abgeschlossener Monate und Prognose des aktuellen Monats nach Kategorie",
       "select": "Kategorien auswählen",
       "selected_count": "{count} ausgewählt",

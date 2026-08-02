@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "Wydatki według kategorii",
+      "subtitle": "Porównaj średnie z zakończonych miesięcy z bieżącą wartością i prognozą tego miesiąca.",
       "chart_label": "Wydatki z zakończonych miesięcy i prognoza bieżącego miesiąca według kategorii",
       "select": "Wybierz kategorie",
       "selected_count": "Wybrano: {count}",

@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "Cheltuieli pe categorii",
+      "subtitle": "Compară mediile lunilor încheiate cu valoarea efectivă și prognoza acestei luni.",
       "chart_label": "Cheltuielile lunilor încheiate și prognoza lunii curente pe categorii",
       "select": "Selectează categorii",
       "selected_count": "{count} selectate",

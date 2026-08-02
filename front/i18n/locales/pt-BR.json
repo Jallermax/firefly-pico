@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "Gastos por categoria",
+      "subtitle": "Compare as médias dos meses concluídos com o valor real e a previsão deste mês.",
       "chart_label": "Gastos dos meses concluídos e previsão do mês atual por categoria",
       "select": "Selecionar categorias",
       "selected_count": "{count} selecionadas",

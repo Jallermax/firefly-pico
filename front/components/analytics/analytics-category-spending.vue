@@ -1,7 +1,10 @@
 <template>
   <van-cell-group inset class="analytics-card analytics-category-card">
     <div class="van-cell-group-title analytics-card-title analytics-category-card-title">
-      <span class="flex-1">{{ $t('analytics.category.title') }}</span>
+      <div class="flex-1">
+        <div>{{ $t('analytics.category.title') }}</div>
+        <div class="analytics-card-subtitle">{{ $t('analytics.category.subtitle') }}</div>
+      </div>
       <analytics-category-facet v-model="analyticsStore.selectedCategoryIds" :items="facetItems" :max="6" />
     </div>
     <div class="analytics-category-periods">
@@ -30,7 +33,7 @@
 
       <multi-series-line-chart :series="chartSeries" :value-formatter="formatNumberForDashboard" :aria-label="$t('analytics.category.chart_label')" @select-point="onSelectPoint" />
 
-      <div class="analytics-category-summary-scroll">
+      <div v-if="appStore.isDesktopLayout" class="analytics-category-summary-scroll">
         <div class="analytics-category-summary">
           <div class="analytics-category-summary-header">
             <span>{{ $t('category') }}</span>
@@ -47,12 +50,34 @@
           </div>
         </div>
       </div>
+      <div v-else class="analytics-category-summary-mobile">
+        <div v-for="item in summaries" :key="item.id" class="analytics-category-summary-mobile-row">
+          <div class="analytics-category-summary-label"><span class="analytics-chart-legend-marker" :style="{ backgroundColor: item.color }" />{{ item.label }}</div>
+          <dl class="analytics-category-summary-mobile-values">
+            <div>
+              <dt>{{ $t('analytics.common.average') }}</dt>
+              <dd>{{ item.averageLabel }}</dd>
+            </div>
+            <div>
+              <dt>{{ $t('analytics.category.current_actual') }}</dt>
+              <dd>{{ item.currentActualLabel }}</dd>
+            </div>
+            <div>
+              <dt>{{ $t('analytics.category.current_forecast') }}</dt>
+              <dd>{{ item.forecastAvailable ? item.forecastLabel : $t('analytics.category.insufficient_history') }}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
 
       <div v-if="summary.usedMonths !== summary.requestedMonths" class="analytics-assumption-note">
         {{ $t('analytics.common.based_on_months', { used: summary.usedMonths, requested: summary.requestedMonths }) }}
       </div>
-      <div class="analytics-assumption-note">{{ $t('analytics.category.definition') }}</div>
-      <div class="analytics-assumption-note">{{ $t('analytics.category.current_month_separate') }}</div>
+      <details class="analytics-calculation-details">
+        <summary>{{ $t('analytics.common.how_calculated') }}</summary>
+        <p>{{ $t('analytics.category.definition') }}</p>
+        <p>{{ $t('analytics.category.current_month_separate') }}</p>
+      </details>
       <div v-if="summary.isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
       <div v-if="summary.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: summary.missingCurrencies.join(', ') }) }}</div>
     </template>
@@ -95,6 +120,7 @@ import { format, parseISO } from 'date-fns'
 import Category from '~/models/Category.js'
 import RouteConstants from '~/constants/RouteConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
+import { useAppStore } from '~/stores/appStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { ANALYTICS_UNCATEGORIZED_ID } from '~/utils/AnalyticsUtils.js'
@@ -110,6 +136,7 @@ const CATEGORY_COLORS = [
   'var(--analytics-category-6)',
 ]
 const analyticsStore = useAnalyticsStore()
+const appStore = useAppStore()
 const categoryStore = useCategoryStore()
 const profileStore = useProfileStore()
 const { t } = useI18n()
@@ -127,7 +154,7 @@ const formatCurrency = (value) => `${formatNumberForDashboard(value)} ${analytic
 const toChartPoint = (point, kind) => ({
   ...point,
   xLabel: point.xLabel ?? formatMonthKey(point.x),
-  valueLabel: formatNumberForDashboard(point.value),
+  valueLabel: formatCurrency(point.value),
   kind,
   isEstimated: analyticsStore.categorySummary.isEstimated,
 })

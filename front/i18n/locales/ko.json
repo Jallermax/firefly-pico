@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "카테고리별 지출",
+      "subtitle": "완료된 월의 평균을 이번 달 실제 지출 및 예측과 비교합니다.",
       "chart_label": "카테고리별 완료된 월의 지출 및 현재 월 예측",
       "select": "카테고리 선택",
       "selected_count": "{count}개 선택됨",

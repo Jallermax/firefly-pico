@@ -2573,6 +2573,11 @@ body {
     cursor: pointer;
 }
 
+.analytics-calculation-details summary:focus-visible {
+    outline: 2px solid var(--primary-action);
+    outline-offset: -2px;
+}
+
 .analytics-calculation-details p {
     margin: 0;
     padding: 0 10px 8px;
@@ -2682,6 +2687,11 @@ body {
     text-transform: uppercase;
 }
 
+.analytics-category-summary-header span:not(:first-child),
+.analytics-category-summary-row > .analytics-category-insufficient {
+    text-align: right;
+}
+
 .analytics-category-summary-row {
     border-top: 1px solid var(--van-border-color);
     color: var(--van-text-color-2);
@@ -2691,6 +2701,8 @@ body {
 .analytics-category-summary-row strong {
     color: var(--van-text-color);
     font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
 }
 
 .analytics-category-summary-label {
@@ -2707,6 +2719,49 @@ body {
     color: var(--van-text-color-3);
     font-size: 10px;
     overflow-wrap: anywhere;
+}
+
+.analytics-category-summary-mobile {
+    margin: 0 16px 12px;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--van-background-2-5);
+}
+
+.analytics-category-summary-mobile-row {
+    padding: 10px;
+    border-top: 1px solid var(--van-border-color);
+}
+
+.analytics-category-summary-mobile-row:first-child {
+    border-top: 0;
+}
+
+.analytics-category-summary-mobile-values {
+    margin: 6px 0 0 15px;
+}
+
+.analytics-category-summary-mobile-values > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.analytics-category-summary-mobile-values dt {
+    color: var(--van-text-color-3);
+    font-size: 11px;
+}
+
+.analytics-category-summary-mobile-values dd {
+    margin: 0;
+    color: var(--van-text-color);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+    text-align: right;
 }
 
 .analytics-forecast-details {
@@ -2983,18 +3038,11 @@ body {
 .analytics-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
     gap: 16px;
     padding-bottom: 100px;
-}
-
-@media (min-width: 1100px) {
-    .analytics-layout {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    }
-
-    .analytics-layout-balance {
-        grid-column: 1 / -1;
-    }
 }
 
 @media (max-width: 360px) {

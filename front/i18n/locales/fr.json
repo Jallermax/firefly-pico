@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "Dépenses par catégorie",
+      "subtitle": "Comparez les moyennes des mois terminés avec le réel et la prévision du mois en cours.",
       "chart_label": "Dépenses des mois terminés et prévision du mois en cours par catégorie",
       "select": "Sélectionner des catégories",
       "selected_count": "{count} sélectionnées",

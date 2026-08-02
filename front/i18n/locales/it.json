@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "Spese per categoria",
+      "subtitle": "Confronta le medie dei mesi completati con il valore effettivo e la previsione di questo mese.",
       "chart_label": "Spese dei mesi completati e previsione del mese corrente per categoria",
       "select": "Seleziona categorie",
       "selected_count": "{count} selezionate",

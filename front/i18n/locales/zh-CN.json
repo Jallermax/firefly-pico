@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "按类别统计支出",
+      "subtitle": "将已结束月份的平均值与本月实际支出和预测进行比较。",
       "chart_label": "按类别显示已结束月份的支出和本月预测",
       "select": "选择类别",
       "selected_count": "已选择 {count} 个",

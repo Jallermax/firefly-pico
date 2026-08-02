@@ -48,6 +48,7 @@
     },
     "category": {
       "title": "Spending by category",
+      "subtitle": "Compare completed-month averages with this month's actual and forecast.",
       "chart_label": "Completed-month spending and current-month forecast by category",
       "select": "Select categories",
       "selected_count": "{count} selected",
