@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
   buildCategoryLedger,
+  buildMonthlyMoneyFlow,
   convertAnalyticsAmount,
   getAnalyticsAccountGroups,
   normalizeBalanceSeries,
@@ -49,6 +50,8 @@ const checking = typedAccount({ type: 'asset' })
 const otherChecking = typedAccount({ type: 'asset' })
 const card = typedAccount({ type: 'asset', role: 'ccAsset' })
 const expense = typedAccount({ type: 'expense' })
+const revenue = typedAccount({ type: 'revenue' })
+const savings = typedAccount({ type: 'asset', role: 'savingAsset' })
 
 const ledgerBucketInTimezone = ({ timeZone, dateParts }) => {
   const analyticsUrl = new URL('../../utils/AnalyticsUtils.js', import.meta.url).href
@@ -336,4 +339,89 @@ test('category ranking uses category ID as a stable tie-breaker', () => {
     today: new Date('2026-04-10T12:00:00Z'),
   })
   assert.deepEqual(ids, ['food', 'rent'])
+})
+
+test('money flow treats card purchases as expense plus new debt and card payments as repayment', () => {
+  const flow = buildMonthlyMoneyFlow({
+    monthKey: '2026-04',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    transactions: [
+      transaction('income', [split({ amount: 1000, date: '2026-04-01', source: revenue, destination: checking })]),
+      transaction('expense', [split({ amount: 200, date: '2026-04-02', source: checking, destination: expense })]),
+      transaction('save', [split({ amount: 300, date: '2026-04-03', source: checking, destination: savings })]),
+      transaction('card-buy', [split({ amount: 100, date: '2026-04-04', source: card, destination: expense })]),
+      transaction('card-pay', [split({ amount: 50, date: '2026-04-05', source: checking, destination: card })]),
+    ],
+  })
+
+  assert.deepEqual(Object.fromEntries(flow.sources.map((node) => [node.id, node.value])), {
+    income: 1000,
+    newDebt: 50,
+  })
+  assert.deepEqual(Object.fromEntries(flow.destinations.map((node) => [node.id, node.value])), {
+    expenses: 300,
+    savingsDeposited: 300,
+    newExcess: 450,
+  })
+  assert.equal(flow.isBalanced, true)
+  assert.deepEqual(flow.audit.debtIncreaseIds, ['card-buy'])
+  assert.deepEqual(flow.audit.debtRepaymentIds, ['card-pay'])
+})
+
+test('money flow nets savings and debt, cancels internal transfers, and exposes refunds as a source', () => {
+  const otherSavings = typedAccount({ type: 'asset', role: 'savingAsset' })
+  const otherDebt = typedAccount({ type: 'liabilities', direction: 'debit' })
+  const flow = buildMonthlyMoneyFlow({
+    monthKey: '2026-05',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    transactions: [
+      transaction('save-in', [split({ amount: 100, date: '2026-05-01', source: checking, destination: savings })]),
+      transaction('save-out', [split({ amount: 40, date: '2026-05-02', source: savings, destination: checking })]),
+      transaction('save-internal', [split({ amount: 20, date: '2026-05-03', source: savings, destination: otherSavings })]),
+      transaction('debt-internal', [split({ amount: 25, date: '2026-05-04', source: card, destination: otherDebt })]),
+      transaction('refund', [split({ amount: 30, date: '2026-05-05', source: expense, destination: checking, categoryId: 'food' })]),
+    ],
+  })
+
+  assert.equal(flow.audit.savingsDeposited, 60)
+  assert.equal(flow.audit.savingsWithdrawn, 0)
+  assert.equal(flow.audit.newDebt, 0)
+  assert.equal(flow.audit.debtRepaid, 0)
+  assert.equal(flow.audit.netRefunds, 30)
+  assert.equal(flow.audit.priorExcessUsed, 30)
+  assert.equal(flow.isBalanced, true)
+})
+
+test('empty money flow closes exactly within currency tolerance', () => {
+  const flow = buildMonthlyMoneyFlow({
+    monthKey: '2026-06',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    transactions: [],
+  })
+  assert.equal(flow.audit.equationDifference, 0)
+  assert.equal(flow.isBalanced, true)
+})
+
+test('split groups contribute their parent transaction ID only once per node', () => {
+  const flow = buildMonthlyMoneyFlow({
+    monthKey: '2026-06',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    transactions: [
+      transaction('split-income', [
+        split({ amount: 10, date: '2026-06-01', source: revenue, destination: checking }),
+        split({ amount: 15, date: '2026-06-01', source: revenue, destination: checking }),
+      ]),
+    ],
+  })
+  const incomeNode = flow.sources.find(({ id }) => id === 'income')
+  assert.equal(incomeNode.value, 25)
+  assert.deepEqual(incomeNode.transactionIds, ['split-income'])
 })

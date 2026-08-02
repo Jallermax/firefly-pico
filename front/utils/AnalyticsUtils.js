@@ -19,6 +19,18 @@ export function getAnalyticsAccountGroups(accounts) {
   }
 }
 
+export function getAnalyticsAccountKind(account) {
+  const type = codeOf(account?.attributes?.type)
+  const role = codeOf(account?.attributes?.account_role)
+  const direction = codeOf(account?.attributes?.liability_direction)
+  if (type === 'expense') return 'expense'
+  if (type === 'revenue') return 'revenue'
+  if (type === 'asset' && role === 'savingAsset') return 'savings'
+  if ((type === 'asset' && role === 'ccAsset') || (type === 'liabilities' && direction === 'debit')) return 'debt'
+  if (['asset', 'cash', 'liabilities'].includes(type)) return 'balance'
+  return 'other'
+}
+
 export function convertAnalyticsAmount({ amount, currencyCode, primaryAmount, primaryCurrencyCode, displayCurrencyCode, rates }) {
   const hasPrimary = primaryAmount !== null && primaryAmount !== undefined && primaryCurrencyCode
   const sourceAmount = Number(hasPrimary ? primaryAmount : amount)
@@ -63,6 +75,131 @@ const splitMonthKey = (item) => {
 const splitDay = (item) => {
   const date = item?.date instanceof Date ? item.date : new Date(item?.date)
   return Number.isNaN(date.getTime()) ? null : date.getDate()
+}
+
+export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyCode, primaryCurrencyCode, rates, currencyDecimalPlaces = 2 }) {
+  const buckets = Object.fromEntries(['income', 'expensePurchases', 'refunds', 'savingsIn', 'savingsOut', 'debtIncrease', 'debtRepayment'].map((id) => [id, { value: 0, transactionIds: [] }]))
+  const missingCurrencies = []
+  let isEstimated = false
+
+  const add = (id, amount, transactionId) => {
+    buckets[id].value += amount
+    buckets[id].transactionIds.push(transactionId)
+    buckets[id].transactionIds = unique(buckets[id].transactionIds)
+  }
+
+  for (const transaction of transactions) {
+    for (const item of transaction?.attributes?.transactions ?? []) {
+      if (splitMonthKey(item) !== monthKey) continue
+
+      const converted = convertAnalyticsAmount({
+        amount: Math.abs(Number(item.amount)),
+        currencyCode: item.currency_code,
+        primaryAmount: item.primary_amount,
+        primaryCurrencyCode,
+        displayCurrencyCode,
+        rates,
+      })
+      if (converted.missingCurrency) {
+        missingCurrencies.push(converted.missingCurrency)
+        continue
+      }
+
+      const amount = Math.abs(converted.value)
+      const sourceKind = getAnalyticsAccountKind(item.accountSource)
+      const destinationKind = getAnalyticsAccountKind(item.accountDestination)
+
+      if (sourceKind === 'revenue') add('income', amount, transaction.id)
+      if (destinationKind === 'expense') add('expensePurchases', amount, transaction.id)
+      if (sourceKind === 'expense') add('refunds', amount, transaction.id)
+
+      if (sourceKind !== 'savings' && destinationKind === 'savings') add('savingsIn', amount, transaction.id)
+      if (sourceKind === 'savings' && destinationKind !== 'savings') add('savingsOut', amount, transaction.id)
+
+      if (sourceKind === 'debt' && destinationKind !== 'debt') add('debtIncrease', amount, transaction.id)
+      if (sourceKind !== 'debt' && destinationKind === 'debt') add('debtRepayment', amount, transaction.id)
+
+      isEstimated ||= converted.isEstimated
+    }
+  }
+
+  const income = buckets.income.value
+  const expensePurchases = buckets.expensePurchases.value
+  const refunds = buckets.refunds.value
+  const savingsIn = buckets.savingsIn.value
+  const savingsOut = buckets.savingsOut.value
+  const debtIncrease = buckets.debtIncrease.value
+  const debtRepayment = buckets.debtRepayment.value
+  const expenses = Math.max(0, expensePurchases - refunds)
+  const netRefunds = Math.max(0, refunds - expensePurchases)
+  const savingsDeposited = Math.max(0, savingsIn - savingsOut)
+  const savingsWithdrawn = Math.max(0, savingsOut - savingsIn)
+  const debtRepaid = Math.max(0, debtRepayment - debtIncrease)
+  const newDebt = Math.max(0, debtIncrease - debtRepayment)
+  const classifiedSources = income + savingsWithdrawn + newDebt + netRefunds
+  const classifiedDestinations = expenses + savingsDeposited + debtRepaid
+  const priorExcessUsed = Math.max(0, classifiedDestinations - classifiedSources)
+  const newExcess = Math.max(0, classifiedSources - classifiedDestinations)
+  const sourceTotal = classifiedSources + priorExcessUsed
+  const destinationTotal = classifiedDestinations + newExcess
+  const equationDifference = sourceTotal - destinationTotal
+  const savingsTransactionIds = unique([...buckets.savingsIn.transactionIds, ...buckets.savingsOut.transactionIds])
+  const debtTransactionIds = unique([...buckets.debtIncrease.transactionIds, ...buckets.debtRepayment.transactionIds])
+  const expenseTransactionIds = unique([...buckets.expensePurchases.transactionIds, ...buckets.refunds.transactionIds])
+  const nodes = (items) => items.filter(({ value }) => value > 0)
+
+  const sources = nodes([
+    { id: 'income', value: income, transactionIds: buckets.income.transactionIds },
+    { id: 'savingsWithdrawn', value: savingsWithdrawn, transactionIds: savingsTransactionIds },
+    { id: 'newDebt', value: newDebt, transactionIds: debtTransactionIds },
+    { id: 'priorExcessUsed', value: priorExcessUsed, transactionIds: [] },
+    { id: 'netRefunds', value: netRefunds, transactionIds: expenseTransactionIds },
+  ])
+  const destinations = nodes([
+    { id: 'expenses', value: expenses, transactionIds: expenseTransactionIds },
+    { id: 'savingsDeposited', value: savingsDeposited, transactionIds: savingsTransactionIds },
+    { id: 'debtRepaid', value: debtRepaid, transactionIds: debtTransactionIds },
+    { id: 'newExcess', value: newExcess, transactionIds: [] },
+  ])
+  const audit = {
+    income,
+    incomeIds: buckets.income.transactionIds,
+    expensePurchases,
+    expensePurchasesIds: buckets.expensePurchases.transactionIds,
+    refunds,
+    refundsIds: buckets.refunds.transactionIds,
+    savingsIn,
+    savingsInIds: buckets.savingsIn.transactionIds,
+    savingsOut,
+    savingsOutIds: buckets.savingsOut.transactionIds,
+    debtIncrease,
+    debtIncreaseIds: buckets.debtIncrease.transactionIds,
+    debtRepayment,
+    debtRepaymentIds: buckets.debtRepayment.transactionIds,
+    expenses,
+    netRefunds,
+    savingsDeposited,
+    savingsWithdrawn,
+    debtRepaid,
+    newDebt,
+    classifiedSources,
+    classifiedDestinations,
+    priorExcessUsed,
+    newExcess,
+    sourceTotal,
+    destinationTotal,
+    equationDifference,
+  }
+
+  return {
+    sources,
+    destinations,
+    total: sourceTotal,
+    audit,
+    isEstimated,
+    missingCurrencies: unique(missingCurrencies),
+    isBalanced: Math.abs(equationDifference) <= 0.5 * 10 ** -currencyDecimalPlaces,
+  }
 }
 
 export function buildCategoryLedger({ transactions, displayCurrencyCode, primaryCurrencyCode, rates }) {
