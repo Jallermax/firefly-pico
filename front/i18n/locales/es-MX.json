@@ -1,4 +1,10 @@
 {
+  "analytics": {
+    "common": {
+      "forecast": "Pronóstico",
+      "estimated_current_rates": "Estimado con los tipos de cambio actuales"
+    }
+  },
   "stop": "Detener",
   "requests_remaining": "solicitudes restantes",
   "new": "Agregar",

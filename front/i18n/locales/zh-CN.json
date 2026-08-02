@@ -1,4 +1,10 @@
 {
+  "analytics": {
+    "common": {
+      "forecast": "预测",
+      "estimated_current_rates": "按当前汇率估算"
+    }
+  },
   "new": "新建",
   "save": "保存",
   "delete": "删除",

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildLineChartGeometry, nearestPointIndex } from '../../utils/ChartUtils.js'
+import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex } from '../../utils/ChartUtils.js'
 
 test('line geometry shares one x scale and keeps zero in range when needed', () => {
   const geometry = buildLineChartGeometry({
@@ -39,6 +39,11 @@ test('nearest point clamps pointer and keyboard positions', () => {
   assert.equal(nearestPointIndex({ clientX: -20, left: 0, width: 100, pointCount: 5 }), 0)
   assert.equal(nearestPointIndex({ clientX: 120, left: 0, width: 100, pointCount: 5 }), 4)
   assert.equal(nearestPointIndex({ clientX: 20, left: 0, width: 100, pointCount: 0 }), -1)
+})
+
+test('nearest chart point maps the rendered plot bounds instead of the full root', () => {
+  assert.equal(nearestChartPointIndex({ clientX: 88, left: 0, width: 1000, viewBoxWidth: 1000, padding: { left: 88, right: 24 }, pointCount: 12 }), 0)
+  assert.equal(nearestChartPointIndex({ clientX: 976, left: 0, width: 1000, viewBoxWidth: 1000, padding: { left: 88, right: 24 }, pointCount: 12 }), 11)
 })
 
 test('line geometry preserves gaps instead of joining across missing values', () => {

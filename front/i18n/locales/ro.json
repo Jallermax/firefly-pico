@@ -1,4 +1,10 @@
 {
+  "analytics": {
+    "common": {
+      "forecast": "Prognoză",
+      "estimated_current_rates": "Estimat la cursurile de schimb actuale"
+    }
+  },
   "stop": "Stop",
   "requests_remaining": "cereri rămase",
   "new": "Nou",

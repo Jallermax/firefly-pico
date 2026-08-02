@@ -1,4 +1,10 @@
 {
+  "analytics": {
+    "common": {
+      "forecast": "Forecast",
+      "estimated_current_rates": "Estimated at current rates"
+    }
+  },
   "stop": "Stop",
   "requests_remaining": "requests remaining",
   "new": "New",

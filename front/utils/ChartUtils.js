@@ -6,6 +6,16 @@ export function nearestPointIndex({ clientX, left, width, pointCount }) {
   return Math.round(ratio * (pointCount - 1))
 }
 
+export function nearestChartPointIndex({ clientX, left, width, viewBoxWidth, padding, pointCount }) {
+  const scale = width / viewBoxWidth
+  return nearestPointIndex({
+    clientX,
+    left: left + padding.left * scale,
+    width: width - (padding.left + padding.right) * scale,
+    pointCount,
+  })
+}
+
 export function buildLineChartGeometry({ series, width, height, padding }) {
   const xValues = [...new Set(series.flatMap((item) => item.points.map((point) => point.x)))].sort()
   const values = series.flatMap((item) => item.points.map((point) => point.value)).filter(Number.isFinite)

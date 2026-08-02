@@ -1,4 +1,10 @@
 {
+  "analytics": {
+    "common": {
+      "forecast": "Прогноз",
+      "estimated_current_rates": "Оценка по текущим обменным курсам"
+    }
+  },
   "stop": "Останавливаться",
   "requests_remaining": "осталось запросов",
   "new": "Новый",

@@ -1,4 +1,10 @@
 {
+  "analytics": {
+    "common": {
+      "forecast": "예측",
+      "estimated_current_rates": "현재 환율로 추정"
+    }
+  },
   "stop": "중지",
   "requests_remaining": "남은 요청",
   "new": "새로 만들기",

@@ -9,6 +9,7 @@
       @pointermove="onPointerMove"
       @pointerdown="onPointerDown"
       @pointerup="onPointerUp"
+      @pointercancel="onPointerCancel"
       @pointerleave="onPointerLeave"
       @keydown="onKeydown"
     >
@@ -65,7 +66,7 @@
 
 <script setup>
 import { onClickOutside } from '@vueuse/core'
-import { buildLineChartGeometry, nearestPointIndex } from '~/utils/ChartUtils.js'
+import { buildLineChartGeometry, nearestChartPointIndex } from '~/utils/ChartUtils.js'
 
 const CHART_WIDTH = 1000
 const CHART_HEIGHT = 320
@@ -207,7 +208,14 @@ const selectIndex = (index, { keyboard = false, notify = false } = {}) => {
 const pointerIndex = (event) => {
   const bounds = root.value?.getBoundingClientRect()
   if (!bounds) return -1
-  return nearestPointIndex({ clientX: event.clientX, left: bounds.left, width: bounds.width, pointCount: pointCount.value })
+  return nearestChartPointIndex({
+    clientX: event.clientX,
+    left: bounds.left,
+    width: bounds.width,
+    viewBoxWidth: CHART_WIDTH,
+    padding: CHART_PADDING,
+    pointCount: pointCount.value,
+  })
 }
 
 const onPointerMove = (event) => {
@@ -239,6 +247,8 @@ const onPointerUp = (event) => {
   isPinned.value = selectedIndex.value >= 0
   if (isPinned.value) emitSelection()
 }
+
+const onPointerCancel = () => clearSelection()
 
 const onPointerLeave = () => {
   if (!isPinned.value && !isDragging.value) clearSelection()
