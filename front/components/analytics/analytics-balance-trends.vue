@@ -27,7 +27,10 @@
       <span>{{ $t('analytics.balance.error') }}</span>
       <van-button size="small" @click="analyticsStore.retryBalance">{{ $t('analytics.common.retry') }}</van-button>
     </div>
-    <div v-else-if="chartSeries.length === 0" class="analytics-card-state">{{ $t('analytics.balance.empty') }}</div>
+    <template v-else-if="chartSeries.length === 0">
+      <div class="analytics-card-state">{{ $t('analytics.balance.empty') }}</div>
+      <div class="analytics-assumption-note">{{ $t('analytics.balance.definition') }}</div>
+    </template>
     <template v-else>
       <div v-if="analyticsStore.balanceState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
         <span>{{ $t('analytics.balance.error') }}</span>
