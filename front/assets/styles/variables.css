@@ -23,6 +23,18 @@
 
     --chart-bar-background: #c4c7d4;
 
+    --analytics-net-worth: #1e88e5;
+    --analytics-savings: #66bb6a;
+    --analytics-debt: #ec407a;
+    --analytics-forecast: #7e57c2;
+    --analytics-grid: rgba(100, 116, 139, 0.18);
+    --analytics-category-1: #1e88e5;
+    --analytics-category-2: #66bb6a;
+    --analytics-category-3: #ec407a;
+    --analytics-category-4: #7e57c2;
+    --analytics-category-5: #ffa726;
+    --analytics-category-6: #26a69a;
+
     --van-search-content-background: var(--van-background-2-5) !important;
 
     --van-field-label-width: 10.5em !important;
@@ -41,6 +53,18 @@
     --primary-action: #00a261dd;
 
     --chart-bar-background: #707070;
+
+    --analytics-net-worth: #1e88e5;
+    --analytics-savings: #66bb6a;
+    --analytics-debt: #ec407a;
+    --analytics-forecast: #7e57c2;
+    --analytics-grid: rgba(226, 232, 240, 0.2);
+    --analytics-category-1: #1e88e5;
+    --analytics-category-2: #66bb6a;
+    --analytics-category-3: #ec407a;
+    --analytics-category-4: #7e57c2;
+    --analytics-category-5: #ffa726;
+    --analytics-category-6: #26a69a;
 
     --expense1: rgba(236, 64, 122, 1);
     --expense2: rgba(236, 64, 122, 1);

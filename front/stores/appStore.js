@@ -57,7 +57,7 @@ export const useAppStore = defineStore('app', () => {
   const activePage = computed(() => {
     const route = useRoute()
     const routeMapping = {
-      [RouteConstants.ROUTE_DASHBOARD]: [RouteConstants.ROUTE_DASHBOARD],
+      [RouteConstants.ROUTE_DASHBOARD]: [RouteConstants.ROUTE_DASHBOARD, RouteConstants.ROUTE_ANALYTICS],
       [RouteConstants.ROUTE_TRANSACTION_LIST]: [RouteConstants.ROUTE_TRANSACTION_LIST],
       [RouteConstants.ROUTE_EXTRAS]: [
         RouteConstants.ROUTE_EXTRAS,

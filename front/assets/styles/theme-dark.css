@@ -518,6 +518,20 @@
     stroke: var(--van-background-2);
 }
 
+.van-theme-dark .analytics-page-switch {
+    background: #27272a;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.van-theme-dark .analytics-page-switch .app-tabs-item {
+    color: #d4d4d8;
+}
+
+.van-theme-dark .analytics-page-switch .app-tabs-item:hover,
+.van-theme-dark .analytics-page-switch .app-tabs-item.active {
+    color: #fff;
+}
+
 .van-theme-dark .analytics-metric-summary,
 .van-theme-dark .analytics-assumption-note,
 .van-theme-dark .analytics-warning {

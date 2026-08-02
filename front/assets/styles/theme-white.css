@@ -2274,7 +2274,7 @@ body {
 }
 
 .analytics-chart-grid {
-    stroke: var(--van-border-color);
+    stroke: var(--analytics-grid);
     stroke-width: 1;
 }
 
@@ -2858,6 +2858,27 @@ body {
 
 .analytics-flow-mobile .analytics-flow-list {
     grid-template-columns: 1fr;
+}
+
+.analytics-page-switch {
+    margin: 10px 16px;
+}
+
+.analytics-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding-bottom: 100px;
+}
+
+@media (min-width: 1100px) {
+    .analytics-layout {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .analytics-layout-balance {
+        grid-column: 1 / -1;
+    }
 }
 
 @media (max-width: 360px) {

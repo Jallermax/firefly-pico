@@ -62,7 +62,8 @@ const sidebarSections = computed(() =>
       key: 'main',
       label: t('main'),
       pages: [
-        { key: 'dashboard', label: 'Dashboard', icon: TablerIconConstants.dashboard, route: RouteConstants.ROUTE_DASHBOARD },
+        { key: 'dashboard', label: t('dashboard.title'), icon: TablerIconConstants.dashboard, route: RouteConstants.ROUTE_DASHBOARD },
+        { key: 'analytics', label: t('analytics.title'), icon: TablerIconConstants.analytics, route: RouteConstants.ROUTE_ANALYTICS },
         { key: 'transactions', label: 'Transactions', icon: TablerIconConstants.transaction, route: RouteConstants.ROUTE_TRANSACTION_LIST },
         { key: 'accounts', label: t('accounts'), icon: TablerIconConstants.account, route: RouteConstants.ROUTE_ACCOUNT_LIST },
       ],
