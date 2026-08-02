@@ -487,14 +487,16 @@ export function normalizeBalanceSeries({ chartLines, metric, displayCurrencyCode
     .map((x) => {
       let value = 0
       let hasValue = false
+      let isPointEstimated = false
       for (const line of normalizedLines) {
         const available = line.points.filter((point) => point.x <= x && point.value !== null)
         const point = available.at(-1)
         if (!point) continue
         hasValue = true
+        isPointEstimated ||= point.isEstimated
         value += metric === 'debt' ? Math.max(0, -point.value) : point.value
       }
-      return hasValue ? { x, value } : null
+      return hasValue ? { x, value, ...(isPointEstimated ? { isEstimated: true } : {}) } : null
     })
     .filter(Boolean)
 

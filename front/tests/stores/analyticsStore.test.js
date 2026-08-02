@@ -205,9 +205,9 @@ test('validates debit liabilities against current debt', async () => {
 
   await store.init()
 
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [
-    { type: 'current-balance-mismatch', sampleDate: format(new Date(), 'yyyy-MM-dd'), chartValue: 200, currentValue: 250 },
-  ])
+  const debt = store.balanceSeries.find(({ id }) => id === 'debt')
+  assert.deepEqual(debt.currentPoint, { x: format(new Date(), 'yyyy-MM-dd'), value: 250 })
+  assert.deepEqual(debt.warnings, [{ type: 'current-balance-mismatch', sampleDate: format(new Date(), 'yyyy-MM-dd'), chartValue: 200, currentValue: 250 }])
 })
 
 test('marks a weekly final point unverified when no account value exists for its sample date', async () => {
@@ -222,21 +222,46 @@ test('marks a weekly final point unverified when no account value exists for its
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [{ type: 'current-balance-unverified', sampleDate, currentDate: format(new Date(), 'yyyy-MM-dd') }])
 })
 
-test('keeps a missing current account balance out of current totals and changes', async () => {
-  const previousMonthEnd = format(new Date(new Date().getFullYear(), new Date().getMonth(), 0), 'yyyy-MM-dd')
+test('uses a same-day debt chart actual when direct current debt is missing and preserves zero change', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
   accountStore.accountList = [
     {
-      ...activeAsset(),
-      attributes: { ...activeAsset().attributes, current_balance: null, current_balance_date: previousMonthEnd },
+      ...debitLiability(),
+      attributes: { ...debitLiability().attributes, current_debt: null },
     },
   ]
-  accountResponse = async () => chartResponse(130, previousMonthEnd)
+  accountResponse = async () => ({ status: 200, data: [{ currency_code: 'USD', entries: { '2026-07-31': '-200', '2026-08-10': '-200' } }] })
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
 
-  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'netWorth')
-  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'netWorth')
+  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'debt')
+  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'debt')
+  assert.deepEqual(sourceSeries.currentPoint, { x: '2026-08-10', value: 200 })
+  assert.deepEqual(sourceSeries.warnings, [])
+  assert.equal(trendSeries.currentTotal, 200)
+  assert.equal(trendSeries.currentChange, 0)
+  assert.deepEqual(
+    trendSeries.changePoints.find(({ kind }) => kind === 'partial'),
+    { x: '2026-08', value: 0, kind: 'partial' },
+  )
+})
+
+test('keeps a prior-month debt chart actual out of current totals when direct current debt is missing', async () => {
+  const previousMonthEnd = format(new Date(new Date().getFullYear(), new Date().getMonth(), 0), 'yyyy-MM-dd')
+  accountStore.accountList = [
+    {
+      ...debitLiability(),
+      attributes: { ...debitLiability().attributes, current_debt: null, current_balance_date: previousMonthEnd },
+    },
+  ]
+  accountResponse = async () => chartResponse(-130, previousMonthEnd)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'debt')
+  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'debt')
   assert.equal(sourceSeries.currentPoint, null)
   assert.equal(trendSeries.currentTotal, null)
   assert.equal(trendSeries.currentChange, null)
@@ -248,6 +273,24 @@ test('keeps a missing current account balance out of current totals and changes'
     trendSeries.changePoints.some(({ kind }) => kind === 'partial'),
     false,
   )
+})
+
+test('retains estimation and staleness metadata on a current-month debt chart fallback', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+  accountStore.accountList = [
+    {
+      ...debitLiability(),
+      attributes: { ...debitLiability().attributes, currency_code: 'EUR', current_debt: '   ' },
+    },
+  ]
+  accountResponse = async () => ({ status: 200, data: [{ currency_code: 'EUR', entries: { '2026-08-07': '-90' } }] })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const debt = store.balanceSeries.find(({ id }) => id === 'debt')
+  assert.deepEqual(debt.currentPoint, { x: '2026-08-07', value: 100, isEstimated: true })
+  assert.deepEqual(debt.warnings, [{ type: 'current-balance-unverified', sampleDate: '2026-08-07', currentDate: '2026-08-10' }])
 })
 
 test('keeps current-rate estimation on current points without marking exact history estimated', async () => {

@@ -221,6 +221,18 @@ test('uses exact primary chart entries when available', () => {
   })
 })
 
+test('retains estimation metadata on normalized account-chart points', () => {
+  const result = normalizeBalanceSeries({
+    metric: 'debt',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1, EUR: 0.9 },
+    chartLines: [{ currency_code: 'EUR', entries: { '2026-08-07': '-90' } }],
+  })
+
+  assert.deepEqual(result.points, [{ x: '2026-08-07', value: 100, isEstimated: true }])
+})
+
 test('normalizes Firefly Atom chart keys without shifting the source day', () => {
   const result = normalizeBalanceSeries({
     metric: 'netWorth',

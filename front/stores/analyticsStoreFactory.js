@@ -315,11 +315,12 @@ export function createAnalyticsStore(id, useDependencies) {
           const tolerance = 0.5 * 10 ** -snapshot.decimalPlaces
           const hasCompleteCurrentTotal = currentAmounts.every(({ converted }) => converted.value !== null)
           const isCurrentEstimated = currentAmounts.some(({ converted }) => converted.isEstimated)
+          const hasCurrentMonthChartPoint = Number.isFinite(finalPoint?.value) && finalPoint.x.slice(0, 7) === snapshot.end.slice(0, 7)
           const hasSampleDateTruth = snapshot.groups[metric].every(({ currentDate }) => currentDate === finalPoint?.x || (!currentDate && finalPoint?.x === snapshot.end))
           const hasMismatch =
             finalPoint && hasCompleteCurrentTotal && hasSampleDateTruth && (Math.sign(finalPoint.value) !== Math.sign(currentTotal) || Math.abs(finalPoint.value - currentTotal) > tolerance)
           const warnings =
-            hasCompleteCurrentTotal && finalPoint && !hasSampleDateTruth
+            (hasCompleteCurrentTotal && finalPoint && !hasSampleDateTruth) || (!hasCompleteCurrentTotal && hasCurrentMonthChartPoint && finalPoint.x < snapshot.end)
               ? [{ type: 'current-balance-unverified', sampleDate: finalPoint.x, currentDate: snapshot.end }]
               : hasMismatch
                 ? [{ type: 'current-balance-mismatch', sampleDate: finalPoint.x, chartValue: finalPoint.value, currentValue: currentTotal }]
@@ -328,7 +329,11 @@ export function createAnalyticsStore(id, useDependencies) {
           return {
             id: metric,
             ...result,
-            currentPoint: hasCompleteCurrentTotal ? { x: snapshot.end, value: currentTotal, ...(isCurrentEstimated ? { isEstimated: true } : {}) } : null,
+            currentPoint: hasCompleteCurrentTotal
+              ? { x: snapshot.end, value: currentTotal, ...(isCurrentEstimated ? { isEstimated: true } : {}) }
+              : hasCurrentMonthChartPoint
+                ? { x: finalPoint.x, value: finalPoint.value, ...(finalPoint.isEstimated ? { isEstimated: true } : {}) }
+                : null,
             missingCurrencies: [...new Set([...result.missingCurrencies, ...currentAmounts.map(({ converted }) => converted.missingCurrency).filter(Boolean)])],
             warnings,
           }
