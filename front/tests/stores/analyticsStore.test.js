@@ -1,17 +1,9 @@
 import assert from 'node:assert/strict'
-import { registerHooks } from 'node:module'
-import test, { afterEach, beforeEach, mock } from 'node:test'
+import test, { afterEach, beforeEach } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, reactive, ref } from 'vue'
 import { format, subDays, subMonths } from 'date-fns'
-
-const frontUrl = new URL('../../', import.meta.url)
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('~/')) return nextResolve(new URL(specifier.slice(2), frontUrl).href, context)
-    return nextResolve(specifier, context)
-  },
-})
+import { createAnalyticsStore } from '../../stores/analyticsStoreFactory.js'
 
 const currency = (id, code, decimalPlaces = 2) => ({ id, attributes: { code, decimal_places: decimalPlaces, default: code === 'USD' } })
 const usd = currency('usd', 'USD')
@@ -24,12 +16,13 @@ const dashboardStore = reactive({
 })
 const accountStore = reactive({ accountList: [] })
 const currencyStore = reactive({ defaultCurrency: usd, exchangeRates: { rates: { USD: 1, EUR: 0.9 } } })
-const categoryStore = reactive({ categoryDictionary: {} })
 const appStore = { syncEverythingIfOld: async () => {} }
 const accountRequests = []
+const transactionRequests = []
 const storageOverrides = new Map()
 let accountResponse = async () => ({ status: 200, data: [] })
 let transactionResult = []
+let transactionResponse = async () => ({ ok: true, data: transactionResult })
 let analyticsStore = null
 
 class AccountRepository {
@@ -48,8 +41,9 @@ class TransactionRepository {
     return { data: [], meta: { pagination: { total_pages: 1 } } }
   }
 
-  async getAllWithMergeResult() {
-    return { ok: true, data: transactionResult }
+  async getAllWithMergeResult(options) {
+    transactionRequests.push(options)
+    return transactionResponse(options)
   }
 }
 
@@ -73,32 +67,22 @@ class Currency {
   }
 }
 
-const modules = [
-  ['../../stores/appStore.js', { useAppStore: () => appStore }],
-  ['../../stores/dashboardStore.js', { useDashboardStore: () => dashboardStore }],
-  ['../../stores/accountStore.js', { useAccountStore: () => accountStore }],
-  ['../../stores/currencyStore.js', { useCurrencyStore: () => currencyStore }],
-  ['../../stores/categoryStore.js', { useCategoryStore: () => categoryStore }],
-]
-for (const [path, exports] of modules) mock.module(new URL(path, import.meta.url), { exports, cache: true })
-mock.module(new URL('../../repository/AccountRepository.js', import.meta.url), { exports: { default: AccountRepository }, cache: true })
-mock.module(new URL('../../repository/TransactionRepository.js', import.meta.url), { exports: { default: TransactionRepository }, cache: true })
-mock.module(new URL('../../transformers/TransactionTransformer.js', import.meta.url), {
-  exports: {
-    default: class TransactionTransformer {
-      static transformFromApiList(list) {
-        return list
-      }
-    },
-  },
-  cache: true,
-})
-mock.module(new URL('../../models/Account.js', import.meta.url), { exports: { default: Account }, cache: true })
-mock.module(new URL('../../models/Currency.js', import.meta.url), { exports: { default: Currency }, cache: true })
-mock.module(new URL('../../utils/DashboardUtils.js', import.meta.url), { exports: { getExcludedTransactionFilters: () => [] }, cache: true })
-mock.module('@vueuse/core', { exports: { useLocalStorage: (key, initialValue) => ref(structuredClone(storageOverrides.get(key) ?? initialValue)) }, cache: true })
-
-const { useAnalyticsStore } = await import('../../stores/analyticsStore.js')
+const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
+  appStore,
+  dashboardStore,
+  accountStore,
+  currencyStore,
+  useStoredValue: (key, initialValue) => ref(structuredClone(storageOverrides.get(key) ?? initialValue)),
+  createAccountRepository: () => new AccountRepository(),
+  createTransactionRepository: () => new TransactionRepository(),
+  transformTransactions: (transactions) => transactions,
+  getAccountBalance: (account) => Account.getBalance(account),
+  getAccountCurrencyCode: (account) => Account.getCurrencyCode(account),
+  getCurrencyCode: (value) => Currency.getCode(value),
+  getCurrencyDecimalPlaces: (value) => Currency.getDecimalPlaces(value),
+  getExcludedTransactionFilters: () => [],
+  isResponseSuccess: (response) => [200, 204].includes(response?.status),
+}))
 
 const activeAsset = () => ({
   id: 'checking',
@@ -118,6 +102,21 @@ const debitLiability = () => ({
   },
 })
 const chartResponse = (value, date = format(new Date(), 'yyyy-MM-dd')) => ({ status: 200, data: [{ currency_code: 'USD', entries: { [date]: String(value) } }] })
+const currentExpenseTransaction = (amount, categoryId = 'food') => ({
+  id: 'current-' + amount,
+  attributes: {
+    transactions: [
+      {
+        amount: String(amount),
+        currency_code: 'USD',
+        date: new Date(),
+        category_id: categoryId,
+        accountSource: { attributes: { type: { fireflyCode: 'asset' } } },
+        accountDestination: { attributes: { type: { fireflyCode: 'expense' } } },
+      },
+    ],
+  },
+})
 const deferred = () => {
   let resolve
   const promise = new Promise((resolvePromise) => {
@@ -139,11 +138,12 @@ beforeEach(() => {
   accountStore.accountList = [activeAsset()]
   currencyStore.defaultCurrency = usd
   currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.9 } }
-  categoryStore.categoryDictionary = {}
   accountRequests.length = 0
+  transactionRequests.length = 0
   storageOverrides.clear()
   accountResponse = async () => chartResponse(100)
   transactionResult = []
+  transactionResponse = async () => ({ ok: true, data: transactionResult })
 })
 
 afterEach(() => analyticsStore?.$dispose())
@@ -228,7 +228,6 @@ test('exposes ranked category items with completed-window net totals', async () 
     { id: 'rent', attributes: { transactions: [split(100, olderCompletedMonth, 'rent')] } },
     { id: 'current-food', attributes: { transactions: [split(500, new Date(), 'food')] } },
   ]
-  categoryStore.categoryDictionary = { food: { id: 'food' }, rent: { id: 'rent' } }
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
@@ -247,4 +246,103 @@ test('treats a corrupted persisted category selection as empty', async () => {
   assert.deepEqual(store.categorySummary.series, [])
   await store.init()
   assert.deepEqual(store.selectedCategoryIds, [])
+})
+
+test('keeps the newer forced transaction result when an older request finishes last', async () => {
+  const olderRequest = deferred()
+  const newerRequest = deferred()
+  const responses = [olderRequest, newerRequest]
+  transactionResponse = () => responses.shift().promise
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const initialLoad = store.init()
+  await waitFor(() => transactionRequests.length === 1)
+  const forcedLoad = store.retryCategory()
+  await waitFor(() => transactionRequests.length === 2)
+
+  newerRequest.resolve({ ok: true, data: [currentExpenseTransaction(25)] })
+  await forcedLoad
+  assert.equal(store.categorySummary.series[0].currentActual, 25)
+
+  olderRequest.resolve({ ok: true, data: [currentExpenseTransaction(10)] })
+  await initialLoad
+  assert.equal(store.categoryState.status, 'ready')
+  assert.equal(store.categorySummary.series[0].currentActual, 25)
+})
+
+test('keeps a newer transaction failure current when an older request later succeeds', async () => {
+  const olderRequest = deferred()
+  const newerRequest = deferred()
+  const responses = [olderRequest, newerRequest]
+  transactionResponse = () => responses.shift().promise
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const initialLoad = store.init()
+  await waitFor(() => transactionRequests.length === 1)
+  const forcedLoad = store.retryFlow()
+  await waitFor(() => transactionRequests.length === 2)
+
+  newerRequest.resolve({ ok: false, data: [] })
+  await forcedLoad
+  assert.equal(store.categoryState.status, 'error')
+
+  olderRequest.resolve({ ok: true, data: [currentExpenseTransaction(10)] })
+  await initialLoad
+  assert.equal(store.categoryState.status, 'error')
+  assert.equal(store.categorySummary.series[0].currentActual, 0)
+})
+
+test('shares one in-flight transaction request between non-forced initial loads', async () => {
+  const request = deferred()
+  transactionResponse = () => request.promise
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const firstLoad = store.init()
+  const secondLoad = store.init()
+  await waitFor(() => transactionRequests.length > 0)
+  assert.equal(transactionRequests.length, 1)
+
+  request.resolve({ ok: true, data: [] })
+  await Promise.all([firstLoad, secondLoad])
+})
+
+test('selects a current-only category and retains its actual with insufficient history', async () => {
+  transactionResult = [currentExpenseTransaction(42, 'new-category')]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.categoryRanking, [])
+  assert.deepEqual(store.categoryRankingItems, [{ id: 'new-category', amount: 0 }])
+  assert.deepEqual(store.selectedCategoryIds, ['new-category'])
+  assert.equal(store.categorySummary.usedMonths, 0)
+  assert.equal(store.categorySummary.series[0].currentActual, 42)
+  assert.equal(store.categorySummary.series[0].forecastAvailable, false)
+})
+
+test('keeps an unavailable persisted category visible as a zero-amount candidate', async () => {
+  storageOverrides.set('analyticsSelectedCategoryIds', ['archived-category'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.selectedCategoryIds, ['archived-category'])
+  assert.deepEqual(store.categoryRankingItems, [{ id: 'archived-category', amount: 0 }])
+  assert.equal(store.categorySummary.series[0].id, 'archived-category')
+})
+
+test('keeps over-limit persisted selection intact until the UI reports and normalizes it', async () => {
+  const persistedIds = ['one', 'two', 'three', 'four', 'five', 'six', 'seven']
+  storageOverrides.set('analyticsSelectedCategoryIds', persistedIds)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.selectedCategoryIds, persistedIds)
+  assert.deepEqual(
+    store.categorySummary.series.map(({ id }) => id),
+    persistedIds.slice(0, 6),
+  )
 })

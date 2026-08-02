@@ -54,13 +54,19 @@ const filteredItems = computed(() => {
   return query ? normalizedItems.value.filter(({ id }) => categoryLabel(id).toLocaleLowerCase().includes(query)) : normalizedItems.value
 })
 
-const normalizeSelection = (value) => [...new Set((Array.isArray(value) ? value : []).filter((id) => id !== null && id !== undefined))].slice(0, selectionLimit.value)
+const uniqueSelection = (value) => [...new Set((Array.isArray(value) ? value : []).filter((id) => id !== null && id !== undefined))]
+const normalizeSelection = (value) => uniqueSelection(value).slice(0, selectionLimit.value)
+let selectionRecoveryReported = false
 
 watch(
   [() => selectedIds.value, selectionLimit],
   ([value]) => {
     const normalized = normalizeSelection(value)
     const current = Array.isArray(value) ? value : []
+    if (!selectionRecoveryReported && (!Array.isArray(value) || uniqueSelection(value).length > selectionLimit.value)) {
+      selectionRecoveryReported = true
+      UIUtils.showToastError(t('analytics.category.selection_limit', { count: selectionLimit.value }))
+    }
     if (!Array.isArray(value) || normalized.length !== current.length || normalized.some((id, index) => id !== current[index])) selectedIds.value = normalized
   },
   { immediate: true },

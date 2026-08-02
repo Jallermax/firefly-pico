@@ -109,8 +109,6 @@ const CATEGORY_COLORS = [
   'var(--analytics-category-5)',
   'var(--analytics-category-6)',
 ]
-const CATEGORY_MARKERS = ['circle', 'square', 'diamond', 'hollow', 'circle', 'square']
-
 const analyticsStore = useAnalyticsStore()
 const categoryStore = useCategoryStore()
 const profileStore = useProfileStore()
@@ -139,7 +137,6 @@ const chartSeries = computed(() =>
     id: category.id,
     label: categoryLabel(category.id),
     color: CATEGORY_COLORS[index],
-    marker: CATEGORY_MARKERS[index],
     points: [
       ...category.actualPoints.map((point) => toChartPoint(point, 'actual')),
       toChartPoint({ x: currentMonthKey.value, value: category.currentActual, transactionIds: category.currentTransactionIds }, 'actual'),

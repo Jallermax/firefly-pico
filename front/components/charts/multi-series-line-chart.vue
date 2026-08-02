@@ -31,21 +31,34 @@
           :stroke="item.color"
           :stroke-dasharray="segment.dashed ? '8 6' : null"
         />
-        <circle v-for="point in singlePoints(item)" :key="item.id + point.key" class="analytics-chart-single-point" :cx="point.x" :cy="point.y" r="4" :fill="item.color" />
+        <path
+          v-for="point in persistentPoints(item)"
+          :key="item.id + point.key"
+          class="analytics-chart-marker"
+          :class="{
+            'analytics-chart-marker-cross': item.marker === 'cross',
+            'analytics-chart-marker-hollow': item.marker === 'hollow',
+            'analytics-chart-marker-forecast': point.kind === 'forecast',
+          }"
+          :d="markerPath(item.marker, point.x, point.y, 7)"
+          :fill="markerFill(item, point)"
+          :stroke="item.color"
+          :stroke-dasharray="markerDash(point)"
+        />
       </template>
 
       <g v-if="selectedIndex >= 0">
         <line class="analytics-chart-crosshair" :x1="selectedX" :x2="selectedX" y1="16" y2="282" />
-        <template v-for="item in selectedValues" :key="item.seriesId">
-          <circle v-if="item.marker === 'circle'" :cx="item.x" :cy="item.y" r="7" :fill="item.color" />
-          <rect v-else-if="item.marker === 'square'" :x="item.x - 7" :y="item.y - 7" width="14" height="14" rx="2" :fill="item.color" />
-          <path
-            v-else-if="item.marker === 'diamond'"
-            :d="'M ' + item.x + ' ' + (item.y - 8) + ' L ' + (item.x + 8) + ' ' + item.y + ' L ' + item.x + ' ' + (item.y + 8) + ' L ' + (item.x - 8) + ' ' + item.y + ' Z'"
-            :fill="item.color"
-          />
-          <circle v-else :cx="item.x" :cy="item.y" r="7" fill="var(--van-background-2)" :stroke="item.color" stroke-width="3" />
-        </template>
+        <path
+          v-for="item in selectedValues"
+          :key="item.seriesId"
+          class="analytics-chart-marker analytics-chart-marker-selected"
+          :class="{ 'analytics-chart-marker-cross': item.marker === 'cross', 'analytics-chart-marker-hollow': item.marker === 'hollow' }"
+          :d="markerPath(item.marker, item.x, item.y, 10)"
+          :fill="markerFill(item, item.point)"
+          :stroke="item.color"
+          :stroke-dasharray="markerDash(item.point)"
+        />
       </g>
     </svg>
 
@@ -174,9 +187,24 @@ const liveDescription = computed(() => {
   return [selectedXLabel.value, ...values].filter(Boolean).join('. ')
 })
 
-const singlePoints = (item) => {
+const persistentPoints = (item) => {
   const points = item.points.filter((point) => point.y !== null)
-  return points.length === 1 ? points : []
+  if (points.length <= 12) return points
+  const step = Math.ceil(points.length / 12)
+  let lastActualIndex = -1
+  points.forEach((point, index) => {
+    if (point.kind !== 'forecast') lastActualIndex = index
+  })
+  return points.filter((point, index) => index % step === 0 || index === points.length - 1 || index === lastActualIndex || point.kind === 'forecast')
+}
+const markerFill = (item, point) => (point.kind === 'forecast' || item.marker === 'hollow' ? 'var(--van-background-2)' : item.color)
+const markerDash = (point) => (point.kind === 'forecast' ? '3 2' : null)
+const markerPath = (marker, x, y, size) => {
+  if (marker === 'square') return `M ${x - size} ${y - size} H ${x + size} V ${y + size} H ${x - size} Z`
+  if (marker === 'diamond') return `M ${x} ${y - size} L ${x + size} ${y} L ${x} ${y + size} L ${x - size} ${y} Z`
+  if (marker === 'triangle') return `M ${x} ${y - size} L ${x + size} ${y + size} L ${x - size} ${y + size} Z`
+  if (marker === 'cross') return `M ${x - size} ${y} L ${x + size} ${y} M ${x} ${y - size} L ${x} ${y + size}`
+  return `M ${x - size} ${y} A ${size} ${size} 0 1 0 ${x + size} ${y} A ${size} ${size} 0 1 0 ${x - size} ${y}`
 }
 
 const selectionPayload = () => ({

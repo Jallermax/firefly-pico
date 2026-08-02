@@ -67,3 +67,28 @@ test('line geometry preserves gaps instead of joining across missing values', ()
   assert.equal(geometry.series[0].points[1].y, null)
   assert.deepEqual(geometry.series[0].segments, [{ path: 'M 63.33333333333333 20 L 90 10', dashed: true }])
 })
+
+test('line geometry assigns six persistent non-color marker treatments to every finite point', () => {
+  const geometry = buildLineChartGeometry({
+    width: 100,
+    height: 60,
+    padding: { top: 10, right: 10, bottom: 10, left: 10 },
+    series: ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({
+      id,
+      points: [
+        { x: '2026-01', value: 1, kind: 'actual' },
+        { x: '2026-02', value: 2, kind: id === 'a' ? 'forecast' : 'actual' },
+      ],
+    })),
+  })
+
+  assert.deepEqual(
+    geometry.series.map(({ marker }) => marker),
+    ['circle', 'square', 'diamond', 'triangle', 'cross', 'hollow'],
+  )
+  assert.equal(
+    geometry.series.every((series) => series.points.every((point) => point.marker === series.marker)),
+    true,
+  )
+  assert.equal(geometry.series[0].segments[0].dashed, true)
+})

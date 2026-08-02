@@ -1,4 +1,5 @@
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
+const SERIES_MARKERS = ['circle', 'square', 'diamond', 'triangle', 'cross', 'hollow']
 
 export function nearestPointIndex({ clientX, left, width, pointCount }) {
   if (pointCount <= 0 || width <= 0) return -1
@@ -26,8 +27,9 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
   const innerHeight = height - padding.top - padding.bottom
   const xAt = (x) => padding.left + (xValues.indexOf(x) / Math.max(1, xValues.length - 1)) * innerWidth
   const yAt = (value) => padding.top + ((yMax - value) / (yMax - yMin)) * innerHeight
-  const outputSeries = series.map((item) => {
-    const points = item.points.map((point) => ({ ...point, x: xAt(point.x), y: Number.isFinite(point.value) ? yAt(point.value) : null, key: point.x }))
+  const outputSeries = series.map((item, seriesIndex) => {
+    const marker = item.marker ?? SERIES_MARKERS[seriesIndex % SERIES_MARKERS.length]
+    const points = item.points.map((point) => ({ ...point, x: xAt(point.x), y: Number.isFinite(point.value) ? yAt(point.value) : null, key: point.x, marker }))
     const segments = points.slice(1).flatMap((point, index) => {
       const previous = points[index]
       if (previous.y === null || point.y === null || xValues.indexOf(point.key) - xValues.indexOf(previous.key) !== 1) return []
@@ -35,6 +37,7 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
     })
     return {
       ...item,
+      marker,
       points,
       segments,
     }

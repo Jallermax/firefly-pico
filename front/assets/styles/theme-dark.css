@@ -514,10 +514,6 @@
     box-shadow: rgba(0, 0, 0, 0.55) 0 3px 8px;
 }
 
-.van-theme-dark .analytics-chart-single-point {
-    stroke: var(--van-background-2);
-}
-
 .van-theme-dark .analytics-page-switch {
     background: #27272a;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);

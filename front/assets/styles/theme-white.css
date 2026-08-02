@@ -2288,9 +2288,19 @@ body {
     stroke-linecap: round;
 }
 
-.analytics-chart-single-point {
-    stroke: var(--van-background-2);
+.analytics-chart-marker {
     stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+}
+
+.analytics-chart-marker-forecast,
+.analytics-chart-marker-selected {
+    stroke-width: 3;
+}
+
+.analytics-chart-marker-cross {
+    fill: none;
+    stroke-linecap: round;
 }
 
 .analytics-chart-crosshair {
