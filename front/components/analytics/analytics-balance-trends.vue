@@ -28,19 +28,19 @@
       <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
     </div>
     <template v-else>
-      <div v-if="hasSelectedAccountMetrics && analyticsStore.balanceState.status === 'loading'" class="analytics-card-state analytics-card-state-compact">
+      <div v-if="sourceState.balanceStatusVisible && analyticsStore.balanceState.status === 'loading'" class="analytics-card-state analytics-card-state-compact">
         <van-loading size="16" />
         <span>{{ $t('analytics.common.loading') }}</span>
       </div>
-      <div v-else-if="hasSelectedAccountMetrics && analyticsStore.balanceState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
+      <div v-else-if="sourceState.balanceStatusVisible" class="analytics-card-state analytics-card-state-compact">
         <span>{{ $t('analytics.balance.error') }}</span>
         <van-button size="small" @click="analyticsStore.retryBalance">{{ $t('analytics.common.retry') }}</van-button>
       </div>
-      <div v-if="expensesSelected && analyticsStore.categoryState.status === 'loading'" class="analytics-card-state analytics-card-state-compact">
+      <div v-if="sourceState.expenseStatusVisible && analyticsStore.categoryState.status === 'loading'" class="analytics-card-state analytics-card-state-compact">
         <van-loading size="16" />
         <span>{{ $t('analytics.common.loading') }}</span>
       </div>
-      <div v-else-if="expensesSelected && analyticsStore.categoryState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
+      <div v-else-if="sourceState.expenseStatusVisible" class="analytics-card-state analytics-card-state-compact">
         <span>{{ $t('analytics.category.error') }}</span>
         <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
       </div>
@@ -83,6 +83,7 @@
 import { format, parseISO } from 'date-fns'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
+import { decorateLineChartPoint, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 
 const analyticsStore = useAnalyticsStore()
@@ -102,29 +103,35 @@ const hasSelectedAccountMetrics = computed(() => selectedAccountMetrics.value.le
 const expensesSelected = computed(() => selectedMetricIds.value.includes('expenses'))
 const hasBalanceResult = computed(() => ['ready', 'empty'].includes(analyticsStore.balanceState.status) || analyticsStore.balanceState.isStale)
 const hasExpenseResult = computed(() => ['ready', 'empty'].includes(analyticsStore.categoryState.status) || analyticsStore.categoryState.isStale)
-const isBalanceBlocking = computed(() => hasSelectedAccountMetrics.value && !expensesSelected.value && !hasBalanceResult.value && ['loading', 'error'].includes(analyticsStore.balanceState.status))
-const isExpenseBlocking = computed(() => expensesSelected.value && !hasSelectedAccountMetrics.value && !hasExpenseResult.value && ['loading', 'error'].includes(analyticsStore.categoryState.status))
-const selectedSourcesSettled = computed(
-  () =>
-    (!hasSelectedAccountMetrics.value || ['ready', 'empty'].includes(analyticsStore.balanceState.status)) &&
-    (!expensesSelected.value || ['ready', 'empty'].includes(analyticsStore.categoryState.status)),
+const sourceState = computed(() =>
+  resolveFinancialTrendSourceState({
+    hasAccountSelection: hasSelectedAccountMetrics.value,
+    expensesSelected: expensesSelected.value,
+    balanceState: analyticsStore.balanceState,
+    expenseState: analyticsStore.categoryState,
+  }),
 )
+const isBalanceBlocking = computed(() => sourceState.value.balanceBlocking)
+const isExpenseBlocking = computed(() => sourceState.value.expenseBlocking)
+const selectedSourcesSettled = computed(() => sourceState.value.selectedSourcesSettled)
 
 const formatCurrency = (value) => (Number.isFinite(value) ? `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
 const formatMonthKey = (value) => new Intl.DateTimeFormat(profileStore.language, { month: 'short', year: 'numeric' }).format(parseISO(value.slice(0, 7) + '-01'))
 const currentMonthKey = computed(() => format(new Date(), 'yyyy-MM'))
 const currentMonthLabel = computed(() => formatMonthKey(currentMonthKey.value))
 const expenseForecastKey = computed(() => (expensesSelected.value && hasExpenseResult.value && analyticsStore.financialTrend.expenses.forecastAvailable ? currentMonthKey.value + ':forecast' : null))
-const toChartPoint = (point) => ({
-  ...point,
-  xLabel: point.xLabel ?? formatMonthKey(point.x),
-  valueLabel: formatCurrency(point.value),
-})
+const toChartPoint = (point, isEstimated) =>
+  decorateLineChartPoint(point, {
+    xLabel: point.xLabel ?? formatMonthKey(point.x),
+    valueLabel: formatCurrency(point.value),
+    isEstimated,
+  })
 
 const selectedAccountTrendSeries = computed(() =>
   selectedAccountMetrics.value.map((metric) => {
     const series = analyticsStore.financialTrend.series.find((item) => item.id === metric.id) ?? { points: [] }
-    const points = series.points.filter((point) => Number.isFinite(point.value)).map(toChartPoint)
+    const sourceSeries = analyticsStore.balanceSeries.find((item) => item.id === metric.id)
+    const points = series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, sourceSeries?.isEstimated))
     const currentPartial = points.findLast((point) => point.kind === 'partial')
     if (expenseForecastKey.value && currentPartial) points.push({ ...currentPartial, x: expenseForecastKey.value, xLabel: currentMonthLabel.value, inspectionOnly: true })
     return { ...metric, points }
@@ -137,9 +144,11 @@ const expenseChartSeries = computed(() => {
   return {
     ...metrics.value.find((metric) => metric.id === 'expenses'),
     points: [
-      ...expenses.actualPoints.map(toChartPoint),
-      toChartPoint({ x: currentMonthKey.value, value: expenses.currentActual, kind: 'partial' }),
-      ...(expenses.forecastAvailable ? [toChartPoint({ x: expenseForecastKey.value, xLabel: currentMonthLabel.value, value: expenses.currentForecast, kind: 'forecast' })] : []),
+      ...expenses.actualPoints.map((point) => toChartPoint(point, analyticsStore.categorySummary.isEstimated)),
+      toChartPoint({ x: currentMonthKey.value, value: expenses.currentActual, kind: 'partial' }, analyticsStore.categorySummary.isEstimated),
+      ...(expenses.forecastAvailable
+        ? [toChartPoint({ x: expenseForecastKey.value, xLabel: currentMonthLabel.value, value: expenses.currentForecast, kind: 'forecast' }, analyticsStore.categorySummary.isEstimated)]
+        : []),
     ],
   }
 })

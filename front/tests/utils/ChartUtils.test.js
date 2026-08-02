@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex } from '../../utils/ChartUtils.js'
+import * as ChartUtils from '../../utils/ChartUtils.js'
 
 test('line geometry shares one x scale and keeps zero in range when needed', () => {
   const geometry = buildLineChartGeometry({
@@ -86,6 +87,136 @@ test('inspection-only points align tooltip values without drawing a line', () =>
 
   assert.deepEqual(geometry.xValues, ['2026-08', '2026-08:forecast'])
   assert.deepEqual(geometry.series[0].segments, [])
+})
+
+test('financial forecast crosshair keeps four estimated values while inspection points stay non-persistent', () => {
+  assert.equal(typeof ChartUtils.decorateLineChartPoint, 'function')
+  assert.equal(typeof ChartUtils.lineChartPointsAtX, 'function')
+  assert.equal(typeof ChartUtils.persistentLineChartPoints, 'function')
+  const forecastKey = '2026-08:forecast'
+  const accountSeries = ['netWorth', 'savings', 'debt'].map((id, index) => ({
+    id,
+    points: [
+      ChartUtils.decorateLineChartPoint({ x: '2026-08', value: 10 + index, kind: 'partial' }, { xLabel: 'Aug 2026', valueLabel: `${10 + index} USD`, isEstimated: true }),
+      ChartUtils.decorateLineChartPoint({ x: forecastKey, value: 10 + index, kind: 'partial', inspectionOnly: true }, { xLabel: 'Aug 2026', valueLabel: `${10 + index} USD`, isEstimated: true }),
+    ],
+  }))
+  const series = [
+    ...accountSeries,
+    {
+      id: 'expenses',
+      points: [
+        ChartUtils.decorateLineChartPoint({ x: '2026-08', value: 20, kind: 'partial' }, { xLabel: 'Aug 2026', valueLabel: '20 USD', isEstimated: true }),
+        ChartUtils.decorateLineChartPoint({ x: forecastKey, value: 30, kind: 'forecast' }, { xLabel: 'Aug 2026', valueLabel: '30 USD', isEstimated: true }),
+      ],
+    },
+  ]
+  const geometry = buildLineChartGeometry({ width: 100, height: 60, padding: { top: 10, right: 10, bottom: 10, left: 10 }, series })
+  const selected = ChartUtils.lineChartPointsAtX(geometry.series, forecastKey)
+
+  assert.equal(selected.length, 4)
+  assert.deepEqual(
+    selected.map(({ series: item, point }) => [item.id, point.value, point.kind, point.isEstimated]),
+    [
+      ['netWorth', 10, 'partial', true],
+      ['savings', 11, 'partial', true],
+      ['debt', 12, 'partial', true],
+      ['expenses', 30, 'forecast', true],
+    ],
+  )
+  assert.equal(
+    accountSeries.every(
+      (item) =>
+        ChartUtils.persistentLineChartPoints(buildLineChartGeometry({ width: 100, height: 60, padding: { top: 10, right: 10, bottom: 10, left: 10 }, series: [item] }).series[0].points).length === 1,
+    ),
+    true,
+  )
+})
+
+test('tooltip and live-region qualifiers share partial forecast and estimated labels', () => {
+  assert.equal(typeof ChartUtils.lineChartPointQualifierKeys, 'function')
+  assert.equal(typeof ChartUtils.buildLineChartLiveDescription, 'function')
+  const partial = { kind: 'partial', isEstimated: true, valueLabel: '10 USD' }
+  const forecast = { kind: 'forecast', isEstimated: true, valueLabel: '20 USD' }
+  const qualifierLabels = { forecast: 'Forecast', partial: 'Partial', estimated_current_rates: 'Estimated at current rates' }
+
+  assert.deepEqual(ChartUtils.lineChartPointQualifierKeys(partial), ['partial', 'estimated_current_rates'])
+  assert.deepEqual(ChartUtils.lineChartPointQualifierKeys(forecast), ['forecast', 'estimated_current_rates'])
+  assert.equal(
+    ChartUtils.buildLineChartLiveDescription({
+      xLabel: 'Aug 2026',
+      values: [
+        { label: 'Net worth', point: partial },
+        { label: 'Expenses', point: forecast },
+      ],
+      qualifierLabels,
+    }),
+    'Aug 2026. Net worth, 10 USD, Partial, Estimated at current rates. Expenses, 20 USD, Forecast, Estimated at current rates',
+  )
+})
+
+test('metric facet filters labels and refuses to remove the final selection', () => {
+  assert.equal(typeof ChartUtils.filterChartFacetItems, 'function')
+  assert.equal(typeof ChartUtils.toggleRequiredChartFacetSelection, 'function')
+  const items = [
+    { id: 'netWorth', label: 'Net-worth change' },
+    { id: 'expenses', label: 'Total expenses' },
+  ]
+
+  assert.deepEqual(ChartUtils.filterChartFacetItems(items, 'ExPeNs'), [items[1]])
+  assert.deepEqual(ChartUtils.toggleRequiredChartFacetSelection(['netWorth'], 'netWorth'), ['netWorth'])
+  assert.deepEqual(ChartUtils.toggleRequiredChartFacetSelection(['netWorth'], 'expenses'), ['netWorth', 'expenses'])
+  assert.deepEqual(ChartUtils.toggleRequiredChartFacetSelection(['netWorth', 'expenses'], 'netWorth'), ['expenses'])
+})
+
+test('financial trend source states keep account and transaction failures independent', () => {
+  assert.equal(typeof ChartUtils.resolveFinancialTrendSourceState, 'function')
+
+  assert.deepEqual(
+    ChartUtils.resolveFinancialTrendSourceState({
+      hasAccountSelection: true,
+      expensesSelected: true,
+      balanceState: { status: 'error', isStale: false },
+      expenseState: { status: 'ready', isStale: false },
+    }),
+    {
+      balanceBlocking: false,
+      expenseBlocking: false,
+      balanceStatusVisible: true,
+      expenseStatusVisible: false,
+      selectedSourcesSettled: false,
+    },
+  )
+  assert.deepEqual(
+    ChartUtils.resolveFinancialTrendSourceState({
+      hasAccountSelection: false,
+      expensesSelected: true,
+      balanceState: { status: 'error', isStale: false },
+      expenseState: { status: 'error', isStale: false },
+    }),
+    {
+      balanceBlocking: false,
+      expenseBlocking: true,
+      balanceStatusVisible: false,
+      expenseStatusVisible: true,
+      selectedSourcesSettled: false,
+    },
+  )
+  assert.deepEqual(
+    ChartUtils.resolveFinancialTrendSourceState({
+      hasAccountSelection: true,
+      expensesSelected: false,
+      balanceState: { status: 'loading', isStale: true },
+      expenseState: { status: 'idle', isStale: false },
+    }),
+    {
+      balanceBlocking: false,
+      expenseBlocking: false,
+      balanceStatusVisible: true,
+      expenseStatusVisible: false,
+      selectedSourcesSettled: false,
+    },
+  )
 })
 
 test('line geometry assigns six persistent non-color marker treatments to every finite point', () => {

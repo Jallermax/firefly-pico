@@ -44,3 +44,56 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
   })
   return { xValues, yMin, yMax, series: outputSeries }
 }
+
+export function decorateLineChartPoint(point, { xLabel, valueLabel, isEstimated = false }) {
+  return { ...point, xLabel, valueLabel, isEstimated: Boolean(isEstimated) }
+}
+
+export function lineChartPointsAtX(series, key) {
+  return series.flatMap((item) => {
+    const point = item.points.find((candidate) => candidate.key === key && candidate.y !== null)
+    return point ? [{ series: item, point }] : []
+  })
+}
+
+export function persistentLineChartPoints(points, maxPointCount = 12) {
+  const visiblePoints = points.filter((point) => point.y !== null && !point.inspectionOnly)
+  if (visiblePoints.length <= maxPointCount) return visiblePoints
+  const step = Math.ceil(visiblePoints.length / maxPointCount)
+  let lastActualIndex = -1
+  visiblePoints.forEach((point, index) => {
+    if (point.kind !== 'forecast') lastActualIndex = index
+  })
+  return visiblePoints.filter((point, index) => index % step === 0 || index === visiblePoints.length - 1 || index === lastActualIndex || point.kind === 'forecast')
+}
+
+export function lineChartPointQualifierKeys(point) {
+  return [point.kind === 'forecast' ? 'forecast' : null, point.kind === 'partial' ? 'partial' : null, point.isEstimated ? 'estimated_current_rates' : null].filter(Boolean)
+}
+
+export function buildLineChartLiveDescription({ xLabel, values, qualifierLabels }) {
+  const descriptions = values.map(({ label, point }) => [label, point.valueLabel, ...lineChartPointQualifierKeys(point).map((key) => qualifierLabels[key])].filter(Boolean).join(', '))
+  return [xLabel, ...descriptions].filter(Boolean).join('. ')
+}
+
+export function filterChartFacetItems(items, query) {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  return normalizedQuery ? items.filter((item) => item.label.toLocaleLowerCase().includes(normalizedQuery)) : items
+}
+
+export function toggleRequiredChartFacetSelection(selectedIds, id) {
+  if (!selectedIds.includes(id)) return [...selectedIds, id]
+  return selectedIds.length === 1 ? selectedIds : selectedIds.filter((item) => item !== id)
+}
+
+export function resolveFinancialTrendSourceState({ hasAccountSelection, expensesSelected, balanceState, expenseState }) {
+  const balanceHasResult = ['ready', 'empty'].includes(balanceState.status) || balanceState.isStale
+  const expenseHasResult = ['ready', 'empty'].includes(expenseState.status) || expenseState.isStale
+  return {
+    balanceBlocking: hasAccountSelection && !expensesSelected && !balanceHasResult && ['loading', 'error'].includes(balanceState.status),
+    expenseBlocking: expensesSelected && !hasAccountSelection && !expenseHasResult && ['loading', 'error'].includes(expenseState.status),
+    balanceStatusVisible: hasAccountSelection && ['loading', 'error'].includes(balanceState.status),
+    expenseStatusVisible: expensesSelected && ['loading', 'error'].includes(expenseState.status),
+    selectedSourcesSettled: (!hasAccountSelection || ['ready', 'empty'].includes(balanceState.status)) && (!expensesSelected || ['ready', 'empty'].includes(expenseState.status)),
+  }
+}

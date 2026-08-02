@@ -32,7 +32,7 @@
           :stroke-dasharray="segment.dashed ? '8 6' : null"
         />
         <path
-          v-for="point in persistentPoints(item)"
+          v-for="point in persistentLineChartPoints(item.points)"
           :key="item.id + point.key"
           class="analytics-chart-marker"
           :class="{
@@ -68,9 +68,7 @@
         <span class="analytics-chart-legend-marker" :class="'analytics-chart-legend-marker-' + item.marker" :style="{ backgroundColor: item.color }" />
         <span class="flex-1">{{ item.label }}</span>
         <span class="analytics-chart-tooltip-amount">{{ item.point.valueLabel }}</span>
-        <span v-if="item.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.forecast') }}</span>
-        <span v-if="item.point.kind === 'partial'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.partial') }}</span>
-        <span v-if="item.point.isEstimated" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.estimated_current_rates') }}</span>
+        <span v-for="qualifier in pointQualifiers(item.point)" :key="qualifier" class="analytics-chart-tooltip-qualifier">{{ qualifier }}</span>
       </button>
     </div>
 
@@ -80,7 +78,7 @@
 
 <script setup>
 import { onClickOutside } from '@vueuse/core'
-import { buildLineChartGeometry, nearestChartPointIndex } from '~/utils/ChartUtils.js'
+import { buildLineChartGeometry, buildLineChartLiveDescription, lineChartPointQualifierKeys, lineChartPointsAtX, nearestChartPointIndex, persistentLineChartPoints } from '~/utils/ChartUtils.js'
 
 const CHART_WIDTH = 1000
 const CHART_HEIGHT = 320
@@ -139,21 +137,15 @@ const selectedXLabel = computed(() => {
 const selectedValues = computed(() => {
   const key = selectedXValue.value
   if (key === undefined) return []
-  return geometry.value.series.flatMap((item) => {
-    const point = item.points.find((candidate) => candidate.key === key && candidate.y !== null)
-    if (!point) return []
-    return [
-      {
-        seriesId: item.id,
-        label: item.label,
-        color: item.color,
-        marker: item.marker,
-        x: point.x,
-        y: point.y,
-        point: { ...point, x: point.key },
-      },
-    ]
-  })
+  return lineChartPointsAtX(geometry.value.series, key).map(({ series: item, point }) => ({
+    seriesId: item.id,
+    label: item.label,
+    color: item.color,
+    marker: item.marker,
+    x: point.x,
+    y: point.y,
+    point: { ...point, x: point.key },
+  }))
 })
 const tooltipOnRight = computed(() => selectedIndex.value < pointCount.value / 2)
 const gridLines = computed(() =>
@@ -179,29 +171,16 @@ const xAxisLabels = computed(() => {
     }
   })
 })
-const liveDescription = computed(() => {
-  if (selectedIndex.value < 0) return ''
-  const values = selectedValues.value.map((item) => {
-    const qualifiers = [
-      item.point.kind === 'forecast' ? t('analytics.common.forecast') : null,
-      item.point.kind === 'partial' ? t('analytics.common.partial') : null,
-      item.point.isEstimated ? t('analytics.common.estimated_current_rates') : null,
-    ].filter(Boolean)
-    return [item.label, item.point.valueLabel, ...qualifiers].filter(Boolean).join(', ')
-  })
-  return [selectedXLabel.value, ...values].filter(Boolean).join('. ')
-})
+const qualifierLabels = computed(() => ({
+  forecast: t('analytics.common.forecast'),
+  partial: t('analytics.common.partial'),
+  estimated_current_rates: t('analytics.common.estimated_current_rates'),
+}))
+const pointQualifiers = (point) => lineChartPointQualifierKeys(point).map((key) => qualifierLabels.value[key])
+const liveDescription = computed(() =>
+  selectedIndex.value < 0 ? '' : buildLineChartLiveDescription({ xLabel: selectedXLabel.value, values: selectedValues.value, qualifierLabels: qualifierLabels.value }),
+)
 
-const persistentPoints = (item) => {
-  const points = item.points.filter((point) => point.y !== null && !point.inspectionOnly)
-  if (points.length <= 12) return points
-  const step = Math.ceil(points.length / 12)
-  let lastActualIndex = -1
-  points.forEach((point, index) => {
-    if (point.kind !== 'forecast') lastActualIndex = index
-  })
-  return points.filter((point, index) => index % step === 0 || index === points.length - 1 || index === lastActualIndex || point.kind === 'forecast')
-}
 const markerFill = (item, point) => (point.kind === 'forecast' || item.marker === 'hollow' ? 'var(--van-background-2)' : item.color)
 const markerDash = (point) => (point.kind === 'forecast' ? '3 2' : null)
 const markerPath = (marker, x, y, size) => {

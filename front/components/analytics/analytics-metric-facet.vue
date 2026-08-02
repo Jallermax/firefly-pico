@@ -31,23 +31,17 @@
 </template>
 
 <script setup>
+import { filterChartFacetItems, toggleRequiredChartFacetSelection } from '~/utils/ChartUtils.js'
+
 const selectedIds = defineModel({ type: Array, default: () => [] })
 const props = defineProps({ items: { type: Array, default: () => [] } })
 
 const popupVisible = ref(false)
 const search = ref('')
 const selected = computed(() => (Array.isArray(selectedIds.value) ? selectedIds.value : []))
-const filteredItems = computed(() => {
-  const query = search.value.trim().toLocaleLowerCase()
-  return query ? props.items.filter((item) => item.label.toLocaleLowerCase().includes(query)) : props.items
-})
+const filteredItems = computed(() => filterChartFacetItems(props.items, search.value))
 
 const toggle = (id) => {
-  if (selected.value.includes(id)) {
-    if (selected.value.length === 1) return
-    selectedIds.value = selected.value.filter((item) => item !== id)
-    return
-  }
-  selectedIds.value = [...selected.value, id]
+  selectedIds.value = toggleRequiredChartFacetSelection(selected.value, id)
 }
 </script>
