@@ -242,6 +242,33 @@ test('repairs persisted financial metrics and keeps at least one valid selection
   assert.deepEqual(store.visibleFinancialMetrics, ['netWorth'])
 })
 
+test('repairs the financial trend view and keeps balance and change selections independent', () => {
+  storageOverrides.set('analyticsFinancialTrendView', 'invalid')
+  storageOverrides.set('analyticsVisibleBalanceTotalMetrics', ['savings', 'unknown', 'savings'])
+  storageOverrides.set('analyticsVisibleBalanceMetrics', ['expenses', 'debt', 'unknown'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  assert.equal(store.financialTrendView, 'balances')
+  assert.deepEqual(store.visibleBalanceMetrics, ['savings'])
+  assert.deepEqual(store.visibleFinancialMetrics, ['expenses', 'debt'])
+
+  store.financialTrendView = 'changes'
+  store.visibleBalanceMetrics = []
+  store.visibleFinancialMetrics = []
+  assert.equal(store.financialTrendView, 'changes')
+  assert.deepEqual(store.visibleBalanceMetrics, ['netWorth'])
+  assert.deepEqual(store.visibleFinancialMetrics, ['netWorth'])
+})
+
+test('requests one baseline month before three completed months', async () => {
+  const today = new Date()
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(accountRequests[0].start, format(new Date(today.getFullYear(), today.getMonth() - 4, 1), 'yyyy-MM-dd'))
+})
+
 test('derives financial trends from three account requests and the transaction ledger', async () => {
   const today = new Date()
   const checking = activeAsset()
@@ -278,7 +305,7 @@ test('derives financial trends from three account requests and the transaction l
     accountRequests.some(({ accountIds }) => accountIds.includes('expenses')),
     false,
   )
-  assert.equal(accountRequests[0].start, format(new Date(today.getFullYear(), today.getMonth() - 3, 1), 'yyyy-MM-dd'))
+  assert.equal(accountRequests[0].start, format(new Date(today.getFullYear(), today.getMonth() - 4, 1), 'yyyy-MM-dd'))
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 300 })
   assert.equal(store.financialTrend.series.find(({ id }) => id === 'netWorth').currentTotal, 300)
   assert.deepEqual(

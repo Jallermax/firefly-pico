@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
+import * as AnalyticsUtils from '../../utils/AnalyticsUtils.js'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
   buildCategoryLedger,
@@ -262,14 +263,14 @@ test('builds completed and partial monthly account movement from month-end total
     ],
   })
 
-  assert.deepEqual(result.monthKeys, ['2026-06', '2026-07', '2026-08'])
-  assert.deepEqual(result.series.find(({ id }) => id === 'netWorth').points, [
+  assert.deepEqual(result.monthKeys, ['2026-05', '2026-06', '2026-07', '2026-08'])
+  assert.deepEqual(result.series.find(({ id }) => id === 'netWorth').changePoints, [
     { x: '2026-06', value: 30, kind: 'actual' },
     { x: '2026-07', value: -10, kind: 'actual' },
     { x: '2026-08', value: 30, kind: 'partial' },
   ])
   assert.deepEqual(
-    result.series.find(({ id }) => id === 'debt').points.map(({ value }) => value),
+    result.series.find(({ id }) => id === 'debt').changePoints.map(({ value }) => value),
     [-20, 15, -5],
   )
 })
@@ -290,7 +291,7 @@ test('omits monthly movement without a preceding baseline', () => {
     ],
   })
 
-  assert.deepEqual(result.series[0].points, [
+  assert.deepEqual(result.series[0].changePoints, [
     { x: '2026-07', value: 20, kind: 'actual' },
     { x: '2026-08', value: 10, kind: 'partial' },
   ])
@@ -315,9 +316,164 @@ test('uses the final weekly sample in a completed month and requires current poi
     ],
   })
 
-  assert.deepEqual(result.series[0].points, [
+  assert.deepEqual(result.series[0].changePoints, [
     { x: '2026-06', value: 30, kind: 'actual' },
     { x: '2026-07', value: 20, kind: 'actual' },
+  ])
+})
+
+test('carries sparse account totals through completed months and forecasts from completed changes', () => {
+  const result = summarizeBalanceMovements({
+    months: 3,
+    today: new Date('2026-08-10T12:00:00Z'),
+    balanceSeries: [
+      {
+        id: 'netWorth',
+        points: [
+          { x: '2026-04-30', value: 100 },
+          { x: '2026-05-31', value: 120 },
+          { x: '2026-07-31', value: 130 },
+          { x: '2026-08-07', value: 135 },
+        ],
+        currentPoint: { x: '2026-08-10', value: 130 },
+      },
+    ],
+  })
+
+  assert.deepEqual(result.monthKeys, ['2026-05', '2026-06', '2026-07', '2026-08'])
+  assert.deepEqual(result.series[0], {
+    id: 'netWorth',
+    totalPoints: [
+      { x: '2026-05', value: 120, kind: 'actual' },
+      { x: '2026-06', value: 120, kind: 'actual' },
+      { x: '2026-07', value: 130, kind: 'actual' },
+      { x: '2026-08', value: 130, kind: 'partial' },
+    ],
+    changePoints: [
+      { x: '2026-05', value: 20, kind: 'actual' },
+      { x: '2026-06', value: 0, kind: 'actual' },
+      { x: '2026-07', value: 10, kind: 'actual' },
+      { x: '2026-08', value: 0, kind: 'partial' },
+    ],
+    currentTotal: 130,
+    currentChange: 0,
+    averageChange: 10,
+    forecastChange: 10,
+    forecastTotal: 140,
+    forecastAvailable: true,
+  })
+})
+
+test('does not carry account totals before the first source point or forecast one completed movement', () => {
+  const result = summarizeBalanceMovements({
+    months: 3,
+    today: new Date('2026-08-10T12:00:00Z'),
+    balanceSeries: [
+      {
+        id: 'savings',
+        points: [{ x: '2026-06-15', value: 50 }],
+        currentPoint: { x: '2026-08-10', value: 50 },
+      },
+      {
+        id: 'debt',
+        points: [{ x: '2026-04-30', value: 80 }],
+        currentPoint: null,
+      },
+      {
+        id: 'newAccount',
+        points: [{ x: '2026-08-07', value: 25 }],
+        currentPoint: { x: '2026-08-10', value: 25 },
+      },
+    ],
+  })
+
+  assert.deepEqual(result.series[0].totalPoints, [
+    { x: '2026-06', value: 50, kind: 'actual' },
+    { x: '2026-07', value: 50, kind: 'actual' },
+    { x: '2026-08', value: 50, kind: 'partial' },
+  ])
+  assert.deepEqual(result.series[0].changePoints, [
+    { x: '2026-07', value: 0, kind: 'actual' },
+    { x: '2026-08', value: 0, kind: 'partial' },
+  ])
+  assert.equal(result.series[0].forecastAvailable, false)
+  assert.equal(result.series[0].forecastChange, null)
+  assert.equal(result.series[0].forecastTotal, null)
+  assert.deepEqual(result.series[1].totalPoints, [
+    { x: '2026-05', value: 80, kind: 'actual' },
+    { x: '2026-06', value: 80, kind: 'actual' },
+    { x: '2026-07', value: 80, kind: 'actual' },
+  ])
+  assert.deepEqual(result.series[1].changePoints, [
+    { x: '2026-05', value: 0, kind: 'actual' },
+    { x: '2026-06', value: 0, kind: 'actual' },
+    { x: '2026-07', value: 0, kind: 'actual' },
+  ])
+  assert.equal(result.series[1].currentChange, null)
+  assert.deepEqual(result.series[2].totalPoints, [])
+  assert.deepEqual(result.series[2].changePoints, [])
+  assert.equal(result.series[2].currentTotal, 25)
+})
+
+test('builds localized balance and change chart series with real account forecast points', () => {
+  assert.equal(typeof AnalyticsUtils.buildFinancialTrendChartSeries, 'function')
+  const metrics = [
+    { id: 'netWorth', label: 'Localized net worth' },
+    { id: 'expenses', label: 'Localized expenses' },
+  ]
+  const accountSeries = [
+    {
+      id: 'netWorth',
+      totalPoints: [
+        { x: '2026-07', value: 130, kind: 'actual' },
+        { x: '2026-08', value: 130, kind: 'partial' },
+      ],
+      changePoints: [
+        { x: '2026-07', value: 10, kind: 'actual' },
+        { x: '2026-08', value: 0, kind: 'partial' },
+      ],
+      forecastTotal: 140,
+      forecastChange: 10,
+      forecastAvailable: true,
+    },
+  ]
+  const expenses = {
+    actualPoints: [{ x: '2026-07', value: 30, kind: 'actual' }],
+    currentActual: 10,
+    currentForecast: 40,
+    forecastAvailable: true,
+  }
+
+  assert.deepEqual(AnalyticsUtils.buildFinancialTrendChartSeries({ view: 'balances', metrics, selectedIds: ['netWorth'], accountSeries, expenses, currentMonthKey: '2026-08' }), [
+    {
+      id: 'netWorth',
+      label: 'Localized net worth',
+      points: [
+        { x: '2026-07', value: 130, kind: 'actual' },
+        { x: '2026-08', value: 130, kind: 'partial' },
+        { x: '2026-08:forecast', value: 140, kind: 'forecast' },
+      ],
+    },
+  ])
+  assert.deepEqual(AnalyticsUtils.buildFinancialTrendChartSeries({ view: 'changes', metrics, selectedIds: ['netWorth', 'expenses'], accountSeries, expenses, currentMonthKey: '2026-08' }), [
+    {
+      id: 'netWorth',
+      label: 'Localized net worth',
+      points: [
+        { x: '2026-07', value: 10, kind: 'actual' },
+        { x: '2026-08', value: 0, kind: 'partial' },
+        { x: '2026-08:forecast', value: 10, kind: 'forecast' },
+      ],
+    },
+    {
+      id: 'expenses',
+      label: 'Localized expenses',
+      points: [
+        { x: '2026-07', value: 30, kind: 'actual' },
+        { x: '2026-08', value: 10, kind: 'partial' },
+        { x: '2026-08:forecast', value: 40, kind: 'forecast' },
+      ],
+    },
   ])
 })
 
@@ -341,6 +497,7 @@ test('summarizes total expense from every category and forecasts only with two c
     [100, 20, 30],
   )
   assert.equal(result.currentActual, 10)
+  assert.equal(result.average, 50)
   assert.equal(result.currentForecast, 40)
   assert.equal(result.forecastAvailable, true)
 })

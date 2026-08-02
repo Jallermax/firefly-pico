@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex } from '../../utils/ChartUtils.js'
 import * as ChartUtils from '../../utils/ChartUtils.js'
+import { buildFinancialTrendChartSeries } from '../../utils/AnalyticsUtils.js'
 
 test('line geometry shares one x scale and keeps zero in range when needed', () => {
   const geometry = buildLineChartGeometry({
@@ -89,28 +90,29 @@ test('inspection-only points align tooltip values without drawing a line', () =>
   assert.deepEqual(geometry.series[0].segments, [])
 })
 
-test('financial forecast crosshair keeps four estimated values while inspection points stay non-persistent', () => {
+test('financial forecast crosshair keeps exact values and dashed segments for every selected metric', () => {
   assert.equal(typeof ChartUtils.decorateLineChartPoint, 'function')
   assert.equal(typeof ChartUtils.lineChartPointsAtX, 'function')
   assert.equal(typeof ChartUtils.persistentLineChartPoints, 'function')
   const forecastKey = '2026-08:forecast'
   const accountSeries = ['netWorth', 'savings', 'debt'].map((id, index) => ({
     id,
-    points: [
-      ChartUtils.decorateLineChartPoint({ x: '2026-08', value: 10 + index, kind: 'partial' }, { xLabel: 'Aug 2026', valueLabel: `${10 + index} USD`, isEstimated: true }),
-      ChartUtils.decorateLineChartPoint({ x: forecastKey, value: 10 + index, kind: 'partial', inspectionOnly: true }, { xLabel: 'Aug 2026', valueLabel: `${10 + index} USD`, isEstimated: true }),
-    ],
+    changePoints: [{ x: '2026-08', value: 10 + index, kind: 'partial' }],
+    forecastChange: 20 + index,
+    forecastAvailable: true,
   }))
-  const series = [
-    ...accountSeries,
-    {
-      id: 'expenses',
-      points: [
-        ChartUtils.decorateLineChartPoint({ x: '2026-08', value: 20, kind: 'partial' }, { xLabel: 'Aug 2026', valueLabel: '20 USD', isEstimated: true }),
-        ChartUtils.decorateLineChartPoint({ x: forecastKey, value: 30, kind: 'forecast' }, { xLabel: 'Aug 2026', valueLabel: '30 USD', isEstimated: true }),
-      ],
-    },
-  ]
+  const metrics = ['netWorth', 'savings', 'debt', 'expenses'].map((id) => ({ id }))
+  const series = buildFinancialTrendChartSeries({
+    view: 'changes',
+    metrics,
+    selectedIds: metrics.map(({ id }) => id),
+    accountSeries,
+    expenses: { actualPoints: [], currentActual: 20, currentForecast: 30, forecastAvailable: true },
+    currentMonthKey: '2026-08',
+  }).map((item) => ({
+    ...item,
+    points: item.points.map((point) => ChartUtils.decorateLineChartPoint(point, { xLabel: 'Aug 2026', valueLabel: `${point.value} USD`, isEstimated: true })),
+  }))
   const geometry = buildLineChartGeometry({ width: 100, height: 60, padding: { top: 10, right: 10, bottom: 10, left: 10 }, series })
   const selected = ChartUtils.lineChartPointsAtX(geometry.series, forecastKey)
 
@@ -118,17 +120,14 @@ test('financial forecast crosshair keeps four estimated values while inspection 
   assert.deepEqual(
     selected.map(({ series: item, point }) => [item.id, point.value, point.kind, point.isEstimated]),
     [
-      ['netWorth', 10, 'partial', true],
-      ['savings', 11, 'partial', true],
-      ['debt', 12, 'partial', true],
+      ['netWorth', 20, 'forecast', true],
+      ['savings', 21, 'forecast', true],
+      ['debt', 22, 'forecast', true],
       ['expenses', 30, 'forecast', true],
     ],
   )
   assert.equal(
-    accountSeries.every(
-      (item) =>
-        ChartUtils.persistentLineChartPoints(buildLineChartGeometry({ width: 100, height: 60, padding: { top: 10, right: 10, bottom: 10, left: 10 }, series: [item] }).series[0].points).length === 1,
-    ),
+    geometry.series.every((item) => item.segments.some(({ dashed }) => dashed) && ChartUtils.persistentLineChartPoints(item.points).some(({ kind }) => kind === 'forecast')),
     true,
   )
 })

@@ -2415,6 +2415,13 @@ body {
     flex-wrap: wrap;
 }
 
+.analytics-balance-view {
+    display: flex;
+    padding: 0 16px 8px;
+    border-bottom: 1px solid var(--van-border-color);
+    margin-bottom: 8px;
+}
+
 .analytics-balance-periods {
     display: flex;
     justify-content: flex-end;
@@ -3056,6 +3063,7 @@ body {
         overflow-x: auto;
     }
 
+    .analytics-balance-view,
     .analytics-balance-periods {
         justify-content: flex-start;
         overflow-x: auto;

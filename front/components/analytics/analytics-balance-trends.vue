@@ -5,7 +5,10 @@
         <div>{{ $t('analytics.balance.title') }}</div>
         <div class="analytics-card-subtitle">{{ $t('analytics.balance.subtitle') }}</div>
       </div>
-      <analytics-metric-facet v-model="analyticsStore.visibleFinancialMetrics" :items="metrics" />
+      <analytics-metric-facet v-model="selectedMetricIds" :items="metrics" />
+    </div>
+    <div class="analytics-balance-view">
+      <app-tabs v-model="analyticsStore.financialTrendView" :items="viewItems" />
     </div>
     <div class="analytics-balance-periods">
       <app-tabs v-model="analyticsStore.balancePeriod" :items="periodItems" />
@@ -45,7 +48,7 @@
         <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
       </div>
 
-      <multi-series-line-chart v-if="chartSeries.length" :series="chartSeries" :value-formatter="formatNumberForDashboard" :aria-label="$t('analytics.balance.chart_label')" />
+      <multi-series-line-chart v-if="chartSeries.length" :series="chartSeries" :value-formatter="formatNumberForDashboard" :aria-label="chartAriaLabel" />
       <div v-else-if="selectedSourcesSettled" class="analytics-card-state">{{ $t('analytics.balance.empty') }}</div>
 
       <div v-if="summaries.length" class="analytics-metric-summary-grid">
@@ -83,6 +86,7 @@
 import { format, parseISO } from 'date-fns'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
+import { buildFinancialTrendChartSeries } from '~/utils/AnalyticsUtils.js'
 import { decorateLineChartPoint, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 
@@ -90,14 +94,29 @@ const analyticsStore = useAnalyticsStore()
 const profileStore = useProfileStore()
 const { t } = useI18n()
 
-const periodItems = computed(() => [3, 6, 12].map((value) => ({ label: t('analytics.period.months_short', { count: value }), value })))
-const metrics = computed(() => [
-  { id: 'netWorth', label: t('analytics.balance.net_worth_change'), summaryLabel: t('analytics.balance.net_worth'), color: 'var(--analytics-net-worth)', marker: 'circle' },
-  { id: 'savings', label: t('analytics.balance.savings_change'), summaryLabel: t('analytics.balance.savings'), color: 'var(--analytics-savings)', marker: 'square' },
-  { id: 'debt', label: t('analytics.balance.debt_change'), summaryLabel: t('analytics.balance.debt'), color: 'var(--analytics-debt)', marker: 'diamond' },
-  { id: 'expenses', label: t('analytics.balance.total_expenses'), summaryLabel: t('analytics.balance.total_expenses'), color: 'var(--analytics-expenses)', marker: 'triangle' },
+const viewItems = computed(() => [
+  { label: t('analytics.balance.view_balances'), value: 'balances' },
+  { label: t('analytics.balance.view_changes'), value: 'changes' },
 ])
-const selectedMetricIds = computed(() => analyticsStore.visibleFinancialMetrics)
+const periodItems = computed(() => [3, 6, 12].map((value) => ({ label: t('analytics.period.months_short', { count: value }), value })))
+const metricDefinitions = computed(() => [
+  { id: 'netWorth', balanceLabel: t('analytics.balance.net_worth'), changeLabel: t('analytics.balance.net_worth_change'), color: 'var(--analytics-net-worth)', marker: 'circle' },
+  { id: 'savings', balanceLabel: t('analytics.balance.savings'), changeLabel: t('analytics.balance.savings_change'), color: 'var(--analytics-savings)', marker: 'square' },
+  { id: 'debt', balanceLabel: t('analytics.balance.debt'), changeLabel: t('analytics.balance.debt_change'), color: 'var(--analytics-debt)', marker: 'diamond' },
+  { id: 'expenses', balanceLabel: null, changeLabel: t('analytics.balance.total_expenses'), color: 'var(--analytics-expenses)', marker: 'triangle' },
+])
+const metrics = computed(() =>
+  metricDefinitions.value
+    .filter((metric) => analyticsStore.financialTrendView === 'changes' || metric.id !== 'expenses')
+    .map((metric) => ({ ...metric, label: analyticsStore.financialTrendView === 'balances' ? metric.balanceLabel : metric.changeLabel })),
+)
+const selectedMetricIds = computed({
+  get: () => (analyticsStore.financialTrendView === 'balances' ? analyticsStore.visibleBalanceMetrics : analyticsStore.visibleFinancialMetrics),
+  set: (metrics) => {
+    if (analyticsStore.financialTrendView === 'balances') analyticsStore.visibleBalanceMetrics = metrics
+    else analyticsStore.visibleFinancialMetrics = metrics
+  },
+})
 const selectedAccountMetrics = computed(() => metrics.value.filter((metric) => metric.id !== 'expenses' && selectedMetricIds.value.includes(metric.id)))
 const hasSelectedAccountMetrics = computed(() => selectedAccountMetrics.value.length > 0)
 const expensesSelected = computed(() => selectedMetricIds.value.includes('expenses'))
@@ -118,8 +137,6 @@ const selectedSourcesSettled = computed(() => sourceState.value.selectedSourcesS
 const formatCurrency = (value) => (Number.isFinite(value) ? `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
 const formatMonthKey = (value) => new Intl.DateTimeFormat(profileStore.language, { month: 'short', year: 'numeric' }).format(parseISO(value.slice(0, 7) + '-01'))
 const currentMonthKey = computed(() => format(new Date(), 'yyyy-MM'))
-const currentMonthLabel = computed(() => formatMonthKey(currentMonthKey.value))
-const expenseForecastKey = computed(() => (expensesSelected.value && hasExpenseResult.value && analyticsStore.financialTrend.expenses.forecastAvailable ? currentMonthKey.value + ':forecast' : null))
 const toChartPoint = (point, isEstimated) =>
   decorateLineChartPoint(point, {
     xLabel: point.xLabel ?? formatMonthKey(point.x),
@@ -127,51 +144,47 @@ const toChartPoint = (point, isEstimated) =>
     isEstimated,
   })
 
-const selectedAccountTrendSeries = computed(() =>
-  selectedAccountMetrics.value.map((metric) => {
-    const series = analyticsStore.financialTrend.series.find((item) => item.id === metric.id) ?? { points: [] }
-    const sourceSeries = analyticsStore.balanceSeries.find((item) => item.id === metric.id)
-    const points = series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, sourceSeries?.isEstimated))
-    const currentPartial = points.findLast((point) => point.kind === 'partial')
-    if (expenseForecastKey.value && currentPartial) points.push({ ...currentPartial, x: expenseForecastKey.value, xLabel: currentMonthLabel.value, inspectionOnly: true })
-    return { ...metric, points }
-  }),
-)
-
-const expenseChartSeries = computed(() => {
-  if (!expensesSelected.value || !hasExpenseResult.value) return null
-  const expenses = analyticsStore.financialTrend.expenses
-  return {
-    ...metrics.value.find((metric) => metric.id === 'expenses'),
-    points: [
-      ...expenses.actualPoints.map((point) => toChartPoint(point, analyticsStore.categorySummary.isEstimated)),
-      toChartPoint({ x: currentMonthKey.value, value: expenses.currentActual, kind: 'partial' }, analyticsStore.categorySummary.isEstimated),
-      ...(expenses.forecastAvailable
-        ? [toChartPoint({ x: expenseForecastKey.value, xLabel: currentMonthLabel.value, value: expenses.currentForecast, kind: 'forecast' }, analyticsStore.categorySummary.isEstimated)]
-        : []),
-    ],
-  }
-})
-
 const chartSeries = computed(() =>
-  [...(hasBalanceResult.value ? selectedAccountTrendSeries.value : []), ...(expenseChartSeries.value ? [expenseChartSeries.value] : [])].filter((series) => series.points.length),
+  buildFinancialTrendChartSeries({
+    view: analyticsStore.financialTrendView,
+    metrics: metrics.value,
+    selectedIds: selectedMetricIds.value,
+    accountSeries: analyticsStore.financialTrend.series,
+    expenses: analyticsStore.financialTrend.expenses,
+    currentMonthKey: currentMonthKey.value,
+  })
+    .filter((series) => (series.id === 'expenses' ? hasExpenseResult.value : hasBalanceResult.value))
+    .map((series) => {
+      const isEstimated = series.id === 'expenses' ? analyticsStore.categorySummary.isEstimated : analyticsStore.balanceSeries.find((item) => item.id === series.id)?.isEstimated
+      return { ...series, points: series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, isEstimated)) }
+    })
+    .filter((series) => series.points.length),
 )
+const chartAriaLabel = computed(() => t(analyticsStore.financialTrendView === 'balances' ? 'analytics.balance.chart_label_balances' : 'analytics.balance.chart_label_changes'))
 const accountSummaries = computed(() => {
   if (!hasBalanceResult.value) return []
-  return metrics.value.slice(0, 3).map((metric) => {
+  return selectedAccountMetrics.value.map((metric) => {
     const series = analyticsStore.financialTrend.series.find((item) => item.id === metric.id)
-    return { ...metric, label: metric.summaryLabel, rows: [{ label: t('analytics.balance.current_total'), value: formatCurrency(series?.currentTotal) }] }
+    const isBalances = analyticsStore.financialTrendView === 'balances'
+    return {
+      ...metric,
+      rows: [
+        { label: t(isBalances ? 'analytics.balance.current_total' : 'analytics.balance.current_change'), value: formatCurrency(isBalances ? series?.currentTotal : series?.currentChange) },
+        { label: t('analytics.balance.average_monthly_change'), value: formatCurrency(series?.averageChange) },
+        { label: t(isBalances ? 'analytics.balance.forecast_total' : 'analytics.balance.forecast_change'), value: formatCurrency(isBalances ? series?.forecastTotal : series?.forecastChange) },
+      ],
+    }
   })
 })
 const expenseSummary = computed(() => {
-  if (!hasExpenseResult.value) return null
+  if (!expensesSelected.value || !hasExpenseResult.value) return null
   const expenses = analyticsStore.financialTrend.expenses
   const metric = metrics.value.find((item) => item.id === 'expenses')
   return {
     ...metric,
-    label: metric.summaryLabel,
     rows: [
       { label: t('analytics.balance.current_actual'), value: formatCurrency(expenses.currentActual) },
+      { label: t('analytics.balance.average_monthly_spending'), value: formatCurrency(expenses.average) },
       { label: t('analytics.balance.current_forecast'), value: formatCurrency(expenses.currentForecast) },
     ],
   }

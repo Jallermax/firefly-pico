@@ -317,6 +317,7 @@ export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
     requestedMonths: averageMonths,
     usedMonths,
     actualPoints,
+    average: usedMonths > 0 ? actualPoints.reduce((total, point) => total + point.value, 0) / usedMonths : null,
     currentActual,
     currentForecast: forecastAvailable ? currentActual + remainderTotal / usedMonths : null,
     forecastAvailable,
@@ -331,25 +332,89 @@ const lastMonthlyPoints = (points) =>
 
 export function summarizeBalanceMovements({ balanceSeries, months, today }) {
   const currentMonth = startOfMonth(today)
-  const monthKeys = Array.from({ length: months }, (_, index) => monthKey(subMonths(currentMonth, months - index - 1)))
+  const monthKeys = Array.from({ length: months + 1 }, (_, index) => monthKey(subMonths(currentMonth, months - index)))
+  const currentMonthKey = monthKey(today)
 
   return {
     monthKeys,
     series: balanceSeries.map(({ id, points, currentPoint }) => {
       const monthlyPoints = lastMonthlyPoints(points)
-      const currentDate = currentPoint?.x ?? null
       const currentTotal = Number.isFinite(currentPoint?.value) ? currentPoint.value : null
-      const movementPoints = monthKeys.flatMap((key) => {
+      const sourceMonthKeys = Object.keys(monthlyPoints).sort()
+      const totalForKey = (key) => {
+        const sourceKey = sourceMonthKeys.filter((sourceMonthKey) => sourceMonthKey <= key).at(-1)
+        return sourceKey ? monthlyPoints[sourceKey].value : null
+      }
+      const completedMonthKeys = monthKeys.filter((key) => key !== currentMonthKey)
+      const precedingCompletedTotal = totalForKey(completedMonthKeys.at(-1))
+      const totalPoints = [
+        ...completedMonthKeys.flatMap((key) => {
+          const value = totalForKey(key)
+          return value === null ? [] : [{ x: key, value, kind: 'actual' }]
+        }),
+        ...(currentTotal === null || precedingCompletedTotal === null ? [] : [{ x: currentMonthKey, value: currentTotal, kind: 'partial' }]),
+      ]
+      const changePoints = monthKeys.flatMap((key) => {
         const previousKey = monthKey(subMonths(new Date(key + '-01T00:00:00'), 1))
-        const previous = monthlyPoints[previousKey]
-        const isCurrentMonth = key === monthKey(today)
-        const current = isCurrentMonth ? (currentTotal === null ? null : { value: currentTotal }) : monthlyPoints[key]
-        return previous && current ? [{ x: key, value: current.value - previous.value, kind: isCurrentMonth ? 'partial' : 'actual' }] : []
+        const previous = totalForKey(previousKey)
+        const isCurrentMonth = key === currentMonthKey
+        const current = isCurrentMonth ? currentTotal : totalForKey(key)
+        return previous === null || current === null ? [] : [{ x: key, value: current - previous, kind: isCurrentMonth ? 'partial' : 'actual' }]
       })
+      const completedChanges = changePoints.filter(({ kind }) => kind === 'actual')
+      const averageChange = completedChanges.length > 0 ? completedChanges.reduce((total, point) => total + point.value, 0) / completedChanges.length : null
+      const forecastAvailable = completedChanges.length >= 2
+      const currentChange = changePoints.find(({ kind }) => kind === 'partial')?.value ?? null
 
-      return { id, currentTotal, currentDate, points: movementPoints }
+      return {
+        id,
+        totalPoints,
+        changePoints,
+        currentTotal,
+        currentChange,
+        averageChange,
+        forecastChange: forecastAvailable ? averageChange : null,
+        forecastTotal: forecastAvailable && precedingCompletedTotal !== null ? precedingCompletedTotal + averageChange : null,
+        forecastAvailable,
+      }
     }),
   }
+}
+
+export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, accountSeries, expenses, currentMonthKey }) {
+  const selected = new Set(selectedIds)
+  const accountSeriesById = Object.fromEntries(accountSeries.map((series) => [series.id, series]))
+
+  return metrics.flatMap((metric) => {
+    if (!selected.has(metric.id)) return []
+    if (metric.id === 'expenses') {
+      if (view !== 'changes') return []
+      return [
+        {
+          ...metric,
+          points: [
+            ...expenses.actualPoints,
+            { x: currentMonthKey, value: expenses.currentActual, kind: 'partial' },
+            ...(expenses.forecastAvailable && Number.isFinite(expenses.currentForecast) ? [{ x: currentMonthKey + ':forecast', value: expenses.currentForecast, kind: 'forecast' }] : []),
+          ],
+        },
+      ]
+    }
+
+    const series = accountSeriesById[metric.id]
+    if (!series) return []
+    const isBalances = view === 'balances'
+    const forecastValue = isBalances ? series.forecastTotal : series.forecastChange
+    return [
+      {
+        ...metric,
+        points: [
+          ...(isBalances ? series.totalPoints : series.changePoints),
+          ...(series.forecastAvailable && Number.isFinite(forecastValue) ? [{ x: currentMonthKey + ':forecast', value: forecastValue, kind: 'forecast' }] : []),
+        ],
+      },
+    ]
+  })
 }
 
 export function rankCategoryIds({ ledger, averageMonths, today }) {

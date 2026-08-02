@@ -16,6 +16,7 @@ import {
 
 const BALANCE_METRICS = ['netWorth', 'savings', 'debt']
 const FINANCIAL_TREND_METRICS = [...BALANCE_METRICS, 'expenses']
+const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
 const CATEGORY_SERIES_LIMIT = 6
 
 export function createAnalyticsStore(id, useDependencies) {
@@ -43,14 +44,28 @@ export function createAnalyticsStore(id, useDependencies) {
     const persistedSelectedCategoryIds = computed(() => [...new Set((Array.isArray(selectedCategoryIds.value) ? selectedCategoryIds.value : []).filter(Boolean))])
     const normalizedSelectedCategoryIds = computed(() => persistedSelectedCategoryIds.value.slice(0, CATEGORY_SERIES_LIMIT))
     const storedVisibleFinancialMetrics = useStoredValue('analyticsVisibleBalanceMetrics', FINANCIAL_TREND_METRICS)
-    const normalizeFinancialMetrics = (metrics) => {
-      const normalized = [...new Set((Array.isArray(metrics) ? metrics : []).filter((metric) => FINANCIAL_TREND_METRICS.includes(metric)))]
-      return normalized.length > 0 ? normalized : ['netWorth']
+    const storedVisibleBalanceMetrics = useStoredValue('analyticsVisibleBalanceTotalMetrics', BALANCE_METRICS)
+    const storedFinancialTrendView = useStoredValue('analyticsFinancialTrendView', 'balances')
+    const normalizeMetrics = (metrics, availableMetrics) => {
+      const normalized = [...new Set((Array.isArray(metrics) ? metrics : []).filter((metric) => availableMetrics.includes(metric)))]
+      return normalized.length > 0 ? normalized : [availableMetrics[0]]
     }
     const visibleFinancialMetrics = computed({
-      get: () => normalizeFinancialMetrics(storedVisibleFinancialMetrics.value),
+      get: () => normalizeMetrics(storedVisibleFinancialMetrics.value, FINANCIAL_TREND_METRICS),
       set: (metrics) => {
-        storedVisibleFinancialMetrics.value = normalizeFinancialMetrics(metrics)
+        storedVisibleFinancialMetrics.value = normalizeMetrics(metrics, FINANCIAL_TREND_METRICS)
+      },
+    })
+    const visibleBalanceMetrics = computed({
+      get: () => normalizeMetrics(storedVisibleBalanceMetrics.value, BALANCE_METRICS),
+      set: (metrics) => {
+        storedVisibleBalanceMetrics.value = normalizeMetrics(metrics, BALANCE_METRICS)
+      },
+    })
+    const financialTrendView = computed({
+      get: () => (FINANCIAL_TREND_VIEWS.includes(storedFinancialTrendView.value) ? storedFinancialTrendView.value : 'balances'),
+      set: (view) => {
+        storedFinancialTrendView.value = FINANCIAL_TREND_VIEWS.includes(view) ? view : 'balances'
       },
     })
     const selectedFlowMonth = ref(startOfMonth(new Date()))
@@ -164,7 +179,7 @@ export function createAnalyticsStore(id, useDependencies) {
       return {
         cacheKey,
         groups,
-        start: DateUtils.dateToString(startOfMonth(subMonths(today, months))),
+        start: DateUtils.dateToString(startOfMonth(subMonths(today, months + 1))),
         end: DateUtils.dateToString(today),
         period: months === 3 ? '1D' : '1W',
         displayCurrencyCode: displayCode,
@@ -358,6 +373,8 @@ export function createAnalyticsStore(id, useDependencies) {
       balancePeriod,
       categoryAverageMonths,
       selectedCategoryIds,
+      financialTrendView,
+      visibleBalanceMetrics,
       visibleFinancialMetrics,
       selectedFlowMonth,
       balanceState,
