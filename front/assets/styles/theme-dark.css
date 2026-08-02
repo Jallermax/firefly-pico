@@ -569,7 +569,7 @@
 }
 
 .van-theme-dark .analytics-flow-node-amount {
-    fill: var(--van-text-color-2);
+    fill: var(--van-text-color);
 }
 
 .van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-band-hit {

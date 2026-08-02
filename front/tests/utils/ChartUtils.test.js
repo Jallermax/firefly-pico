@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildLineChartGeometry, buildMoneyFlowGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../utils/ChartUtils.js'
 import * as ChartUtils from '../../utils/ChartUtils.js'
@@ -324,4 +325,24 @@ test('money flow presentation suppresses an unbalanced diagram without hiding it
     showEmpty: true,
     showUnbalancedAudit: false,
   })
+})
+
+test('mobile money flow typography remains readable inside an inset card', () => {
+  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const darkCss = readFileSync(new URL('../../assets/styles/theme-dark.css', import.meta.url), 'utf8')
+  const ruleBody = (css, selector) => {
+    const start = css.indexOf(`${selector} {`)
+    assert.notEqual(start, -1, `missing ${selector}`)
+    return css.slice(start, css.indexOf('}', start) + 1)
+  }
+  const mobileRule = ruleBody(whiteCss, '.analytics-flow-mobile')
+  const horizontalPadding = Number(mobileRule.match(/padding-inline:\s*([\d.]+)/)?.[1])
+  const mobileFontSize = Number(whiteCss.match(/\.analytics-flow-mobile \.analytics-flow-node-label,[\s\S]*?font-size:\s*([\d.]+)px/)?.[1])
+
+  for (const viewportWidth of [360, 390]) {
+    const renderedFontSize = mobileFontSize * ((viewportWidth - 32 - horizontalPadding * 2) / 360)
+    assert.ok(renderedFontSize >= 12, `${viewportWidth}px renders ${renderedFontSize}px flow text`)
+  }
+  assert.match(ruleBody(whiteCss, '.analytics-flow-node-amount'), /fill:\s*var\(--van-text-color\)/)
+  assert.match(ruleBody(darkCss, '.van-theme-dark .analytics-flow-node-amount'), /fill:\s*var\(--van-text-color\)/)
 })

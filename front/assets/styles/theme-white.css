@@ -2873,7 +2873,7 @@ body {
 }
 
 .analytics-flow-node-amount {
-    fill: var(--van-text-color-2);
+    fill: var(--van-text-color);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
     font-weight: 500;
@@ -3062,6 +3062,16 @@ body {
 .analytics-flow-residual-result {
     border-top: 1px solid var(--van-border-color);
     font-size: 12px;
+}
+
+.analytics-flow-mobile {
+    padding-inline: 0;
+}
+
+.analytics-flow-mobile .analytics-flow-node-label,
+.analytics-flow-mobile .analytics-flow-node-amount,
+.analytics-flow-mobile .analytics-flow-bus-label {
+    font-size: 13.25px;
 }
 
 .analytics-flow-mobile .analytics-flow-svg {
