@@ -166,7 +166,9 @@ export function createAnalyticsStore(id, useDependencies) {
 
     const balanceCacheKey = computed(() => getBalanceSnapshot().cacheKey)
     const balanceSeries = computed(
-      () => balanceCache.value[balanceCacheKey.value] ?? FINANCIAL_TREND_METRICS.filter((metric) => metric !== 'expenses').map((metric) => ({ id: metric, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })),
+      () =>
+        balanceCache.value[balanceCacheKey.value] ??
+        FINANCIAL_TREND_METRICS.filter((metric) => metric !== 'expenses').map((metric) => ({ id: metric, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })),
     )
     const financialTrend = computed(() => ({
       ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: new Date() }),

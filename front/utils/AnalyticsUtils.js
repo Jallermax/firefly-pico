@@ -297,7 +297,10 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
 const totalForMonth = (ledger, key) => Object.values(ledger.months?.[key]?.categories ?? {}).reduce((total, category) => total + category.amount, 0)
 
 const totalByDay = (categories, predicate) =>
-  Object.values(categories ?? {}).reduce((total, category) => total + Object.entries(category.byDay ?? {}).reduce((categoryTotal, [day, value]) => categoryTotal + (predicate(Number(day)) ? value : 0), 0), 0)
+  Object.values(categories ?? {}).reduce(
+    (total, category) => total + Object.entries(category.byDay ?? {}).reduce((categoryTotal, [day, value]) => categoryTotal + (predicate(Number(day)) ? value : 0), 0),
+    0,
+  )
 
 export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
   const monthKeys = completedMonthKeys({ today, averageMonths, ledgerStartMonth: ledger.ledgerStartMonth })

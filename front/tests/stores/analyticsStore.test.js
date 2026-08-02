@@ -253,11 +253,17 @@ test('derives financial trends from three account requests and the transaction l
   await store.init()
 
   assert.equal(accountRequests.length, 3)
-  assert.equal(accountRequests.some(({ accountIds }) => accountIds.includes('expenses')), false)
+  assert.equal(
+    accountRequests.some(({ accountIds }) => accountIds.includes('expenses')),
+    false,
+  )
   assert.equal(accountRequests[0].start, format(new Date(today.getFullYear(), today.getMonth() - 3, 1), 'yyyy-MM-dd'))
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 300 })
   assert.equal(store.financialTrend.series.find(({ id }) => id === 'netWorth').currentTotal, 300)
-  assert.deepEqual(store.financialTrend.expenses.actualPoints.map(({ value }) => value), [100, 20, 30])
+  assert.deepEqual(
+    store.financialTrend.expenses.actualPoints.map(({ value }) => value),
+    [100, 20, 30],
+  )
   assert.equal(store.financialTrend.expenses.currentActual, 10)
   assert.equal(store.financialTrend.expenses.currentForecast, 60)
 })

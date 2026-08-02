@@ -239,8 +239,26 @@ test('builds completed and partial monthly account movement from month-end total
     months: 3,
     today: new Date('2026-08-10T12:00:00Z'),
     balanceSeries: [
-      { id: 'netWorth', points: [{ x: '2026-05-31', value: 100 }, { x: '2026-06-30', value: 130 }, { x: '2026-07-31', value: 120 }, { x: '2026-08-07', value: 140 }], currentPoint: { x: '2026-08-10', value: 150 } },
-      { id: 'debt', points: [{ x: '2026-05-31', value: 80 }, { x: '2026-06-30', value: 60 }, { x: '2026-07-31', value: 75 }, { x: '2026-08-07', value: 72 }], currentPoint: { x: '2026-08-10', value: 70 } },
+      {
+        id: 'netWorth',
+        points: [
+          { x: '2026-05-31', value: 100 },
+          { x: '2026-06-30', value: 130 },
+          { x: '2026-07-31', value: 120 },
+          { x: '2026-08-07', value: 140 },
+        ],
+        currentPoint: { x: '2026-08-10', value: 150 },
+      },
+      {
+        id: 'debt',
+        points: [
+          { x: '2026-05-31', value: 80 },
+          { x: '2026-06-30', value: 60 },
+          { x: '2026-07-31', value: 75 },
+          { x: '2026-08-07', value: 72 },
+        ],
+        currentPoint: { x: '2026-08-10', value: 70 },
+      },
     ],
   })
 
@@ -250,7 +268,57 @@ test('builds completed and partial monthly account movement from month-end total
     { x: '2026-07', value: -10, kind: 'actual' },
     { x: '2026-08', value: 30, kind: 'partial' },
   ])
-  assert.deepEqual(result.series.find(({ id }) => id === 'debt').points.map(({ value }) => value), [-20, 15, -5])
+  assert.deepEqual(
+    result.series.find(({ id }) => id === 'debt').points.map(({ value }) => value),
+    [-20, 15, -5],
+  )
+})
+
+test('omits monthly movement without a preceding baseline', () => {
+  const result = summarizeBalanceMovements({
+    months: 3,
+    today: new Date('2026-08-10T12:00:00Z'),
+    balanceSeries: [
+      {
+        id: 'netWorth',
+        points: [
+          { x: '2026-06-30', value: 100 },
+          { x: '2026-07-31', value: 120 },
+        ],
+        currentPoint: { x: '2026-08-10', value: 130 },
+      },
+    ],
+  })
+
+  assert.deepEqual(result.series[0].points, [
+    { x: '2026-07', value: 20, kind: 'actual' },
+    { x: '2026-08', value: 10, kind: 'partial' },
+  ])
+})
+
+test('uses the final weekly sample in a completed month and requires current point for partial movement', () => {
+  const result = summarizeBalanceMovements({
+    months: 3,
+    today: new Date('2026-08-10T12:00:00Z'),
+    balanceSeries: [
+      {
+        id: 'netWorth',
+        points: [
+          { x: '2026-05-31', value: 100 },
+          { x: '2026-06-07', value: 120 },
+          { x: '2026-06-30', value: 130 },
+          { x: '2026-07-31', value: 150 },
+          { x: '2026-08-07', value: 170 },
+        ],
+        currentPoint: null,
+      },
+    ],
+  })
+
+  assert.deepEqual(result.series[0].points, [
+    { x: '2026-06', value: 30, kind: 'actual' },
+    { x: '2026-07', value: 20, kind: 'actual' },
+  ])
 })
 
 test('summarizes total expense from every category and forecasts only with two completed months', () => {
@@ -268,7 +336,10 @@ test('summarizes total expense from every category and forecasts only with two c
     },
   })
 
-  assert.deepEqual(result.actualPoints.map(({ value }) => value), [100, 20, 30])
+  assert.deepEqual(
+    result.actualPoints.map(({ value }) => value),
+    [100, 20, 30],
+  )
   assert.equal(result.currentActual, 10)
   assert.equal(result.currentForecast, 40)
   assert.equal(result.forecastAvailable, true)
