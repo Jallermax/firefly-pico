@@ -247,6 +247,99 @@ test('uses a same-day debt chart actual when direct current debt is missing and 
   )
 })
 
+test('uses a current-month daily debt actual without replacing longer-window weekly history', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  accountStore.accountList = [
+    {
+      ...debitLiability(),
+      attributes: { ...debitLiability().attributes, current_debt: null },
+    },
+  ]
+  accountResponse = async ({ period }) =>
+    period === '1D' ? chartResponse(-147, '2026-08-07') : { status: 200, data: [{ currency_code: 'USD', entries: { '2026-06-30': '-253', '2026-07-28': '-200' } }] }
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'debt')
+  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'debt')
+  assert.deepEqual(
+    accountRequests.map(({ start, end, period }) => ({ start, end, period })),
+    [
+      { start: '2026-01-01', end: '2026-08-10', period: '1W' },
+      { start: '2026-08-01', end: '2026-08-10', period: '1D' },
+    ],
+  )
+  assert.deepEqual(sourceSeries.points, [
+    { x: '2026-06-30', value: 253 },
+    { x: '2026-07-28', value: 200 },
+  ])
+  assert.deepEqual(sourceSeries.currentPoint, { x: '2026-08-07', value: 147 })
+  assert.deepEqual(sourceSeries.warnings, [{ type: 'current-balance-unverified', sampleDate: '2026-08-07', currentDate: '2026-08-10' }])
+  assert.equal(trendSeries.currentTotal, 147)
+  assert.equal(trendSeries.currentChange, -53)
+})
+
+test('does not cache longer-window balances when the current-month auxiliary request fails', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  accountStore.accountList = [
+    {
+      ...debitLiability(),
+      attributes: { ...debitLiability().attributes, current_debt: null },
+    },
+  ]
+  let dailyFails = true
+  accountResponse = async ({ period }) => (period === '1D' ? (dailyFails ? { status: 500, data: {} } : chartResponse(-147, '2026-08-10')) : chartResponse(-200, '2026-07-28'))
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.balanceState.status, 'error')
+  assert.equal(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, undefined)
+
+  dailyFails = false
+  await store.retryBalance()
+
+  assert.equal(accountRequests.length, 4)
+  assert.equal(store.balanceState.status, 'ready')
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, { x: '2026-08-10', value: 147 })
+})
+
+test('keeps a newer currency result current while an older auxiliary debt request finishes', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-10T12:00:00') })
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  accountStore.accountList = [
+    {
+      ...debitLiability(),
+      attributes: { ...debitLiability().attributes, current_debt: null },
+    },
+  ]
+  const olderDaily = deferred()
+  const newerDaily = deferred()
+  const dailyResponses = [olderDaily, newerDaily]
+  accountResponse = ({ period }) => (period === '1D' ? dailyResponses.shift().promise : Promise.resolve(chartResponse(-200, '2026-07-28')))
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const initPromise = store.init()
+  await waitFor(() => accountRequests.length === 2)
+  dashboardStore.dashboardCurrency = eur
+  await nextTick()
+  await waitFor(() => accountRequests.length === 4)
+
+  newerDaily.resolve(chartResponse(-100, '2026-08-10'))
+  await waitFor(() => store.balanceState.status === 'ready')
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, { x: '2026-08-10', value: 90, isEstimated: true })
+
+  olderDaily.resolve(chartResponse(-200, '2026-08-10'))
+  await initPromise
+  await nextTick()
+
+  assert.equal(store.balanceState.status, 'ready')
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, { x: '2026-08-10', value: 90, isEstimated: true })
+})
+
 test('keeps a prior-month debt chart actual out of current totals when direct current debt is missing', async () => {
   const previousMonthEnd = format(new Date(new Date().getFullYear(), new Date().getMonth(), 0), 'yyyy-MM-dd')
   accountStore.accountList = [

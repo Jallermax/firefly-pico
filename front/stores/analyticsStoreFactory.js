@@ -287,33 +287,51 @@ export function createAnalyticsStore(id, useDependencies) {
           return
         }
 
-        const normalized = responses.map(({ metric, response }) => {
-          const result = normalizeBalanceSeries({
-            chartLines: response?.data ?? [],
-            metric,
-            displayCurrencyCode: snapshot.displayCurrencyCode,
-            primaryCurrencyCode: snapshot.primaryCurrencyCode,
-            rates: snapshot.rates,
-          })
-          const currentAmounts = snapshot.groups[metric].map((account) => ({
-            account,
-            converted: convertAnalyticsAmount({
-              amount: account.currentAmount,
-              currencyCode: account.currencyCode,
-              primaryAmount: null,
-              primaryCurrencyCode: snapshot.primaryCurrencyCode,
+        const responsesWithCurrent = await Promise.all(
+          responses.map(async ({ metric, response }) => {
+            const currentAmounts = snapshot.groups[metric].map((account) => ({
+              account,
+              converted: convertAnalyticsAmount({
+                amount: account.currentAmount,
+                currencyCode: account.currencyCode,
+                primaryAmount: null,
+                primaryCurrencyCode: snapshot.primaryCurrencyCode,
+                displayCurrencyCode: snapshot.displayCurrencyCode,
+                rates: snapshot.rates,
+              }),
+            }))
+            const hasCompleteCurrentTotal = currentAmounts.every(({ converted }) => converted.value !== null)
+            const currentResponse =
+              !hasCompleteCurrentTotal && snapshot.period !== '1D'
+                ? await repository.getChartOverview({ start: snapshot.end.slice(0, 7) + '-01', end: snapshot.end, period: '1D', accountIds: snapshot.groups[metric].map(({ id }) => id) })
+                : null
+            return { metric, response, currentResponse, currentAmounts, hasCompleteCurrentTotal }
+          }),
+        )
+
+        if (responsesWithCurrent.some(({ currentResponse }) => currentResponse && !isResponseSuccess(currentResponse))) {
+          if (ownsCurrentState()) Object.assign(balanceState, { status: 'error', error: new Error('Analytics balance request failed'), isStale: hasExistingData })
+          return
+        }
+
+        const normalized = responsesWithCurrent.map(({ metric, response, currentResponse, currentAmounts, hasCompleteCurrentTotal }) => {
+          const normalize = (chartLines) =>
+            normalizeBalanceSeries({
+              chartLines,
+              metric,
               displayCurrencyCode: snapshot.displayCurrencyCode,
+              primaryCurrencyCode: snapshot.primaryCurrencyCode,
               rates: snapshot.rates,
-            }),
-          }))
+            })
+          const result = normalize(response?.data ?? [])
+          const currentResult = currentResponse ? normalize(currentResponse.data ?? []) : result
           const currentTotal = currentAmounts.reduce(
             (total, { account, converted }) =>
               total + (metric === 'debt' ? (account.usesCurrentDebt ? Math.max(0, converted.value ?? 0) : Math.max(0, -(converted.value ?? 0))) : (converted.value ?? 0)),
             0,
           )
-          const finalPoint = result.points.at(-1)
+          const finalPoint = currentResult.points.at(-1)
           const tolerance = 0.5 * 10 ** -snapshot.decimalPlaces
-          const hasCompleteCurrentTotal = currentAmounts.every(({ converted }) => converted.value !== null)
           const isCurrentEstimated = currentAmounts.some(({ converted }) => converted.isEstimated)
           const hasCurrentMonthChartPoint = Number.isFinite(finalPoint?.value) && finalPoint.x.slice(0, 7) === snapshot.end.slice(0, 7)
           const hasSampleDateTruth = snapshot.groups[metric].every(({ currentDate }) => currentDate === finalPoint?.x || (!currentDate && finalPoint?.x === snapshot.end))
@@ -334,7 +352,7 @@ export function createAnalyticsStore(id, useDependencies) {
               : hasCurrentMonthChartPoint
                 ? { x: finalPoint.x, value: finalPoint.value, ...(finalPoint.isEstimated ? { isEstimated: true } : {}) }
                 : null,
-            missingCurrencies: [...new Set([...result.missingCurrencies, ...currentAmounts.map(({ converted }) => converted.missingCurrency).filter(Boolean)])],
+            missingCurrencies: [...new Set([...result.missingCurrencies, ...currentResult.missingCurrencies, ...currentAmounts.map(({ converted }) => converted.missingCurrency).filter(Boolean)])],
             warnings,
           }
         })
