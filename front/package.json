@@ -9,7 +9,7 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "prod": "node .output/server/index.mjs",
-    "test:analytics": "node --test tests/utils/AnalyticsUtils.test.js",
+    "test:analytics": "node --test tests/utils/AnalyticsUtils.test.js tests/repository/BaseRepository.test.js",
     "lint": "npm run lint:eslint && npm run lint:prettier",
     "lint:fix": "npm run lint:eslint:fix && npm run lint:prettier:fix",
     "lint:eslint": "eslint .",

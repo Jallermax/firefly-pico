@@ -29,20 +29,36 @@ export default class BaseRepository {
     return get(response, 'data', {})
   }
 
-  async getAllWithMerge({ filters = [], getAll = null } = {}) {
+  async getAllWithMerge({ filters = [], getAll = null, pageSize = 50 } = {}) {
     let list = []
-    let getMethod = (getAll ?? this.getAll)
-    const firstPageResponseBody = await getMethod({ filters, page: 1 })
+    let getMethod = getAll ?? this.getAll
+    const firstPageResponseBody = await getMethod({ filters, page: 1, pageSize })
     let responseList = get(firstPageResponseBody, 'data', [])
     list = [...list, ...responseList]
 
     let totalPages = get(firstPageResponseBody, 'meta.pagination.total_pages')
     for (let page = 2; page <= totalPages; page++) {
-      const pageResponse = await getMethod({ filters, page })
+      const pageResponse = await getMethod({ filters, page, pageSize })
       let responseList = get(pageResponse, 'data', [])
       list = [...list, ...responseList]
     }
     return list
+  }
+
+  async getAllWithMergeResult({ filters = [], getAll = null, pageSize = 50 } = {}) {
+    const list = []
+    const getMethod = getAll ?? this.getAll
+    const firstPage = await getMethod({ filters, page: 1, pageSize })
+    if (!Array.isArray(firstPage?.data)) return { ok: false, data: [] }
+
+    list.push(...firstPage.data)
+    const totalPages = Number(firstPage?.meta?.pagination?.total_pages ?? 1)
+    for (let page = 2; page <= totalPages; page++) {
+      const response = await getMethod({ filters, page, pageSize })
+      if (!Array.isArray(response?.data)) return { ok: false, data: [] }
+      list.push(...response.data)
+    }
+    return { ok: true, data: list }
   }
 
   async update(id, data) {
