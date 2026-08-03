@@ -471,3 +471,122 @@ test('mobile money flow typography remains readable inside an inset card', () =>
   assert.match(ruleBody(whiteCss, '.analytics-flow-node-amount'), /fill:\s*var\(--van-text-color\)/)
   assert.match(ruleBody(darkCss, '.van-theme-dark .analytics-flow-node-amount'), /fill:\s*var\(--van-text-color\)/)
 })
+
+const layeredGeometryGraph = {
+  nodes: [
+    { id: 'income:salary', layer: 0, kind: 'income', refId: 'salary', value: 100, transactionIds: ['income'] },
+    { id: 'income', layer: 1, kind: 'income', value: 100, transactionIds: ['income'] },
+    { id: 'available', layer: 2, kind: 'available', value: 60, transactionIds: ['expense-available', 'income'] },
+    { id: 'savings', layer: 2, kind: 'savings', value: 40, transactionIds: ['expense-savings', 'income'] },
+    { id: 'expenses', layer: 3, kind: 'expenses', value: 100, transactionIds: ['expense-available', 'expense-savings'] },
+    { id: 'expense:food', layer: 4, kind: 'expenseCategory', refId: 'food', value: 60, transactionIds: ['expense-available'] },
+    { id: 'expense:home', layer: 4, kind: 'expenseCategory', refId: 'home', value: 40, transactionIds: ['expense-savings'] },
+  ],
+  links: [
+    { id: 'salary-income', sourceId: 'income:salary', targetId: 'income', kind: 'income', value: 100, transactionIds: ['income'] },
+    { id: 'income-available', sourceId: 'income', targetId: 'available', kind: 'income', fundingPool: 'available', value: 60, transactionIds: ['income'] },
+    { id: 'income-savings', sourceId: 'income', targetId: 'savings', kind: 'income', fundingPool: 'savings', value: 40, transactionIds: ['income'] },
+    { id: 'available-expenses', sourceId: 'available', targetId: 'expenses', kind: 'expense', fundingPool: 'available', value: 60, transactionIds: ['expense-available'] },
+    { id: 'savings-expenses', sourceId: 'savings', targetId: 'expenses', kind: 'expense', fundingPool: 'savings', value: 40, transactionIds: ['expense-savings'] },
+    { id: 'expenses-food', sourceId: 'expenses', targetId: 'expense:food', kind: 'expense', fundingPool: 'available', value: 60, transactionIds: ['expense-available'] },
+    { id: 'expenses-home', sourceId: 'expenses', targetId: 'expense:home', kind: 'expense', fundingPool: 'savings', value: 40, transactionIds: ['expense-savings'] },
+  ],
+}
+
+test('packed ribbons close at square node edges and never overfill a pool', () => {
+  assert.equal(typeof ChartUtils.buildMoneyFlowGraphGeometry, 'function')
+
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth: 900, mode: 'full' })
+
+  assert.equal(
+    geometry.ribbons.every(({ path }) => path.startsWith('M ') && path.endsWith(' Z')),
+    true,
+  )
+  assert.equal(
+    geometry.ribbons.every(({ strokeWidth }) => strokeWidth === undefined),
+    true,
+  )
+  assert.equal(
+    geometry.ribbons.every(({ width, value }) => width === Math.abs(value) * geometry.scale),
+    true,
+  )
+  assert.equal(
+    geometry.pools.every(({ incomingWidth, outgoingWidth, span }) => incomingWidth <= span && outgoingWidth <= span),
+    true,
+  )
+})
+
+test('full mobile flow preserves baseline spacing and separate 44px interaction targets', () => {
+  assert.equal(typeof ChartUtils.resolveMoneyFlowGraphMode, 'function')
+  assert.equal(ChartUtils.resolveMoneyFlowGraphMode({ nodes: layeredGeometryGraph.nodes, isDesktop: false, renderedWidth: 390 }), 'full')
+
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: false, renderedWidth: 390, mode: 'full' })
+
+  assert.ok(geometry.baselineSpacing >= 28)
+  assert.equal(
+    geometry.nodes.every(({ hitBox }) => hitBox.width >= 44 && hitBox.height >= 44),
+    true,
+  )
+  assert.equal(
+    geometry.ribbons.every(({ hitBox }) => hitBox.width >= 44 && hitBox.height >= 44),
+    true,
+  )
+})
+
+test('crowded 390px flow condenses outer details without discarding their selection metadata', () => {
+  const detailNodes = Array.from({ length: 7 }, (_, index) => ({
+    id: `expense:${index + 1}`,
+    layer: 4,
+    kind: 'expenseCategory',
+    refId: String(index + 1),
+    value: 10,
+    transactionIds: [`expense-${index + 1}`],
+  }))
+  const detailLinks = detailNodes.map((node) => ({
+    id: `expenses-${node.refId}`,
+    sourceId: 'expenses',
+    targetId: node.id,
+    kind: 'expense',
+    fundingPool: 'available',
+    value: 10,
+    transactionIds: node.transactionIds,
+  }))
+  const graph = {
+    nodes: [...layeredGeometryGraph.nodes.filter(({ layer }) => layer !== 4), ...detailNodes],
+    links: [...layeredGeometryGraph.links.filter(({ targetId }) => !targetId.startsWith('expense:')), ...detailLinks],
+  }
+
+  assert.equal(ChartUtils.resolveMoneyFlowGraphMode({ nodes: graph.nodes, isDesktop: false, renderedWidth: 390 }), 'condensed')
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...graph, isDesktop: false, renderedWidth: 390, mode: 'condensed' })
+  const hiddenNodes = graph.nodes.filter(({ layer }) => layer === 0 || layer === 4)
+  const hiddenNodeIds = new Set(hiddenNodes.map(({ id }) => id))
+  const hiddenLinks = graph.links.filter(({ sourceId, targetId }) => hiddenNodeIds.has(sourceId) || hiddenNodeIds.has(targetId))
+
+  assert.equal(
+    geometry.nodes.every(({ layer }) => layer > 0 && layer < 4),
+    true,
+  )
+  assert.deepEqual(
+    geometry.details.nodes.map(({ id }) => id),
+    hiddenNodes.map(({ id }) => id),
+  )
+  assert.deepEqual(
+    geometry.details.links.map(({ id }) => id),
+    hiddenLinks.map(({ id }) => id),
+  )
+  assert.deepEqual(
+    geometry.details.nodes.flatMap(({ transactionIds }) => transactionIds),
+    hiddenNodes.flatMap(({ transactionIds }) => transactionIds),
+  )
+})
+
+test('layered flow renderer uses filled ribbons and emits exact selected graph objects', () => {
+  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+
+  assert.match(component, /<path :d="ribbon\.path" :fill="linkColor\(ribbon\)"/)
+  assert.doesNotMatch(component, /stroke-linecap|strokeWidth/)
+  assert.match(component, /defineEmits\(\['select-node', 'select-link'\]\)/)
+  assert.match(component, /emit\('select-node', node\)/)
+  assert.match(component, /emit\('select-link', link\)/)
+  assert.match(component, /linkAriaLabel[\s\S]*analytics\.flow\.source[\s\S]*analytics\.flow\.destination/)
+})

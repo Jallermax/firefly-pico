@@ -204,6 +204,155 @@ export function buildMoneyFlowGeometry({ sources, destinations, total, isDesktop
   }
 }
 
+const MONEY_FLOW_GRAPH_PADDING = 16
+const MONEY_FLOW_GRAPH_GAP = 28
+const MONEY_FLOW_GRAPH_HIT_SIZE = 44
+const MONEY_FLOW_GRAPH_NODE_THICKNESS = 12
+
+const moneyFlowGraphWidth = (renderedWidth, isDesktop) => (Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : isDesktop ? 1000 : 360)
+const moneyFlowGraphLayerGroups = (nodes) => {
+  const layers = new Map()
+  for (const node of nodes) layers.set(node.layer, [...(layers.get(node.layer) ?? []), node])
+  return [...layers.entries()].sort(([left], [right]) => left - right).map(([layer, entries]) => ({ layer, nodes: entries.sort((left, right) => left.id.localeCompare(right.id)) }))
+}
+
+export function resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth }) {
+  if (isDesktop) return 'full'
+  const width = moneyFlowGraphWidth(renderedWidth, false)
+  const requiredWidth = Math.max(
+    0,
+    ...moneyFlowGraphLayerGroups(nodes).map(({ nodes: entries }) => entries.length * MONEY_FLOW_GRAPH_HIT_SIZE + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP + MONEY_FLOW_GRAPH_PADDING * 2),
+  )
+  return requiredWidth <= width ? 'full' : 'condensed'
+}
+
+const moneyFlowGraphHitBox = ({ x, y, width, height }) => {
+  const hitWidth = Math.max(MONEY_FLOW_GRAPH_HIT_SIZE, width)
+  const hitHeight = Math.max(MONEY_FLOW_GRAPH_HIT_SIZE, height)
+  return { x: x - (hitWidth - width) / 2, y: y - (hitHeight - height) / 2, width: hitWidth, height: hitHeight }
+}
+
+const moneyFlowGraphRibbonPath = ({ source, target, sourceOffset, targetOffset, width, isDesktop }) => {
+  if (isDesktop) {
+    const sourceX = source.x + source.width
+    const targetX = target.x
+    const sourceStart = source.y + sourceOffset
+    const sourceEnd = sourceStart + width
+    const targetStart = target.y + targetOffset
+    const targetEnd = targetStart + width
+    const middleX = (sourceX + targetX) / 2
+    return {
+      path: `M ${sourceX} ${sourceStart} C ${middleX} ${sourceStart}, ${middleX} ${targetStart}, ${targetX} ${targetStart} L ${targetX} ${targetEnd} C ${middleX} ${targetEnd}, ${middleX} ${sourceEnd}, ${sourceX} ${sourceEnd} Z`,
+      bounds: { x: Math.min(sourceX, targetX), y: Math.min(sourceStart, targetStart), width: Math.abs(targetX - sourceX), height: Math.max(sourceEnd, targetEnd) - Math.min(sourceStart, targetStart) },
+    }
+  }
+
+  const sourceY = source.y + source.height
+  const targetY = target.y
+  const sourceStart = source.x + sourceOffset
+  const sourceEnd = sourceStart + width
+  const targetStart = target.x + targetOffset
+  const targetEnd = targetStart + width
+  const middleY = (sourceY + targetY) / 2
+  return {
+    path: `M ${sourceStart} ${sourceY} C ${sourceStart} ${middleY}, ${targetStart} ${middleY}, ${targetStart} ${targetY} L ${targetEnd} ${targetY} C ${targetEnd} ${middleY}, ${sourceEnd} ${middleY}, ${sourceEnd} ${sourceY} Z`,
+    bounds: { x: Math.min(sourceStart, targetStart), y: Math.min(sourceY, targetY), width: Math.max(sourceEnd, targetEnd) - Math.min(sourceStart, targetStart), height: Math.abs(targetY - sourceY) },
+  }
+}
+
+export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedWidth, mode }) {
+  const width = moneyFlowGraphWidth(renderedWidth, isDesktop)
+  const resolvedMode = mode ?? resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth: width })
+  const hiddenNodes = resolvedMode === 'condensed' ? nodes.filter(({ layer }) => layer === 0 || layer === 4) : []
+  const hiddenNodeIds = new Set(hiddenNodes.map(({ id }) => id))
+  const visibleNodes = nodes.filter(({ id }) => !hiddenNodeIds.has(id))
+  const visibleNodeIds = new Set(visibleNodes.map(({ id }) => id))
+  const visibleLinks = links.filter(({ sourceId, targetId, value }) => visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId) && Number.isFinite(value) && value !== 0)
+  const hiddenLinks = resolvedMode === 'condensed' ? links.filter(({ sourceId, targetId }) => hiddenNodeIds.has(sourceId) || hiddenNodeIds.has(targetId)) : []
+  const layerGroups = moneyFlowGraphLayerGroups(visibleNodes)
+  const incoming = new Map(visibleNodes.map(({ id }) => [id, 0]))
+  const outgoing = new Map(visibleNodes.map(({ id }) => [id, 0]))
+  for (const link of visibleLinks) {
+    outgoing.set(link.sourceId, outgoing.get(link.sourceId) + Math.abs(link.value))
+    incoming.set(link.targetId, incoming.get(link.targetId) + Math.abs(link.value))
+  }
+  const spanValues = new Map(visibleNodes.map((node) => [node.id, Math.max(Math.abs(Number(node.value) || 0), incoming.get(node.id), outgoing.get(node.id))]))
+  const crossExtent = isDesktop ? 280 : Math.max(1, width - MONEY_FLOW_GRAPH_PADDING * 2)
+  const scaleCandidates = layerGroups.flatMap(({ nodes: entries }) => {
+    const total = entries.reduce((sum, node) => sum + spanValues.get(node.id), 0)
+    const available = crossExtent - Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP
+    return total > 0 ? [Math.max(0, available) / total] : []
+  })
+  const scale = scaleCandidates.length ? Math.min(...scaleCandidates) : 1
+  const layerCrossExtents = layerGroups.map(({ nodes: entries }) => entries.reduce((sum, node) => sum + spanValues.get(node.id) * scale, 0) + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP)
+  const height = isDesktop ? Math.max(360, Math.max(0, ...layerCrossExtents) + MONEY_FLOW_GRAPH_PADDING * 2) : Math.max(280, layerGroups.length * 104 + MONEY_FLOW_GRAPH_PADDING * 2)
+  const directionExtent = isDesktop ? width : height
+  const layerStart = isDesktop ? 48 : 44
+  const layerEnd = directionExtent - layerStart
+  const layerPosition = (index) => (layerGroups.length <= 1 ? directionExtent / 2 : layerStart + (index / (layerGroups.length - 1)) * (layerEnd - layerStart))
+  const graphNodes = []
+
+  layerGroups.forEach(({ nodes: entries }, layerIndex) => {
+    const totalExtent = entries.reduce((sum, node) => sum + spanValues.get(node.id) * scale, 0) + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP
+    let cursor = ((isDesktop ? height : width) - totalExtent) / 2
+    for (const node of entries) {
+      const span = spanValues.get(node.id) * scale
+      const geometry = isDesktop
+        ? { x: layerPosition(layerIndex) - MONEY_FLOW_GRAPH_NODE_THICKNESS / 2, y: cursor, width: MONEY_FLOW_GRAPH_NODE_THICKNESS, height: span }
+        : { x: cursor, y: layerPosition(layerIndex) - MONEY_FLOW_GRAPH_NODE_THICKNESS / 2, width: span, height: MONEY_FLOW_GRAPH_NODE_THICKNESS }
+      graphNodes.push({
+        ...node,
+        node,
+        ...geometry,
+        span,
+        incomingWidth: incoming.get(node.id) * scale,
+        outgoingWidth: outgoing.get(node.id) * scale,
+        hitBox: moneyFlowGraphHitBox(geometry),
+      })
+      cursor += span + MONEY_FLOW_GRAPH_GAP
+    }
+  })
+
+  const nodeGeometry = new Map(graphNodes.map((node) => [node.id, node]))
+  const sourceOffsets = new Map(graphNodes.map(({ id }) => [id, 0]))
+  const targetOffsets = new Map(graphNodes.map(({ id }) => [id, 0]))
+  const ribbons = [...visibleLinks]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((link) => {
+      const source = nodeGeometry.get(link.sourceId)
+      const target = nodeGeometry.get(link.targetId)
+      const ribbonWidth = Math.abs(link.value) * scale
+      const sourceOffset = sourceOffsets.get(link.sourceId)
+      const targetOffset = targetOffsets.get(link.targetId)
+      sourceOffsets.set(link.sourceId, sourceOffset + ribbonWidth)
+      targetOffsets.set(link.targetId, targetOffset + ribbonWidth)
+      const { path, bounds } = moneyFlowGraphRibbonPath({ source, target, sourceOffset, targetOffset, width: ribbonWidth, isDesktop })
+      return { ...link, link, width: ribbonWidth, path, source, target, hitBox: moneyFlowGraphHitBox(bounds) }
+    })
+
+  const baselines = layerGroups.flatMap(({ nodes: entries }) => {
+    const positioned = entries.map(({ id }) => nodeGeometry.get(id)).sort((left, right) => (isDesktop ? left.y - right.y : left.x - right.x))
+    return positioned.slice(1).map((node, index) => {
+      const previous = positioned[index]
+      return isDesktop ? node.y + node.height / 2 - previous.y - previous.height / 2 : node.x + node.width / 2 - previous.x - previous.width / 2
+    })
+  })
+  const baselineSpacing = baselines.length ? Math.min(...baselines) : MONEY_FLOW_GRAPH_GAP
+
+  return {
+    mode: resolvedMode,
+    width,
+    height,
+    viewBox: `0 0 ${width} ${height}`,
+    scale,
+    baselineSpacing,
+    nodes: graphNodes,
+    ribbons,
+    pools: graphNodes.filter(({ kind }) => ['available', 'savings'].includes(kind)),
+    details: resolvedMode === 'condensed' ? { nodes: hiddenNodes, links: hiddenLinks } : null,
+  }
+}
+
 export function resolveMoneyFlowPresentation({ isBalanced, hasNodes }) {
   return {
     showChart: isBalanced && hasNodes,

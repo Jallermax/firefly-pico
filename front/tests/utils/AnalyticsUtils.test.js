@@ -1051,6 +1051,37 @@ const nodeTransactions = (graph, id) => graph.nodes.find((node) => node.id === i
 const linkValue = (graph, sourceId, targetId) => graph.links.filter((link) => link.sourceId === sourceId && link.targetId === targetId).reduce((sum, link) => sum + link.value, 0)
 const linkTotal = (graph, id, direction) => graph.links.filter((link) => link[`${direction}Id`] === id).reduce((sum, link) => sum + link.value, 0)
 
+const manyCategoryGraph = {
+  nodes: [
+    { id: 'available', layer: 2, kind: 'available', value: 280, transactionIds: [] },
+    { id: 'expenses', layer: 3, kind: 'expenses', value: 280, transactionIds: [] },
+    { id: 'expense:category-1', layer: 4, kind: 'expenseCategory', refId: 'category-1', value: 70, transactionIds: ['expense-1'] },
+    { id: 'expense:category-2', layer: 4, kind: 'expenseCategory', refId: 'category-2', value: 60, transactionIds: ['expense-2'] },
+    { id: 'expense:category-3', layer: 4, kind: 'expenseCategory', refId: 'category-3', value: 50, transactionIds: ['expense-3'] },
+    { id: 'expense:category-4', layer: 4, kind: 'expenseCategory', refId: 'category-4', value: 40, transactionIds: ['expense-4'] },
+    { id: 'expense:category-5', layer: 4, kind: 'expenseCategory', refId: 'category-5', value: 30, transactionIds: ['expense-5'] },
+    { id: 'expense:category-6', layer: 4, kind: 'expenseCategory', refId: 'category-6', value: 20, transactionIds: ['expense-6'] },
+    { id: 'expense:category-7', layer: 4, kind: 'expenseCategory', refId: 'category-7', value: 10, transactionIds: ['expense-7'] },
+  ],
+  links: [
+    { id: 'available->expenses', sourceId: 'available', targetId: 'expenses', kind: 'expense', fundingPool: 'available', value: 280, transactionIds: [] },
+    { id: 'expenses->category-1', sourceId: 'expenses', targetId: 'expense:category-1', kind: 'expense', fundingPool: 'available', value: 70, transactionIds: ['expense-1'] },
+    { id: 'expenses->category-2', sourceId: 'expenses', targetId: 'expense:category-2', kind: 'expense', fundingPool: 'available', value: 60, transactionIds: ['expense-2'] },
+    { id: 'expenses->category-3', sourceId: 'expenses', targetId: 'expense:category-3', kind: 'expense', fundingPool: 'available', value: 50, transactionIds: ['expense-3'] },
+    { id: 'expenses->category-4', sourceId: 'expenses', targetId: 'expense:category-4', kind: 'expense', fundingPool: 'available', value: 40, transactionIds: ['expense-4'] },
+    { id: 'expenses->category-5', sourceId: 'expenses', targetId: 'expense:category-5', kind: 'expense', fundingPool: 'available', value: 30, transactionIds: ['expense-5'] },
+    { id: 'expenses->category-6', sourceId: 'expenses', targetId: 'expense:category-6', kind: 'expense', fundingPool: 'available', value: 20, transactionIds: ['expense-6'] },
+    { id: 'expenses->category-7', sourceId: 'expenses', targetId: 'expense:category-7', kind: 'expense', fundingPool: 'available', value: 10, transactionIds: ['expense-7'] },
+  ],
+  pools: { available: { incoming: 280, outgoing: 280, net: 0 }, savings: { incoming: 0, outgoing: 0, net: 0 } },
+  audit: { totalSources: 280, totalDestinations: 280, equationDifference: 0 },
+  meta: { savingsView: 'combined' },
+  isEstimated: false,
+  missingCurrencies: [],
+  unclassified: { value: 0, transactionIds: [] },
+  isBalanced: true,
+}
+
 const flowAccounts = {
   checking: typedAccount({ id: 'checking', type: 'asset' }),
   card: typedAccount({ id: 'card', type: 'asset', role: 'ccAsset' }),
@@ -1308,4 +1339,121 @@ test('returns an empty layered graph as balanced', () => {
   assert.equal(graph.audit.equationDifference, 0)
   assert.deepEqual(graph.meta, { savingsView: 'split' })
   assert.equal(graph.isBalanced, true)
+})
+
+test('limits each compatible breakdown independently and preserves exact Other totals', () => {
+  assert.equal(typeof AnalyticsUtils.limitMoneyFlowGraphDetail, 'function')
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: manyCategoryGraph, detailLevel: 5 })
+  const expenseNodes = limited.nodes.filter(({ kind }) => ['expenseCategory', 'otherExpenseCategory'].includes(kind))
+
+  assert.equal(expenseNodes.length, 6)
+  assert.equal(nodeValue(limited, 'other:expenses:available:positive'), 30)
+  assert.deepEqual(nodeTransactions(limited, 'other:expenses:available:positive'), ['expense-6', 'expense-7'])
+  assert.equal(linkValue(limited, 'expenses', 'other:expenses:available:positive'), 30)
+  assert.equal(linkTotal(limited, 'expenses', 'source'), 280)
+  assert.equal(linkTotal(limited, 'expenses', 'target'), 280)
+  assert.deepEqual(limited.pools, manyCategoryGraph.pools)
+  assert.deepEqual(limited.audit, manyCategoryGraph.audit)
+})
+
+test('uses stable entity IDs to break equal-value detail ties regardless of input order', () => {
+  assert.equal(typeof AnalyticsUtils.limitMoneyFlowGraphDetail, 'function')
+
+  const reversedEqualGraph = {
+    ...manyCategoryGraph,
+    nodes: [
+      { id: 'expenses', layer: 3, kind: 'expenses', value: 60, transactionIds: [] },
+      ...['f', 'e', 'd', 'c', 'b', 'a'].map((refId) => ({ id: `expense:${refId}`, layer: 4, kind: 'expenseCategory', refId, value: 10, transactionIds: [`expense-${refId}`] })),
+    ],
+    links: ['f', 'e', 'd', 'c', 'b', 'a'].map((refId) => ({
+      id: `expenses->${refId}`,
+      sourceId: 'expenses',
+      targetId: `expense:${refId}`,
+      kind: 'expense',
+      fundingPool: 'available',
+      value: 10,
+      transactionIds: [`expense-${refId}`],
+    })),
+  }
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: reversedEqualGraph, detailLevel: 5 })
+
+  assert.deepEqual(
+    limited.nodes.filter(({ kind }) => kind === 'expenseCategory').map(({ refId }) => refId),
+    ['a', 'b', 'c', 'd', 'e'],
+  )
+  assert.deepEqual(nodeTransactions(limited, 'other:expenses:available:positive'), ['expense-f'])
+})
+
+test('never combines incompatible graph sides, pools, signs, or savings groups into one Other node', () => {
+  assert.equal(typeof AnalyticsUtils.limitMoneyFlowGraphDetail, 'function')
+
+  const nodes = [
+    { id: 'available', layer: 2, kind: 'available', value: 12, transactionIds: [] },
+    { id: 'savings', layer: 2, kind: 'savings', value: 18, transactionIds: [] },
+    { id: 'expenses', layer: 3, kind: 'expenses', value: 12, transactionIds: [] },
+    { id: 'savingsDeposited', layer: 3, kind: 'savingsDeposited', value: 12, transactionIds: [] },
+  ]
+  const links = []
+  const addGroup = ({ prefix, layer, kind, parentId, side, fundingPool, savingsGroup }) => {
+    for (let index = 1; index <= 6; index++) {
+      const value = 7 - index
+      const id = `${prefix}:${index}`
+      const transactionId = `${prefix}-${index}`
+      nodes.push({ id, layer, kind, refId: String(index), value, transactionIds: [transactionId], ...(savingsGroup ? { savingsGroup } : {}) })
+      links.push({
+        id: side === 'source' ? `${id}->${parentId}` : `${parentId}->${id}`,
+        sourceId: side === 'source' ? id : parentId,
+        targetId: side === 'source' ? parentId : id,
+        kind,
+        fundingPool,
+        value,
+        transactionIds: [transactionId],
+      })
+    }
+  }
+  addGroup({ prefix: 'expense-available', layer: 4, kind: 'expenseCategory', parentId: 'expenses', side: 'destination', fundingPool: 'available' })
+  addGroup({ prefix: 'expense-savings', layer: 4, kind: 'expenseCategory', parentId: 'expenses', side: 'destination', fundingPool: 'savings' })
+  addGroup({ prefix: 'refund-available', layer: 0, kind: 'refund', parentId: 'available', side: 'source', fundingPool: 'available' })
+  addGroup({ prefix: 'deposit-included', layer: 4, kind: 'savingsDeposit', parentId: 'savingsDeposited', side: 'destination', fundingPool: 'savings', savingsGroup: 'included' })
+  addGroup({ prefix: 'deposit-excluded', layer: 4, kind: 'savingsDeposit', parentId: 'savingsDeposited', side: 'destination', fundingPool: 'savings', savingsGroup: 'excluded' })
+  addGroup({ prefix: 'withdraw-included', layer: 0, kind: 'existingSavings', parentId: 'savings', side: 'source', fundingPool: 'savings', savingsGroup: 'included' })
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: { ...manyCategoryGraph, nodes, links }, detailLevel: 5 })
+  const otherNodes = limited.nodes.filter(({ id }) => id.startsWith('other:'))
+
+  assert.deepEqual(
+    otherNodes.map(({ id }) => id),
+    [
+      'other:existingSavings:savings:negative:included',
+      'other:expenses:available:positive',
+      'other:expenses:savings:positive',
+      'other:refunds:available:negative',
+      'other:savingsDeposited:savings:positive:excluded',
+      'other:savingsDeposited:savings:positive:included',
+    ],
+  )
+  assert.equal(
+    otherNodes.every(({ value }) => value === 1),
+    true,
+  )
+  assert.deepEqual(otherNodes.flatMap(({ transactionIds }) => transactionIds).sort(), [
+    'deposit-excluded-6',
+    'deposit-included-6',
+    'expense-available-6',
+    'expense-savings-6',
+    'refund-available-6',
+    'withdraw-included-6',
+  ])
+})
+
+test('All graph detail preserves every original node and link', () => {
+  assert.equal(typeof AnalyticsUtils.limitMoneyFlowGraphDetail, 'function')
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: manyCategoryGraph, detailLevel: 'all' })
+
+  assert.equal(limited, manyCategoryGraph)
+  assert.deepEqual(limited.nodes, manyCategoryGraph.nodes)
+  assert.deepEqual(limited.links, manyCategoryGraph.links)
 })

@@ -598,6 +598,96 @@ export function buildLayeredMonthlyMoneyFlow({ transactions, monthKey, displayCu
   }
 }
 
+const moneyFlowOtherGroups = {
+  expenseCategory: 'expenses',
+  refund: 'refunds',
+  savingsDeposit: 'savingsDeposited',
+}
+
+const moneyFlowOtherKind = (kind) => `other${kind.charAt(0).toUpperCase()}${kind.slice(1)}`
+const sortedTransactionIds = (items) => unique(items.flatMap(({ transactionIds }) => transactionIds ?? [])).sort()
+
+export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
+  if (detailLevel === 'all') return graph
+
+  const limit = Number(detailLevel)
+  const linksByNode = new Map()
+  for (const link of graph.links) {
+    for (const [side, id] of [
+      ['source', link.sourceId],
+      ['destination', link.targetId],
+    ]) {
+      const entries = linksByNode.get(id) ?? []
+      entries.push({ side, link })
+      linksByNode.set(id, entries)
+    }
+  }
+
+  const groups = new Map()
+  for (const node of graph.nodes.filter(({ refId }) => refId !== undefined && refId !== null)) {
+    const connections = linksByNode.get(node.id) ?? []
+    const outgoing = connections.filter(({ side }) => side === 'source')
+    const incoming = connections.filter(({ side }) => side === 'destination')
+    const side = outgoing.length && !incoming.length ? 'source' : 'destination'
+    const connectedLinks = side === 'source' ? outgoing : incoming
+    const parentIds = unique(connectedLinks.map(({ link }) => (side === 'source' ? link.targetId : link.sourceId))).sort()
+    const fundingPools = unique(connectedLinks.map(({ link }) => link.fundingPool)).sort()
+    const fundingPool = fundingPools[0] ?? (['savingsDeposit', 'existingSavings'].includes(node.kind) ? 'savings' : 'none')
+    const sign = side === 'source' || node.value < 0 ? 'negative' : 'positive'
+    const groupName = moneyFlowOtherGroups[node.kind] ?? node.kind
+    const key = [side, groupName, parentIds.join(','), fundingPools.join(','), fundingPool, sign, node.savingsGroup ?? ''].join(':')
+    const group = groups.get(key) ?? { nodes: [], side, groupName, fundingPool, sign, savingsGroup: node.savingsGroup }
+    group.nodes.push(node)
+    groups.set(key, group)
+  }
+
+  const hiddenToOther = new Map()
+  const otherNodes = []
+  for (const group of groups.values()) {
+    const ranked = [...group.nodes].sort((left, right) => Math.abs(right.value) - Math.abs(left.value) || String(left.refId ?? left.id).localeCompare(String(right.refId ?? right.id)))
+    const hidden = ranked.slice(Number.isFinite(limit) && limit >= 0 ? limit : ranked.length)
+    if (!hidden.length) continue
+
+    const suffix = group.savingsGroup ? `:${group.savingsGroup}` : ''
+    const id = `other:${group.groupName}:${group.fundingPool}:${group.sign}${suffix}`
+    for (const node of hidden) hiddenToOther.set(node.id, id)
+    otherNodes.push({
+      id,
+      layer: hidden[0].layer,
+      kind: moneyFlowOtherKind(hidden[0].kind),
+      label: 'Other',
+      value: hidden.reduce((total, node) => total + node.value, 0),
+      transactionIds: sortedTransactionIds(hidden),
+      ...(group.savingsGroup ? { savingsGroup: group.savingsGroup } : {}),
+      details: { nodes: hidden },
+    })
+  }
+
+  if (!hiddenToOther.size) return graph
+
+  const rewiredLinks = new Map()
+  for (const link of graph.links) {
+    const sourceId = hiddenToOther.get(link.sourceId) ?? link.sourceId
+    const targetId = hiddenToOther.get(link.targetId) ?? link.targetId
+    if (sourceId === link.sourceId && targetId === link.targetId) {
+      rewiredLinks.set(`original:${link.id}`, link)
+      continue
+    }
+    const key = [sourceId, targetId, link.kind ?? '', link.fundingPool ?? ''].join(':')
+    const existing = rewiredLinks.get(key)
+    if (!existing) {
+      rewiredLinks.set(key, { ...link, id: `${sourceId}->${targetId}:${link.kind ?? ''}:${link.fundingPool ?? ''}`, sourceId, targetId, transactionIds: sortedTransactionIds([link]) })
+      continue
+    }
+    existing.value += link.value
+    existing.transactionIds = sortedTransactionIds([existing, link])
+  }
+
+  const nodes = [...graph.nodes.filter(({ id }) => !hiddenToOther.has(id)), ...otherNodes].sort((left, right) => left.id.localeCompare(right.id))
+  const links = [...rewiredLinks.values()].sort((left, right) => left.id.localeCompare(right.id))
+  return { ...graph, nodes, links }
+}
+
 export function buildCategoryLedger({ transactions, displayCurrencyCode, primaryCurrencyCode, rates }) {
   const months = {}
   const missingCurrencies = []
