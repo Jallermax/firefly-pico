@@ -10,6 +10,8 @@
       "actual": "Réel",
       "loading": "Chargement des analyses",
       "forecast": "Prévision",
+      "end_of_month": "Prévision de fin de mois",
+      "from_today": "À partir d’aujourd’hui",
       "average": "Moyenne",
       "current_month": "Mois en cours",
       "estimated_current_rates": "Estimé aux taux de change actuels",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "Dépenses mensuelles moyennes",
       "forecast_total": "Total prévu",
       "forecast_change": "Variation prévue",
+      "remaining_from_today": "Variation restante à partir d’aujourd’hui",
       "insufficient_history": "Au moins deux mois terminés sont nécessaires pour établir une prévision.",
       "latest": "Dernier",
       "change": "Variation",
@@ -74,6 +77,9 @@
       "definition": "Mois terminés uniquement. Les remboursements réduisent les dépenses ; l’épargne, les remboursements de dette, les virements ordinaires et les exclusions configurées du tableau de bord sont exclus.",
       "current_month_separate": "Le mois en cours est affiché séparément des moyennes des mois terminés.",
       "average_remainder": "Dépenses restantes moyennes",
+      "paced_forecast": "Prévision au rythme actuel",
+      "final_forecast_rule": "La prévision de fin de mois est le maximum du réel, de la moyenne et du rythme actuel.",
+      "remaining_from_today": "Reste à partir d’aujourd’hui",
       "used_month_count": "Mois terminés utilisés"
     },
     "flow": {

@@ -135,12 +135,15 @@ const isExpenseBlocking = computed(() => sourceState.value.expenseBlocking)
 const selectedSourcesSettled = computed(() => sourceState.value.selectedSourcesSettled)
 
 const formatCurrency = (value) => (Number.isFinite(value) ? `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
+const formatSignedCurrency = (value) => (Number.isFinite(value) ? `${value > 0 ? '+' : ''}${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
 const formatMonthKey = (value) => new Intl.DateTimeFormat(profileStore.language, { month: 'short', year: 'numeric' }).format(parseISO(value.slice(0, 7) + '-01'))
 const currentMonthKey = computed(() => format(new Date(), 'yyyy-MM'))
-const toChartPoint = (point, isEstimated) =>
+const toChartPoint = (point, isEstimated, remainingFromToday) =>
   decorateLineChartPoint(point, {
     xLabel: point.xLabel ?? formatMonthKey(point.x),
     valueLabel: formatCurrency(point.value),
+    secondaryLabel: point.kind === 'forecast' && Number.isFinite(remainingFromToday) ? t('analytics.common.from_today') : undefined,
+    secondaryValueLabel: point.kind === 'forecast' && Number.isFinite(remainingFromToday) ? formatSignedCurrency(remainingFromToday) : undefined,
     isEstimated,
   })
 
@@ -156,7 +159,11 @@ const chartSeries = computed(() =>
     .filter((series) => (series.id === 'expenses' ? hasExpenseResult.value : hasBalanceResult.value))
     .map((series) => {
       const isSeriesEstimated = series.id === 'expenses' ? analyticsStore.categorySummary.isEstimated : analyticsStore.balanceSeries.find((item) => item.id === series.id)?.isEstimated
-      return { ...series, points: series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, point.isEstimated || isSeriesEstimated)) }
+      const source = series.id === 'expenses' ? analyticsStore.financialTrend.expenses : analyticsStore.financialTrend.series.find((item) => item.id === series.id)
+      return {
+        ...series,
+        points: series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, point.isEstimated || isSeriesEstimated, source?.remainingFromToday)),
+      }
     })
     .filter((series) => series.points.length),
 )
@@ -172,11 +179,20 @@ const accountSummaries = computed(() => {
         { label: t(isBalances ? 'analytics.balance.current_total' : 'analytics.balance.current_change'), value: formatCurrency(isBalances ? series?.currentTotal : series?.currentChange) },
         { label: t('analytics.balance.average_monthly_change'), value: formatCurrency(series?.averageChange) },
         {
-          label: t(isBalances ? 'analytics.balance.forecast_total' : 'analytics.balance.forecast_change'),
+          label: t('analytics.common.end_of_month'),
           value: formatFinancialTrendForecastValue({
             forecastAvailable: series?.forecastAvailable,
             value: isBalances ? series?.forecastTotal : series?.forecastChange,
             formatValue: formatCurrency,
+            insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
+          }),
+        },
+        {
+          label: t('analytics.balance.remaining_from_today'),
+          value: formatFinancialTrendForecastValue({
+            forecastAvailable: series?.forecastAvailable,
+            value: series?.remainingFromToday,
+            formatValue: formatSignedCurrency,
             insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
           }),
         },
@@ -194,11 +210,20 @@ const expenseSummary = computed(() => {
       { label: t('analytics.balance.current_actual'), value: formatCurrency(expenses.currentActual) },
       { label: t('analytics.balance.average_monthly_spending'), value: formatCurrency(expenses.average) },
       {
-        label: t('analytics.balance.current_forecast'),
+        label: t('analytics.common.end_of_month'),
         value: formatFinancialTrendForecastValue({
           forecastAvailable: expenses.forecastAvailable,
           value: expenses.currentForecast,
           formatValue: formatCurrency,
+          insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
+        }),
+      },
+      {
+        label: t('analytics.balance.remaining_from_today'),
+        value: formatFinancialTrendForecastValue({
+          forecastAvailable: expenses.forecastAvailable,
+          value: expenses.remainingFromToday,
+          formatValue: formatSignedCurrency,
           insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
         }),
       },

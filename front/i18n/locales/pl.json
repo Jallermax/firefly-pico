@@ -10,6 +10,8 @@
       "actual": "Wartość rzeczywista",
       "loading": "Ładowanie analiz",
       "forecast": "Prognoza",
+      "end_of_month": "Prognoza na koniec miesiąca",
+      "from_today": "Od dzisiaj",
       "average": "Średnia",
       "current_month": "Bieżący miesiąc",
       "estimated_current_rates": "Oszacowano według bieżących kursów wymiany",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "Średnie wydatki miesięczne",
       "forecast_total": "Prognozowana suma",
       "forecast_change": "Prognozowana zmiana",
+      "remaining_from_today": "Pozostała zmiana od dzisiaj",
       "insufficient_history": "Prognoza wymaga co najmniej dwóch zakończonych miesięcy.",
       "latest": "Najnowsze",
       "change": "Zmiana",
@@ -74,6 +77,9 @@
       "definition": "Tylko zakończone miesiące. Zwroty zmniejszają wydatki; oszczędności, spłaty zadłużenia, zwykłe przelewy i skonfigurowane wykluczenia panelu są pomijane.",
       "current_month_separate": "Bieżący miesiąc jest wyświetlany oddzielnie od średnich z zakończonych miesięcy.",
       "average_remainder": "Średnie pozostałe wydatki",
+      "paced_forecast": "Prognoza według bieżącego tempa",
+      "final_forecast_rule": "Prognoza na koniec miesiąca jest maksimum z wartości rzeczywistej, średniej i prognozy tempa.",
+      "remaining_from_today": "Pozostało od dzisiaj",
       "used_month_count": "Użyte zakończone miesiące"
     },
     "flow": {

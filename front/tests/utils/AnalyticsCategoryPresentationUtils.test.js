@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '../../utils/AnalyticsCategoryPresentationUtils.js'
+import * as CategoryPresentation from '../../utils/AnalyticsCategoryPresentationUtils.js'
 
 const summaries = [
   {
@@ -10,7 +11,7 @@ const summaries = [
     averageLabel: '120 USD',
     currentActualLabel: '45 USD',
     forecastLabel: '2,500 USD',
-    remainingFromTodayLabel: '2,181 USD',
+    remainingFromTodayLabel: '+2,181 USD',
     forecastAvailable: true,
   },
 ]
@@ -19,8 +20,8 @@ const labels = {
   category: 'Category',
   average: 'Monthly average',
   currentActual: 'Spent so far',
-  currentForecast: 'Projected',
-  remainingFromToday: 'Remaining from today',
+  currentForecast: 'End-of-month forecast',
+  remainingFromToday: 'From today',
   insufficientHistory: 'Not enough history',
 }
 
@@ -36,8 +37,8 @@ test('category summary presentation selects the desktop table branch', () => {
       values: [
         { id: 'average', label: 'Monthly average', value: '120 USD' },
         { id: 'currentActual', label: 'Spent so far', value: '45 USD' },
-        { id: 'currentForecast', label: 'Projected', value: '2,500 USD' },
-        { id: 'remainingFromToday', label: 'Remaining from today', value: '2,181 USD' },
+        { id: 'currentForecast', label: 'End-of-month forecast', value: '2,500 USD' },
+        { id: 'remainingFromToday', label: 'From today', value: '+2,181 USD' },
       ],
     },
   ])
@@ -49,12 +50,12 @@ test('category summary presentation selects mobile localized values including re
   assert.equal(presentation.layout, 'mobile')
   assert.equal(presentation.labels.average, 'Monthly average')
   assert.equal(presentation.labels.currentActual, 'Spent so far')
-  assert.equal(presentation.labels.currentForecast, 'Projected')
+  assert.equal(presentation.labels.currentForecast, 'End-of-month forecast')
   assert.deepEqual(
     presentation.rows[0].values?.map(({ id }) => id),
     ['average', 'currentActual', 'currentForecast', 'remainingFromToday'],
   )
-  assert.equal(presentation.rows[0].values?.find(({ id }) => id === 'remainingFromToday')?.value, '2,181 USD')
+  assert.equal(presentation.rows[0].values?.find(({ id }) => id === 'remainingFromToday')?.value, '+2,181 USD')
 })
 
 test('category summary presentation uses insufficient history for unavailable forecast values', () => {
@@ -77,6 +78,8 @@ test('category chart point decoration includes currency and forecast metadata', 
       fallbackXLabel: 'Aug 2026',
       currencyCode: 'USD',
       formatNumber: (value) => value.toFixed(2),
+      secondaryLabel: 'From today',
+      secondaryValueLabel: '0.00 USD',
       isEstimated: true,
     },
   )
@@ -87,9 +90,47 @@ test('category chart point decoration includes currency and forecast metadata', 
     transactionIds: [],
     xLabel: 'Aug 2026',
     valueLabel: '1234.50 USD',
+    secondaryLabel: 'From today',
+    secondaryValueLabel: '0.00 USD',
     kind: 'forecast',
     isEstimated: true,
   })
+})
+
+test('category forecast details expose every input and both forecast values', () => {
+  assert.equal(typeof CategoryPresentation.buildCategoryForecastDetailsPresentation, 'function')
+  const presentation = CategoryPresentation.buildCategoryForecastDetailsPresentation({
+    point: {
+      currentActual: 319,
+      average: 2100,
+      averageHistoricalRemainder: 1800,
+      pacedForecast: 2119,
+      currentForecast: 2500,
+      remainingFromToday: 2181,
+      usedMonths: 6,
+    },
+    labels: {
+      currentActual: 'Current actual',
+      average: 'Average',
+      historicalRemainder: 'Historical remainder',
+      pacedForecast: 'Paced forecast',
+      finalForecast: 'Final max result',
+      remainingFromToday: 'Remaining from today',
+      usedMonths: 'Completed months used',
+    },
+    formatValue: (value) => `${value} USD`,
+    formatSignedValue: (value) => `${value > 0 ? '+' : ''}${value} USD`,
+  })
+
+  assert.deepEqual(presentation, [
+    { id: 'currentActual', label: 'Current actual', value: '319 USD' },
+    { id: 'average', label: 'Average', value: '2100 USD' },
+    { id: 'historicalRemainder', label: 'Historical remainder', value: '1800 USD' },
+    { id: 'pacedForecast', label: 'Paced forecast', value: '2119 USD' },
+    { id: 'finalForecast', label: 'Final max result', value: '2500 USD' },
+    { id: 'remainingFromToday', label: 'Remaining from today', value: '+2181 USD' },
+    { id: 'usedMonths', label: 'Completed months used', value: 6 },
+  ])
 })
 
 test('category ready presentation keeps calculation disclosure and warnings independently visible', () => {

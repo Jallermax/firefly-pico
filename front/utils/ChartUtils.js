@@ -69,8 +69,14 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
   return { xValues, yMin, yMax, series: outputSeries }
 }
 
-export function decorateLineChartPoint(point, { xLabel, valueLabel, isEstimated = false }) {
-  return { ...point, xLabel, valueLabel, isEstimated: Boolean(isEstimated) }
+export function decorateLineChartPoint(point, { xLabel, valueLabel, secondaryLabel, secondaryValueLabel, isEstimated = false }) {
+  return {
+    ...point,
+    xLabel,
+    valueLabel,
+    ...(typeof secondaryLabel === 'string' && typeof secondaryValueLabel === 'string' ? { secondaryLabel, secondaryValueLabel } : {}),
+    isEstimated: Boolean(isEstimated),
+  }
 }
 
 export function lineChartPointsAtX(series, key) {
@@ -96,7 +102,11 @@ export function lineChartPointQualifierKeys(point) {
 }
 
 export function buildLineChartLiveDescription({ xLabel, values, qualifierLabels }) {
-  const descriptions = values.map(({ label, point }) => [label, point.valueLabel, ...lineChartPointQualifierKeys(point).map((key) => qualifierLabels[key])].filter(Boolean).join(', '))
+  const descriptions = values.map(({ label, point }) => {
+    const primary = [point.valueLabel, ...lineChartPointQualifierKeys(point).map((key) => qualifierLabels[key])].filter(Boolean).join(', ')
+    const secondary = typeof point.secondaryLabel === 'string' && typeof point.secondaryValueLabel === 'string' ? `${point.secondaryLabel}: ${point.secondaryValueLabel}` : null
+    return [`${label}: ${primary}`, secondary].filter(Boolean).join(', ')
+  })
   return [xLabel, ...descriptions].filter(Boolean).join('. ')
 }
 

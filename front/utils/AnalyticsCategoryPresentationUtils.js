@@ -16,13 +16,24 @@ export const buildCategorySummaryPresentation = ({ summaries, isDesktopLayout, l
   }),
 })
 
-export const decorateCategoryChartPoint = (point, { kind, fallbackXLabel, currencyCode, formatNumber, isEstimated }) => ({
+export const decorateCategoryChartPoint = (point, { kind, fallbackXLabel, currencyCode, formatNumber, secondaryLabel, secondaryValueLabel, isEstimated }) => ({
   ...point,
   xLabel: point.xLabel ?? fallbackXLabel,
   valueLabel: `${formatNumber(point.value)} ${currencyCode}`,
+  ...(typeof secondaryLabel === 'string' && typeof secondaryValueLabel === 'string' ? { secondaryLabel, secondaryValueLabel } : {}),
   kind,
   isEstimated,
 })
+
+export const buildCategoryForecastDetailsPresentation = ({ point, labels, formatValue, formatSignedValue = formatValue }) => [
+  { id: 'currentActual', label: labels.currentActual, value: formatValue(point.currentActual) },
+  { id: 'average', label: labels.average, value: formatValue(point.average) },
+  { id: 'historicalRemainder', label: labels.historicalRemainder, value: formatValue(point.averageHistoricalRemainder) },
+  { id: 'pacedForecast', label: labels.pacedForecast, value: formatValue(point.pacedForecast) },
+  { id: 'finalForecast', label: labels.finalForecast, value: formatValue(point.currentForecast) },
+  { id: 'remainingFromToday', label: labels.remainingFromToday, value: formatSignedValue(point.remainingFromToday) },
+  { id: 'usedMonths', label: labels.usedMonths, value: point.usedMonths },
+]
 
 export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, isEstimated, missingCurrencies }) => ({
   showShortHistory: usedMonths !== requestedMonths,

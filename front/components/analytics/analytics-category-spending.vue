@@ -35,18 +35,16 @@
 
       <div v-if="summaryPresentation.layout === 'desktop'" class="analytics-category-summary-scroll">
         <div class="analytics-category-summary">
-          <div class="analytics-category-summary-header">
+          <div class="analytics-category-summary-header" style="grid-template-columns: minmax(96px, 1.4fr) repeat(4, minmax(82px, 1fr))">
             <span>{{ summaryPresentation.labels.category }}</span>
-            <span>{{ summaryPresentation.labels.average }}</span>
-            <span>{{ summaryPresentation.labels.currentActual }}</span>
-            <span>{{ summaryPresentation.labels.currentForecast }}</span>
+            <span v-for="value in summaryPresentation.rows[0]?.values ?? []" :key="value.id">{{ value.label }}</span>
           </div>
-          <div v-for="item in summaryPresentation.rows" :key="item.id" class="analytics-category-summary-row">
+          <div v-for="item in summaryPresentation.rows" :key="item.id" class="analytics-category-summary-row" style="grid-template-columns: minmax(96px, 1.4fr) repeat(4, minmax(82px, 1fr))">
             <span class="analytics-category-summary-label"><span class="analytics-chart-legend-marker" :style="{ backgroundColor: item.color }" />{{ item.label }}</span>
-            <strong>{{ item.averageLabel }}</strong>
-            <strong>{{ item.currentActualLabel }}</strong>
-            <strong v-if="item.forecastAvailable">{{ item.currentForecastLabel }}</strong>
-            <span v-else class="analytics-category-insufficient">{{ item.currentForecastLabel }}</span>
+            <template v-for="value in item.values" :key="value.id">
+              <strong v-if="item.forecastAvailable || !['currentForecast', 'remainingFromToday'].includes(value.id)">{{ value.value }}</strong>
+              <span v-else class="analytics-category-insufficient">{{ value.value }}</span>
+            </template>
           </div>
         </div>
       </div>
@@ -54,17 +52,9 @@
         <div v-for="item in summaryPresentation.rows" :key="item.id" class="analytics-category-summary-mobile-row">
           <div class="analytics-category-summary-label"><span class="analytics-chart-legend-marker" :style="{ backgroundColor: item.color }" />{{ item.label }}</div>
           <dl class="analytics-category-summary-mobile-values">
-            <div>
-              <dt>{{ summaryPresentation.labels.average }}</dt>
-              <dd>{{ item.averageLabel }}</dd>
-            </div>
-            <div>
-              <dt>{{ summaryPresentation.labels.currentActual }}</dt>
-              <dd>{{ item.currentActualLabel }}</dd>
-            </div>
-            <div>
-              <dt>{{ summaryPresentation.labels.currentForecast }}</dt>
-              <dd>{{ item.currentForecastLabel }}</dd>
+            <div v-for="value in item.values" :key="value.id">
+              <dt>{{ value.label }}</dt>
+              <dd>{{ value.value }}</dd>
             </div>
           </dl>
         </div>
@@ -95,22 +85,10 @@
           <strong class="flex-1">{{ $t('analytics.common.details') }} — {{ selectedForecastPoint.categoryLabel }}</strong>
           <van-button size="small" @click="forecastDetailsVisible = false">{{ $t('ok') }}</van-button>
         </div>
-        <p>{{ $t('analytics.category.forecast_formula') }}</p>
-        <div class="analytics-forecast-detail-row">
-          <span>{{ $t('analytics.category.current_actual') }}</span
-          ><strong>{{ formatCurrency(selectedForecastPoint.currentActual) }}</strong>
-        </div>
-        <div class="analytics-forecast-detail-row">
-          <span>{{ $t('analytics.category.average_remainder') }}</span
-          ><strong>{{ formatCurrency(selectedForecastPoint.averageRemainder) }}</strong>
-        </div>
-        <div class="analytics-forecast-detail-row">
-          <span>{{ $t('analytics.category.used_month_count') }}</span
-          ><strong>{{ selectedForecastPoint.usedMonths }}</strong>
-        </div>
-        <div class="analytics-forecast-detail-row">
-          <span>{{ $t('analytics.category.current_forecast') }}</span
-          ><strong>{{ formatCurrency(selectedForecastPoint.value) }}</strong>
+        <p>{{ $t('analytics.category.final_forecast_rule') }}</p>
+        <div v-for="row in forecastDetails" :key="row.id" class="analytics-forecast-detail-row">
+          <span>{{ row.label }}</span
+          ><strong>{{ row.value }}</strong>
         </div>
       </div>
     </app-popup>
@@ -125,7 +103,7 @@ import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useAppStore } from '~/stores/appStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
-import { buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '~/utils/AnalyticsCategoryPresentationUtils.js'
+import { buildCategoryForecastDetailsPresentation, buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '~/utils/AnalyticsCategoryPresentationUtils.js'
 import { ANALYTICS_UNCATEGORIZED_ID } from '~/utils/AnalyticsUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
@@ -154,12 +132,15 @@ const currentMonthLabel = computed(() => formatMonthKey(currentMonthKey.value))
 const categoryLabel = (categoryId) =>
   categoryId === ANALYTICS_UNCATEGORIZED_ID ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[categoryId]) || categoryId
 const formatCurrency = (value) => `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}`
-const toChartPoint = (point, kind) =>
+const formatSignedCurrency = (value) => `${value > 0 ? '+' : ''}${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}`
+const toChartPoint = (point, kind, remainingFromToday) =>
   decorateCategoryChartPoint(point, {
     kind,
     fallbackXLabel: formatMonthKey(point.x),
     currencyCode: analyticsStore.displayCurrencyCode,
     formatNumber: formatNumberForDashboard,
+    secondaryLabel: kind === 'forecast' ? t('analytics.common.from_today') : undefined,
+    secondaryValueLabel: kind === 'forecast' && Number.isFinite(remainingFromToday) ? formatSignedCurrency(remainingFromToday) : undefined,
     isEstimated: analyticsStore.categorySummary.isEstimated,
   })
 
@@ -180,11 +161,16 @@ const chartSeries = computed(() =>
                 value: category.currentForecast,
                 transactionIds: [],
                 currentActual: category.currentActual,
-                averageRemainder: category.currentForecast - category.currentActual,
+                average: category.average,
+                averageHistoricalRemainder: category.averageHistoricalRemainder,
+                pacedForecast: category.pacedForecast,
+                currentForecast: category.currentForecast,
+                remainingFromToday: category.remainingFromToday,
                 usedMonths: summary.value.usedMonths,
                 categoryLabel: categoryLabel(category.id),
               },
               'forecast',
+              category.remainingFromToday,
             ),
           ]
         : []),
@@ -200,6 +186,7 @@ const summaries = computed(() =>
     averageLabel: category.average === null ? '—' : formatCurrency(category.average),
     currentActualLabel: formatCurrency(category.currentActual),
     forecastLabel: category.forecastAvailable ? formatCurrency(category.currentForecast) : null,
+    remainingFromTodayLabel: category.forecastAvailable ? formatSignedCurrency(category.remainingFromToday) : null,
   })),
 )
 const summaryPresentation = computed(() =>
@@ -210,10 +197,29 @@ const summaryPresentation = computed(() =>
       category: t('category'),
       average: t('analytics.common.average'),
       currentActual: t('analytics.category.current_actual'),
-      currentForecast: t('analytics.category.current_forecast'),
+      currentForecast: t('analytics.common.end_of_month'),
+      remainingFromToday: t('analytics.common.from_today'),
       insufficientHistory: t('analytics.category.insufficient_history'),
     },
   }),
+)
+const forecastDetails = computed(() =>
+  selectedForecastPoint.value
+    ? buildCategoryForecastDetailsPresentation({
+        point: selectedForecastPoint.value,
+        labels: {
+          currentActual: t('analytics.category.current_actual'),
+          average: t('analytics.common.average'),
+          historicalRemainder: t('analytics.category.average_remainder'),
+          pacedForecast: t('analytics.category.paced_forecast'),
+          finalForecast: t('analytics.common.end_of_month'),
+          remainingFromToday: t('analytics.category.remaining_from_today'),
+          usedMonths: t('analytics.category.used_month_count'),
+        },
+        formatValue: formatCurrency,
+        formatSignedValue: formatSignedCurrency,
+      })
+    : [],
 )
 const readyPresentation = computed(() =>
   buildCategoryReadyPresentation({

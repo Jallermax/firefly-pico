@@ -10,6 +10,8 @@
       "actual": "실제",
       "loading": "분석을 불러오는 중",
       "forecast": "예측",
+      "end_of_month": "월말 예측",
+      "from_today": "오늘부터",
       "average": "평균",
       "current_month": "현재 월",
       "estimated_current_rates": "현재 환율로 추정",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "평균 월별 지출",
       "forecast_total": "예측 합계",
       "forecast_change": "예측 변동",
+      "remaining_from_today": "오늘부터 남은 변동",
       "insufficient_history": "예측하려면 완료된 월이 두 개 이상 필요합니다.",
       "latest": "최신",
       "change": "변화",
@@ -74,6 +77,9 @@
       "definition": "완료된 월만 포함합니다. 환불은 지출을 줄이며 저축, 부채 상환, 일반 이체 및 구성된 대시보드 제외 항목은 포함하지 않습니다.",
       "current_month_separate": "현재 월은 완료된 월의 평균과 별도로 표시됩니다.",
       "average_remainder": "평균 잔여 지출",
+      "paced_forecast": "현재 속도 예측",
+      "final_forecast_rule": "월말 예측은 실제, 평균, 속도 예측 중 최댓값입니다.",
+      "remaining_from_today": "오늘부터 남은 금액",
       "used_month_count": "사용된 완료 월 수"
     },
     "flow": {

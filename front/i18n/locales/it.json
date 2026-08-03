@@ -10,6 +10,8 @@
       "actual": "Effettivo",
       "loading": "Caricamento delle analisi",
       "forecast": "Previsione",
+      "end_of_month": "Previsione di fine mese",
+      "from_today": "Da oggi",
       "average": "Media",
       "current_month": "Mese corrente",
       "estimated_current_rates": "Stimato ai tassi di cambio correnti",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "Spesa mensile media",
       "forecast_total": "Totale previsto",
       "forecast_change": "Variazione prevista",
+      "remaining_from_today": "Variazione restante da oggi",
       "insufficient_history": "Per una previsione sono necessari almeno due mesi completati.",
       "latest": "Più recente",
       "change": "Variazione",
@@ -74,6 +77,9 @@
       "definition": "Solo mesi completati. I rimborsi riducono la spesa; sono esclusi risparmi, pagamenti dei debiti, trasferimenti ordinari ed esclusioni configurate della dashboard.",
       "current_month_separate": "Il mese corrente è mostrato separatamente dalle medie dei mesi completati.",
       "average_remainder": "Spesa media rimanente",
+      "paced_forecast": "Previsione al ritmo attuale",
+      "final_forecast_rule": "La previsione di fine mese è il massimo tra effettivo, media e ritmo attuale.",
+      "remaining_from_today": "Rimanente da oggi",
       "used_month_count": "Mesi completati utilizzati"
     },
     "flow": {

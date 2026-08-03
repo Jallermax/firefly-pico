@@ -79,6 +79,7 @@
         <span class="flex-1">{{ item.label }}</span>
         <span class="analytics-chart-tooltip-amount">{{ item.point.valueLabel }}</span>
         <span v-for="qualifier in pointQualifiers(item.point)" :key="qualifier" class="analytics-chart-tooltip-qualifier">{{ qualifier }}</span>
+        <span v-if="item.point.secondaryLabel && item.point.secondaryValueLabel" class="analytics-chart-tooltip-qualifier">{{ item.point.secondaryLabel }}: {{ item.point.secondaryValueLabel }}</span>
       </button>
     </div>
 

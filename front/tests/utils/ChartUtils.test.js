@@ -129,6 +129,7 @@ test('financial forecast crosshair keeps exact values and dashed segments for ev
     id,
     changePoints: [{ x: '2026-08', value: 10 + index, kind: 'partial' }],
     forecastChange: 20 + index,
+    remainingFromToday: index === 2 ? -5 : 10 + index,
     forecastAvailable: true,
   }))
   const metrics = ['netWorth', 'savings', 'debt', 'expenses'].map((id) => ({ id }))
@@ -137,23 +138,32 @@ test('financial forecast crosshair keeps exact values and dashed segments for ev
     metrics,
     selectedIds: metrics.map(({ id }) => id),
     accountSeries,
-    expenses: { actualPoints: [], currentActual: 20, currentForecast: 30, forecastAvailable: true },
+    expenses: { actualPoints: [], currentActual: 20, currentForecast: 30, remainingFromToday: 10, forecastAvailable: true },
     currentMonthKey: '2026-08',
   }).map((item) => ({
     ...item,
-    points: item.points.map((point) => ChartUtils.decorateLineChartPoint(point, { xLabel: 'Aug 2026', valueLabel: `${point.value} USD`, isEstimated: true })),
+    points: item.points.map((point) => {
+      const source = item.id === 'expenses' ? { remainingFromToday: 10 } : accountSeries.find(({ id }) => id === item.id)
+      return ChartUtils.decorateLineChartPoint(point, {
+        xLabel: 'Aug 2026',
+        valueLabel: `${point.value} USD`,
+        secondaryLabel: point.kind === 'forecast' ? 'From today' : undefined,
+        secondaryValueLabel: point.kind === 'forecast' ? `${source.remainingFromToday > 0 ? '+' : ''}${source.remainingFromToday} USD` : undefined,
+        isEstimated: true,
+      })
+    }),
   }))
   const geometry = buildLineChartGeometry({ width: 100, height: 60, padding: { top: 10, right: 10, bottom: 10, left: 10 }, series })
   const selected = ChartUtils.lineChartPointsAtX(geometry.series, forecastKey)
 
   assert.equal(selected.length, 4)
   assert.deepEqual(
-    selected.map(({ series: item, point }) => [item.id, point.value, point.kind, point.isEstimated]),
+    selected.map(({ series: item, point }) => [item.id, point.value, point.kind, point.secondaryLabel, point.secondaryValueLabel, point.isEstimated]),
     [
-      ['netWorth', 20, 'forecast', true],
-      ['savings', 21, 'forecast', true],
-      ['debt', 22, 'forecast', true],
-      ['expenses', 30, 'forecast', true],
+      ['netWorth', 20, 'forecast', 'From today', '+10 USD', true],
+      ['savings', 21, 'forecast', 'From today', '+11 USD', true],
+      ['debt', 22, 'forecast', 'From today', '-5 USD', true],
+      ['expenses', 30, 'forecast', 'From today', '+10 USD', true],
     ],
   )
   assert.equal(
@@ -180,7 +190,39 @@ test('tooltip and live-region qualifiers share partial forecast and estimated la
       ],
       qualifierLabels,
     }),
-    'Aug 2026. Net worth, 10 USD, Partial, Estimated at current rates. Expenses, 20 USD, Forecast, Estimated at current rates',
+    'Aug 2026. Net worth: 10 USD, Partial, Estimated at current rates. Expenses: 20 USD, Forecast, Estimated at current rates',
+  )
+})
+
+test('forecast crosshair exposes end-of-month and from-today values together', () => {
+  const description = ChartUtils.buildLineChartLiveDescription({
+    xLabel: 'Aug 2026 forecast',
+    values: [
+      {
+        label: 'Savings end-of-month forecast',
+        point: {
+          valueLabel: '2,500 USD',
+          kind: 'forecast',
+          secondaryLabel: 'From today',
+          secondaryValueLabel: '+1,300 USD',
+        },
+      },
+      {
+        label: 'Expenses end-of-month forecast',
+        point: {
+          valueLabel: '2,321 USD',
+          kind: 'forecast',
+          secondaryLabel: 'From today',
+          secondaryValueLabel: '+2,321 USD',
+        },
+      },
+    ],
+    qualifierLabels: { forecast: 'Forecast' },
+  })
+
+  assert.equal(
+    description,
+    'Aug 2026 forecast. Savings end-of-month forecast: 2,500 USD, Forecast, From today: +1,300 USD. Expenses end-of-month forecast: 2,321 USD, Forecast, From today: +2,321 USD',
   )
 })
 

@@ -10,6 +10,8 @@
       "actual": "Valoare efectivă",
       "loading": "Se încarcă analizele",
       "forecast": "Prognoză",
+      "end_of_month": "Prognoză la sfârșitul lunii",
+      "from_today": "De astăzi",
       "average": "Medie",
       "current_month": "Luna curentă",
       "estimated_current_rates": "Estimat la cursurile de schimb actuale",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "Cheltuieli lunare medii",
       "forecast_total": "Total prognozat",
       "forecast_change": "Modificare prognozată",
+      "remaining_from_today": "Modificare rămasă de astăzi",
       "insufficient_history": "Sunt necesare cel puțin două luni încheiate pentru o prognoză.",
       "latest": "Cel mai recent",
       "change": "Modificare",
@@ -74,6 +77,9 @@
       "definition": "Doar luni încheiate. Rambursările reduc cheltuielile; economiile, plățile datoriilor, transferurile obișnuite și excluderile configurate din panou sunt excluse.",
       "current_month_separate": "Luna curentă este afișată separat de mediile lunilor încheiate.",
       "average_remainder": "Cheltuială medie rămasă",
+      "paced_forecast": "Prognoză în ritmul curent",
+      "final_forecast_rule": "Prognoza la sfârșitul lunii este maximul dintre valoarea efectivă, medie și ritmul curent.",
+      "remaining_from_today": "Rămas de astăzi",
       "used_month_count": "Luni încheiate utilizate"
     },
     "flow": {

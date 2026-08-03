@@ -10,6 +10,8 @@
       "actual": "实际",
       "loading": "正在加载分析",
       "forecast": "预测",
+      "end_of_month": "月末预测",
+      "from_today": "从今天起",
       "average": "平均值",
       "current_month": "本月",
       "estimated_current_rates": "按当前汇率估算",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "月均支出",
       "forecast_total": "预测总额",
       "forecast_change": "预测变动",
+      "remaining_from_today": "从今天起的剩余变动",
       "insufficient_history": "至少需要两个已结束月份才能进行预测。",
       "latest": "最新",
       "change": "变化",
@@ -74,6 +77,9 @@
       "definition": "仅包含已结束月份。退款会减少支出；储蓄、债务还款、普通转账以及已配置的仪表板排除项不计入。",
       "current_month_separate": "本月数据与已结束月份的平均值分开显示。",
       "average_remainder": "平均剩余支出",
+      "paced_forecast": "按当前进度预测",
+      "final_forecast_rule": "月末预测取实际值、平均值和进度预测中的最大值。",
+      "remaining_from_today": "从今天起的剩余金额",
       "used_month_count": "使用的已结束月份数"
     },
     "flow": {

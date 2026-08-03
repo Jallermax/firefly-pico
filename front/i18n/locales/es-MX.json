@@ -10,6 +10,8 @@
       "actual": "Real",
       "loading": "Cargando análisis",
       "forecast": "Pronóstico",
+      "end_of_month": "Pronóstico al fin de mes",
+      "from_today": "Desde hoy",
       "average": "Promedio",
       "current_month": "Mes actual",
       "estimated_current_rates": "Estimado con los tipos de cambio actuales",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "Gasto mensual promedio",
       "forecast_total": "Total pronosticado",
       "forecast_change": "Cambio pronosticado",
+      "remaining_from_today": "Cambio restante desde hoy",
       "insufficient_history": "Se requieren al menos dos meses completados para generar un pronóstico.",
       "latest": "Más reciente",
       "change": "Cambio",
@@ -74,6 +77,9 @@
       "definition": "Solo meses completados. Los reembolsos reducen el gasto; se excluyen los ahorros, pagos de deuda, transferencias ordinarias y exclusiones configuradas del panel.",
       "current_month_separate": "El mes actual se muestra separado de los promedios de meses completados.",
       "average_remainder": "Gasto restante promedio",
+      "paced_forecast": "Pronóstico al ritmo actual",
+      "final_forecast_rule": "El pronóstico al fin de mes es el máximo entre el valor real, el promedio y el ritmo actual.",
+      "remaining_from_today": "Restante desde hoy",
       "used_month_count": "Meses completados utilizados"
     },
     "flow": {

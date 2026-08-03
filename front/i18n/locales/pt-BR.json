@@ -10,6 +10,8 @@
       "actual": "Real",
       "loading": "Carregando análises",
       "forecast": "Previsão",
+      "end_of_month": "Previsão para o fim do mês",
+      "from_today": "A partir de hoje",
       "average": "Média",
       "current_month": "Mês atual",
       "estimated_current_rates": "Estimado com as taxas de câmbio atuais",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "Gasto mensal médio",
       "forecast_total": "Total previsto",
       "forecast_change": "Variação prevista",
+      "remaining_from_today": "Variação restante a partir de hoje",
       "insufficient_history": "São necessários pelo menos dois meses concluídos para uma previsão.",
       "latest": "Mais recente",
       "change": "Variação",
@@ -74,6 +77,9 @@
       "definition": "Somente meses concluídos. Reembolsos reduzem os gastos; poupança, pagamentos de dívidas, transferências comuns e exclusões configuradas do painel são excluídos.",
       "current_month_separate": "O mês atual é exibido separadamente das médias dos meses concluídos.",
       "average_remainder": "Gasto restante médio",
+      "paced_forecast": "Previsão no ritmo atual",
+      "final_forecast_rule": "A previsão para o fim do mês é o máximo entre o valor real, a média e o ritmo atual.",
+      "remaining_from_today": "Restante a partir de hoje",
       "used_month_count": "Meses concluídos utilizados"
     },
     "flow": {

@@ -10,6 +10,8 @@
       "actual": "Istwert",
       "loading": "Analysen werden geladen",
       "forecast": "Prognose",
+      "end_of_month": "Prognose zum Monatsende",
+      "from_today": "Ab heute",
       "average": "Durchschnitt",
       "current_month": "Aktueller Monat",
       "estimated_current_rates": "Zu aktuellen Wechselkursen geschätzt",
@@ -47,6 +49,7 @@
       "average_monthly_spending": "Durchschnittliche monatliche Ausgaben",
       "forecast_total": "Prognostizierter Gesamtwert",
       "forecast_change": "Prognostizierte Veränderung",
+      "remaining_from_today": "Ab heute verbleibend",
       "insufficient_history": "Für eine Prognose sind mindestens zwei abgeschlossene Monate erforderlich.",
       "latest": "Aktuell",
       "change": "Veränderung",
@@ -74,6 +77,9 @@
       "definition": "Nur abgeschlossene Monate. Erstattungen verringern die Ausgaben; Ersparnisse, Schuldentilgungen, gewöhnliche Überweisungen und konfigurierte Dashboard-Ausschlüsse sind ausgeschlossen.",
       "current_month_separate": "Der aktuelle Monat wird getrennt von den Durchschnittswerten abgeschlossener Monate angezeigt.",
       "average_remainder": "Durchschnittliche verbleibende Ausgaben",
+      "paced_forecast": "Hochgerechnete Prognose",
+      "final_forecast_rule": "Die Monatsendprognose ist das Maximum aus Istwert, Durchschnitt und Hochrechnung.",
+      "remaining_from_today": "Ab heute verbleibend",
       "used_month_count": "Verwendete abgeschlossene Monate"
     },
     "flow": {
