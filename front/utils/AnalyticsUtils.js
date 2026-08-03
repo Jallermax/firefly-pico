@@ -68,8 +68,9 @@ export function getAnalyticsAccountKind(account) {
   if (type === 'expense') return 'expense'
   if (type === 'revenue') return 'revenue'
   if (type === 'asset' && role === 'savingAsset') return 'savings'
-  if ((type === 'asset' && role === 'ccAsset') || (type === 'liabilities' && direction === 'debit')) return 'debt'
-  if (['asset', 'cash', 'liabilities'].includes(type)) return 'balance'
+  if (type === 'liabilities' && direction === 'debit') return 'debt'
+  if (['asset', 'cash'].includes(type)) return 'available'
+  if (type === 'liabilities') return 'balance'
   return 'other'
 }
 

@@ -90,6 +90,14 @@ const activeAsset = () => ({
   id: 'checking',
   attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'defaultAsset' }, include_net_worth: true, currency_code: 'USD', current_balance: '100' },
 })
+const includedSavings = () => ({
+  id: 'savings',
+  attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'savingAsset' }, include_net_worth: true, currency_code: 'USD', current_balance: '200' },
+})
+const excludedSavings = () => ({
+  id: 'excluded-savings',
+  attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'savingAsset' }, include_net_worth: false, currency_code: 'USD', current_balance: '50' },
+})
 const debitLiability = () => ({
   id: 'loan',
   attributes: {
@@ -188,6 +196,22 @@ test('initializes a fallback currency with one request per non-empty group and r
   assert.equal(accountRequests.length, 1)
 })
 
+test('initializes the real store factory with an included savings account', async () => {
+  accountStore.accountList = [activeAsset(), includedSavings(), excludedSavings()]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.balanceState.status, 'ready')
+  assert.deepEqual(
+    accountRequests.map(({ accountIds }) => accountIds.sort()),
+    [
+      ['checking', 'savings'],
+      ['excluded-savings', 'savings'],
+    ],
+  )
+})
+
 test('normalizes a current Firefly chart timestamp before validating balances', async () => {
   const date = format(new Date(), 'yyyy-MM-dd')
   const atomDate = date + 'T00:00:00+00:00'
@@ -212,6 +236,34 @@ test('validates debit liabilities against current debt', async () => {
   assert.deepEqual(debt.currentPoint, { x: format(new Date(), 'yyyy-MM-dd'), value: 250 })
   assert.deepEqual(debt.warnings, [{ type: 'current-balance-mismatch', sampleDate: format(new Date(), 'yyyy-MM-dd'), chartValue: 200, currentValue: 250 }])
 })
+
+for (const { name, direction, currentDebt, currentBalance, expected } of [
+  { name: 'negative debit current debt', direction: 'debit', currentDebt: '-250', currentBalance: '-125', expected: 250 },
+  { name: 'credit-direction current debt', direction: 'credit', currentDebt: '150', currentBalance: '-125', expected: 150 },
+  { name: 'blank current debt fallback', direction: 'debit', currentDebt: '   ', currentBalance: '-125', expected: 125 },
+  { name: 'explicit zero current debt', direction: 'debit', currentDebt: '0', currentBalance: '-125', expected: 0 },
+]) {
+  test(`uses ${name} for the current debt total`, async () => {
+    const liability = debitLiability()
+    accountStore.accountList = [
+      {
+        ...liability,
+        attributes: {
+          ...liability.attributes,
+          liability_direction: { fireflyCode: direction },
+          current_debt: currentDebt,
+          current_balance: currentBalance,
+        },
+      },
+    ]
+    accountResponse = async () => chartResponse(-500)
+    const store = (analyticsStore = useAnalyticsStore())
+
+    await store.init()
+
+    assert.equal(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint.value, expected)
+  })
+}
 
 test('marks a weekly final point unverified when no account value exists for its sample date', async () => {
   const sampleDate = format(subDays(new Date(), 3), 'yyyy-MM-dd')

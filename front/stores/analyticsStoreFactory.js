@@ -7,6 +7,7 @@ import {
   buildMonthlyMoneyFlow,
   convertAnalyticsAmount,
   getAnalyticsAccountGroups,
+  getAnalyticsCurrentAmount,
   normalizeBalanceSeries,
   rankCategoryIds,
   summarizeBalanceMovements,
@@ -91,7 +92,10 @@ export function createAnalyticsStore(id, useDependencies) {
       return decimalPlaces === null || decimalPlaces === undefined ? 2 : Number(decimalPlaces)
     })
     const rates = computed(() => currencyStore.exchangeRates?.rates ?? {})
-    const accountGroups = computed(() => getAnalyticsAccountGroups(accountStore.accountList))
+    const accountGroups = computed(() => {
+      const groups = getAnalyticsAccountGroups(accountStore.accountList)
+      return { ...groups, savings: [...groups.savingsIncluded, ...groups.savingsExcluded] }
+    })
     const categoryLedger = computed(() =>
       buildCategoryLedger({
         transactions: transactions.value,
@@ -154,16 +158,12 @@ export function createAnalyticsStore(id, useDependencies) {
         BALANCE_METRICS.map((metric) => [
           metric,
           accountGroups.value[metric].map((account) => {
-            const type = account?.attributes?.type?.fireflyCode ?? account?.attributes?.type
-            const direction = account?.attributes?.liability_direction?.fireflyCode ?? account?.attributes?.liability_direction
-            const usesCurrentDebt = metric === 'debt' && type === 'liabilities' && direction === 'debit'
             const currentDate = account?.attributes?.current_balance_date
             return {
               id: account.id,
               currencyCode: getAccountCurrencyCode(account) ?? account?.attributes?.currency_code,
-              currentAmount: usesCurrentDebt ? account?.attributes?.current_debt : getAccountBalance(account),
+              currentAmount: getAnalyticsCurrentAmount({ account, metric, fallbackAmount: getAccountBalance(account) }),
               currentDate: currentDate instanceof Date ? DateUtils.dateToString(currentDate) : currentDate?.slice(0, 10),
-              usesCurrentDebt,
             }
           }),
         ]),
@@ -326,11 +326,7 @@ export function createAnalyticsStore(id, useDependencies) {
             })
           const result = normalize(response?.data ?? [])
           const currentResult = currentResponse ? normalize(currentResponse.data ?? []) : result
-          const currentTotal = currentAmounts.reduce(
-            (total, { account, converted }) =>
-              total + (metric === 'debt' ? (account.usesCurrentDebt ? Math.max(0, converted.value ?? 0) : Math.max(0, -(converted.value ?? 0))) : (converted.value ?? 0)),
-            0,
-          )
+          const currentTotal = currentAmounts.reduce((total, { converted }) => total + (converted.value ?? 0), 0)
           const finalPoint = currentResult.points.at(-1)
           const tolerance = 0.5 * 10 ** -snapshot.decimalPlaces
           const isCurrentEstimated = currentAmounts.some(({ converted }) => converted.isEstimated)

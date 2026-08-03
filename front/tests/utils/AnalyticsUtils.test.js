@@ -139,6 +139,12 @@ test('groups all liabilities as debt and keeps credit cards in available net wor
   )
 })
 
+test('classifies credit cards and non-savings asset accounts as available', () => {
+  assert.equal(AnalyticsUtils.getAnalyticsAccountKind(typedAccount({ type: 'asset', role: 'ccAsset' })), 'available')
+  assert.equal(AnalyticsUtils.getAnalyticsAccountKind(typedAccount({ type: 'asset' })), 'available')
+  assert.equal(AnalyticsUtils.getAnalyticsAccountKind(typedAccount({ type: 'cash' })), 'available')
+})
+
 test('normalizes each current liability amount before it is aggregated', () => {
   const liability = account({ id: 'loan', type: 'liabilities', role: null, direction: 'credit' })
   liability.attributes.current_debt = '-900'
@@ -814,7 +820,7 @@ test('category ranking uses category ID as a stable tie-breaker', () => {
   assert.deepEqual(ids, ['food', 'rent'])
 })
 
-test('money flow treats card purchases as expense plus new debt and card payments as repayment', () => {
+test('money flow keeps card purchases as expenses without classifying card movement as debt', () => {
   const flow = buildMonthlyMoneyFlow({
     monthKey: '2026-04',
     displayCurrencyCode: 'USD',
@@ -831,21 +837,21 @@ test('money flow treats card purchases as expense plus new debt and card payment
 
   assert.deepEqual(Object.fromEntries(flow.sources.map((node) => [node.id, node.value])), {
     income: 1000,
-    newDebt: 50,
   })
   assert.deepEqual(Object.fromEntries(flow.destinations.map((node) => [node.id, node.value])), {
     expenses: 300,
     savingsDeposited: 300,
-    newExcess: 450,
+    newExcess: 400,
   })
   assert.equal(flow.audit.priorExcessUsed, 0)
-  assert.equal(flow.audit.newExcess, 450)
-  assert.equal(flow.audit.sourceTotal, 1050)
-  assert.equal(flow.audit.destinationTotal, 1050)
+  assert.equal(flow.audit.newExcess, 400)
+  assert.equal(flow.audit.sourceTotal, 1000)
+  assert.equal(flow.audit.destinationTotal, 1000)
   assert.equal(flow.audit.equationDifference, 0)
   assert.equal(flow.isBalanced, true)
-  assert.deepEqual(flow.audit.debtIncreaseIds, ['card-buy'])
-  assert.deepEqual(flow.audit.debtRepaymentIds, ['card-pay'])
+  assert.equal(flow.audit.expensePurchases, 300)
+  assert.deepEqual(flow.audit.debtIncreaseIds, [])
+  assert.deepEqual(flow.audit.debtRepaymentIds, [])
 })
 
 test('money flow nets savings and debt, cancels internal transfers, and exposes refunds as a source', () => {
@@ -868,12 +874,12 @@ test('money flow nets savings and debt, cancels internal transfers, and exposes 
   assert.equal(flow.audit.savingsDeposited, 60)
   assert.equal(flow.audit.savingsWithdrawn, 0)
   assert.equal(flow.audit.newDebt, 0)
-  assert.equal(flow.audit.debtRepaid, 0)
+  assert.equal(flow.audit.debtRepaid, 25)
   assert.equal(flow.audit.netRefunds, 30)
-  assert.equal(flow.audit.priorExcessUsed, 30)
+  assert.equal(flow.audit.priorExcessUsed, 55)
   assert.equal(flow.audit.newExcess, 0)
-  assert.equal(flow.audit.sourceTotal, 60)
-  assert.equal(flow.audit.destinationTotal, 60)
+  assert.equal(flow.audit.sourceTotal, 85)
+  assert.equal(flow.audit.destinationTotal, 85)
   assert.equal(flow.audit.equationDifference, 0)
   assert.equal(flow.isBalanced, true)
 })
