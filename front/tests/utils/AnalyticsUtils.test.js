@@ -6,8 +6,10 @@ import {
   ANALYTICS_UNCATEGORIZED_ID,
   buildCategoryLedger,
   buildMonthlyMoneyFlow,
+  combineSavingsBalanceSeries,
   convertAnalyticsAmount,
   getAnalyticsAccountGroups,
+  getAnalyticsCurrentAmount,
   normalizeBalanceSeries,
   rankCategoryIds,
   summarizeBalanceMovements,
@@ -93,12 +95,13 @@ const ledgerBucketInTimezone = ({ timeZone, dateParts }) => {
   return JSON.parse(result.stdout.trim())
 }
 
-test('groups active net-worth, savings, debit liabilities, and credit cards', () => {
+test('groups all liabilities as debt and keeps credit cards in available net worth', () => {
   const groups = getAnalyticsAccountGroups([
     account({ id: 'checking' }),
-    account({ id: 'saving', role: 'savingAsset' }),
+    account({ id: 'saving-in', role: 'savingAsset', includeNetWorth: true }),
+    account({ id: 'saving-out', role: 'savingAsset', includeNetWorth: false }),
     account({ id: 'card', role: 'ccAsset' }),
-    account({ id: 'mortgage', type: 'liabilities', role: null, direction: 'debit' }),
+    account({ id: 'loan', type: 'liabilities', role: null, direction: 'debit' }),
     account({ id: 'receivable', type: 'liabilities', role: null, direction: 'credit' }),
     account({ id: 'hidden', active: false }),
     account({ id: 'excluded', includeNetWorth: false }),
@@ -116,16 +119,36 @@ test('groups active net-worth, savings, debit liabilities, and credit cards', ()
 
   assert.deepEqual(
     groups.netWorth.map(({ id }) => id),
-    ['checking', 'saving', 'card', 'mortgage', 'receivable', 'cash'],
+    ['checking', 'saving-in', 'card', 'loan', 'receivable', 'cash'],
   )
   assert.deepEqual(
-    groups.savings.map(({ id }) => id),
-    ['saving'],
+    groups.savingsIncluded.map(({ id }) => id),
+    ['saving-in'],
+  )
+  assert.deepEqual(
+    groups.savingsExcluded.map(({ id }) => id),
+    ['saving-out'],
   )
   assert.deepEqual(
     groups.debt.map(({ id }) => id),
-    ['card', 'mortgage'],
+    ['loan', 'receivable'],
   )
+  assert.equal(
+    groups.debt.some(({ id }) => id === 'card'),
+    false,
+  )
+})
+
+test('normalizes each current liability amount before it is aggregated', () => {
+  const liability = account({ id: 'loan', type: 'liabilities', role: null, direction: 'credit' })
+  liability.attributes.current_debt = '-900'
+
+  assert.equal(getAnalyticsCurrentAmount({ account: liability, metric: 'debt', fallbackAmount: 250 }), 900)
+  assert.equal(getAnalyticsCurrentAmount({ account: { attributes: { current_debt: '   ' } }, metric: 'debt', fallbackAmount: -250 }), 250)
+  assert.equal(getAnalyticsCurrentAmount({ account: liability, metric: 'netWorth', fallbackAmount: -100 }), -100)
+  assert.equal(getAnalyticsCurrentAmount({ account: liability, metric: 'debt', fallbackAmount: 'not a number' }), 900)
+  assert.equal(getAnalyticsCurrentAmount({ account: { attributes: { current_debt: 'not a number' } }, metric: 'debt', fallbackAmount: 10 }), null)
+  assert.equal(getAnalyticsCurrentAmount({ account: { attributes: { current_debt: '   ' } }, metric: 'debt', fallbackAmount: '   ' }), null)
 })
 
 test('prefers exact primary values and labels current-rate conversion', () => {
@@ -193,9 +216,68 @@ test('aligns dates, carries forward only after first history, and normalizes deb
   assert.deepEqual(result.points, [
     { x: '2026-01-01', value: 100 },
     { x: '2026-01-02', value: 150 },
-    { x: '2026-01-03', value: 80 },
+    { x: '2026-01-03', value: 90 },
   ])
   assert.equal(result.isEstimated, false)
+})
+
+test('normalizes every liability magnitude before aggregation', () => {
+  const result = normalizeBalanceSeries({
+    metric: 'debt',
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    chartLines: [
+      { currency_code: 'USD', entries: { '2026-07-31': '-900' } },
+      { currency_code: 'USD', entries: { '2026-07-31': '250' } },
+    ],
+  })
+  assert.deepEqual(result.points, [{ x: '2026-07-31', value: 1150 }])
+})
+
+test('combines complete savings groups on their union of dates without inventing early history', () => {
+  const combined = combineSavingsBalanceSeries({
+    includedSeries: {
+      id: 'savingsIncluded',
+      points: [
+        { x: '2026-01-31', value: 100 },
+        { x: '2026-03-31', value: 150 },
+      ],
+      currentPoint: { x: '2026-04-10', value: 160 },
+      isEstimated: true,
+      missingCurrencies: ['EUR'],
+      warnings: ['included warning'],
+    },
+    excludedSeries: {
+      id: 'savingsExcluded',
+      points: [
+        { x: '2026-02-28', value: 40 },
+        { x: '2026-03-31', value: 50 },
+      ],
+      currentPoint: { x: '2026-04-10', value: 55 },
+      missingCurrencies: ['JPY'],
+      warnings: ['excluded warning'],
+    },
+    includedIsEmpty: false,
+    excludedIsEmpty: false,
+  })
+
+  assert.deepEqual(combined.points, [
+    { x: '2026-02-28', value: 140 },
+    { x: '2026-03-31', value: 200 },
+  ])
+  assert.equal(combined.currentPoint.value, 215)
+  assert.equal(combined.isEstimated, true)
+  assert.deepEqual(combined.missingCurrencies, ['EUR', 'JPY'])
+  assert.deepEqual(combined.warnings, ['included warning', 'excluded warning'])
+})
+
+test('requires each non-empty savings group but treats an empty group as zero', () => {
+  const includedSeries = { points: [{ x: '2026-03-31', value: 100 }], currentPoint: { x: '2026-04-10', value: 110 } }
+  const excludedSeries = { points: [{ x: '2026-03-31', value: 50 }], currentPoint: { x: '2026-04-10', value: 55 } }
+
+  assert.equal(combineSavingsBalanceSeries({ includedSeries: null, excludedSeries, includedIsEmpty: false, excludedIsEmpty: false }), null)
+  assert.deepEqual(combineSavingsBalanceSeries({ includedSeries, excludedSeries: null, includedIsEmpty: false, excludedIsEmpty: true }).points, [{ x: '2026-03-31', value: 100 }])
 })
 
 test('uses exact primary chart entries when available', () => {
@@ -297,6 +379,51 @@ test('builds completed and partial monthly account movement from month-end total
   )
 })
 
+test('balance forecast reports signed movement remaining from today', () => {
+  const result = summarizeBalanceMovements({
+    balanceSeries: [
+      {
+        id: 'savings',
+        points: [
+          { x: '2025-12-31', value: 1000 },
+          { x: '2026-01-31', value: 1100 },
+          { x: '2026-02-28', value: 1200 },
+          { x: '2026-03-31', value: 1300 },
+        ],
+        currentPoint: { x: '2026-04-10', value: 1350 },
+      },
+    ],
+    months: 3,
+    today: new Date('2026-04-10T12:00:00'),
+  }).series[0]
+
+  assert.equal(result.forecastTotal, 1400)
+  assert.equal(result.remainingFromToday, 50)
+})
+
+test('retains zero balance movement and remaining forecast as visible values', () => {
+  const result = summarizeBalanceMovements({
+    balanceSeries: [
+      {
+        id: 'savings',
+        points: [
+          { x: '2025-12-31', value: 1000 },
+          { x: '2026-01-31', value: 1000 },
+          { x: '2026-02-28', value: 1000 },
+          { x: '2026-03-31', value: 1000 },
+        ],
+        currentPoint: { x: '2026-04-10', value: 1000 },
+      },
+    ],
+    months: 3,
+    today: new Date('2026-04-10T12:00:00'),
+  }).series[0]
+
+  assert.equal(result.currentChange, 0)
+  assert.equal(result.forecastChange, 0)
+  assert.equal(result.remainingFromToday, 0)
+})
+
 test('omits monthly movement without a preceding baseline', () => {
   const result = summarizeBalanceMovements({
     months: 3,
@@ -382,6 +509,7 @@ test('carries sparse account totals through completed months and forecasts from 
     averageChange: 10,
     forecastChange: 10,
     forecastTotal: 140,
+    remainingFromToday: 10,
     forecastAvailable: true,
   })
 })

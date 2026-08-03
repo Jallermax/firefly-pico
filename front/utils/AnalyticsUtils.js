@@ -9,14 +9,56 @@ export function getAnalyticsAccountGroups(accounts) {
   const active = accounts.filter((account) => account?.attributes?.active === true)
   const typeOf = (account) => codeOf(account?.attributes?.type)
   const roleOf = (account) => codeOf(account?.attributes?.account_role)
-  const directionOf = (account) => codeOf(account?.attributes?.liability_direction)
   const balanceHolding = (account) => ['asset', 'cash', 'liabilities'].includes(typeOf(account))
 
   return {
     netWorth: active.filter((account) => balanceHolding(account) && account?.attributes?.include_net_worth === true),
-    savings: active.filter((account) => typeOf(account) === 'asset' && roleOf(account) === 'savingAsset'),
-    debt: active.filter((account) => (typeOf(account) === 'asset' && roleOf(account) === 'ccAsset') || (typeOf(account) === 'liabilities' && directionOf(account) === 'debit')),
+    savingsIncluded: active.filter((account) => typeOf(account) === 'asset' && roleOf(account) === 'savingAsset' && account?.attributes?.include_net_worth === true),
+    savingsExcluded: active.filter((account) => typeOf(account) === 'asset' && roleOf(account) === 'savingAsset' && account?.attributes?.include_net_worth !== true),
+    debt: active.filter((account) => typeOf(account) === 'liabilities'),
   }
+}
+
+export function getAnalyticsCurrentAmount({ account, metric, fallbackAmount }) {
+  const currentDebt = account?.attributes?.current_debt
+  const rawAmount = metric === 'debt' && currentDebt !== null && currentDebt !== undefined && (typeof currentDebt !== 'string' || currentDebt.trim() !== '') ? currentDebt : fallbackAmount
+  if (rawAmount === null || rawAmount === undefined || (typeof rawAmount === 'string' && rawAmount.trim() === '')) return null
+  const amount = Number(rawAmount)
+  if (!Number.isFinite(amount)) return null
+  return metric === 'debt' ? Math.abs(amount) : amount
+}
+
+export function combineSavingsBalanceSeries({ includedSeries, excludedSeries, includedIsEmpty, excludedIsEmpty }) {
+  const series = [
+    { value: includedSeries, isEmpty: includedIsEmpty },
+    { value: excludedSeries, isEmpty: excludedIsEmpty },
+  ]
+  if (series.some(({ value, isEmpty }) => !isEmpty && !value)) return null
+
+  const nonEmptySeries = series.filter(({ isEmpty }) => !isEmpty).map(({ value }) => value)
+  const metadata = {
+    isEstimated: series.some(({ value }) => value?.isEstimated),
+    missingCurrencies: unique(series.flatMap(({ value }) => value?.missingCurrencies ?? [])),
+    warnings: unique(series.flatMap(({ value }) => value?.warnings ?? [])),
+  }
+  const dates = unique(nonEmptySeries.flatMap(({ points }) => points?.filter((point) => Number.isFinite(point.value)).map(({ x }) => x) ?? [])).sort()
+  const points = dates.flatMap((x) => {
+    const constituents = nonEmptySeries.map(({ points }) => points?.filter((point) => point.x <= x && Number.isFinite(point.value)).at(-1))
+    if (constituents.some((point) => !point)) return []
+    const isEstimated = constituents.some((point) => point.isEstimated)
+    return [{ x, value: constituents.reduce((total, point) => total + point.value, 0), ...(isEstimated ? { isEstimated: true } : {}) }]
+  })
+  const currentPoints = nonEmptySeries.map(({ currentPoint }) => (Number.isFinite(currentPoint?.value) ? currentPoint : null))
+  const currentPoint =
+    currentPoints.length === nonEmptySeries.length
+      ? {
+          x: currentPoints.at(-1)?.x ?? null,
+          value: currentPoints.reduce((total, point) => total + point.value, 0),
+          ...(currentPoints.some((point) => point.isEstimated) ? { isEstimated: true } : {}),
+        }
+      : null
+
+  return { points, currentPoint, ...metadata }
 }
 
 export function getAnalyticsAccountKind(account) {
@@ -372,6 +414,8 @@ export function summarizeBalanceMovements({ balanceSeries, months, today }) {
       const averageChange = completedChanges.length > 0 ? completedChanges.reduce((total, point) => total + point.value, 0) / completedChanges.length : null
       const forecastAvailable = completedChanges.length >= 2
       const currentChange = changePoints.find(({ kind }) => kind === 'partial')?.value ?? null
+      const forecastChange = forecastAvailable ? averageChange : null
+      const forecastTotal = forecastAvailable && precedingCompletedTotal !== null ? precedingCompletedTotal + averageChange : null
 
       return {
         id,
@@ -380,8 +424,9 @@ export function summarizeBalanceMovements({ balanceSeries, months, today }) {
         currentTotal,
         currentChange,
         averageChange,
-        forecastChange: forecastAvailable ? averageChange : null,
-        forecastTotal: forecastAvailable && precedingCompletedTotal !== null ? precedingCompletedTotal + averageChange : null,
+        forecastChange,
+        forecastTotal,
+        remainingFromToday: forecastTotal !== null && currentTotal !== null ? forecastTotal - currentTotal : null,
         forecastAvailable,
       }
     }),
@@ -494,7 +539,7 @@ export function normalizeBalanceSeries({ chartLines, metric, displayCurrencyCode
         if (!point) continue
         hasValue = true
         isPointEstimated ||= point.isEstimated
-        value += metric === 'debt' ? Math.max(0, -point.value) : point.value
+        value += metric === 'debt' ? Math.abs(point.value) : point.value
       }
       return hasValue ? { x, value, ...(isPointEstimated ? { isEstimated: true } : {}) } : null
     })
