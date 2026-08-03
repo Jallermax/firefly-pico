@@ -5,7 +5,6 @@ import * as AnalyticsUtils from '../../utils/AnalyticsUtils.js'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
   buildCategoryLedger,
-  buildLayeredMonthlyMoneyFlow,
   buildMonthlyMoneyFlow,
   combineSavingsBalanceSeries,
   convertAnalyticsAmount,
@@ -60,8 +59,6 @@ const checking = typedAccount({ type: 'asset' })
 const otherChecking = typedAccount({ type: 'asset' })
 const card = typedAccount({ type: 'asset', role: 'ccAsset' })
 const expense = typedAccount({ type: 'expense' })
-const revenue = typedAccount({ type: 'revenue' })
-const savings = typedAccount({ type: 'asset', role: 'savingAsset' })
 
 const ledgerBucketInTimezone = ({ timeZone, dateParts }) => {
   const analyticsUrl = new URL('../../utils/AnalyticsUtils.js', import.meta.url).href
@@ -951,98 +948,22 @@ test('category ranking uses category ID as a stable tie-breaker', () => {
   assert.deepEqual(ids, ['food', 'rent'])
 })
 
-test('money flow keeps card purchases as expenses without classifying card movement as debt', () => {
-  const flow = buildMonthlyMoneyFlow({
+test('publishes only the layered monthly money-flow contract', () => {
+  const graph = buildMonthlyMoneyFlow({
     monthKey: '2026-04',
     displayCurrencyCode: 'USD',
     primaryCurrencyCode: 'USD',
     rates: { USD: 1 },
-    transactions: [
-      transaction('income', [split({ amount: 1000, date: '2026-04-01', source: revenue, destination: checking })]),
-      transaction('expense', [split({ amount: 200, date: '2026-04-02', source: checking, destination: expense })]),
-      transaction('save', [split({ amount: 300, date: '2026-04-03', source: checking, destination: savings })]),
-      transaction('card-buy', [split({ amount: 100, date: '2026-04-04', source: card, destination: expense })]),
-      transaction('card-pay', [split({ amount: 50, date: '2026-04-05', source: checking, destination: card })]),
-    ],
+    savingsView: 'combined',
+    transactions: [transaction('card-buy', [split({ amount: 100, date: '2026-04-04', source: card, destination: expense, categoryId: 'food' })])],
   })
 
-  assert.deepEqual(Object.fromEntries(flow.sources.map((node) => [node.id, node.value])), {
-    income: 1000,
-  })
-  assert.deepEqual(Object.fromEntries(flow.destinations.map((node) => [node.id, node.value])), {
-    expenses: 300,
-    savingsDeposited: 300,
-    newExcess: 400,
-  })
-  assert.equal(flow.audit.priorExcessUsed, 0)
-  assert.equal(flow.audit.newExcess, 400)
-  assert.equal(flow.audit.sourceTotal, 1000)
-  assert.equal(flow.audit.destinationTotal, 1000)
-  assert.equal(flow.audit.equationDifference, 0)
-  assert.equal(flow.isBalanced, true)
-  assert.equal(flow.audit.expensePurchases, 300)
-  assert.deepEqual(flow.audit.debtIncreaseIds, [])
-  assert.deepEqual(flow.audit.debtRepaymentIds, [])
-})
-
-test('money flow nets savings and debt, cancels internal transfers, and exposes refunds as a source', () => {
-  const otherSavings = typedAccount({ type: 'asset', role: 'savingAsset' })
-  const otherDebt = typedAccount({ type: 'liabilities', direction: 'debit' })
-  const flow = buildMonthlyMoneyFlow({
-    monthKey: '2026-05',
-    displayCurrencyCode: 'USD',
-    primaryCurrencyCode: 'USD',
-    rates: { USD: 1 },
-    transactions: [
-      transaction('save-in', [split({ amount: 100, date: '2026-05-01', source: checking, destination: savings })]),
-      transaction('save-out', [split({ amount: 40, date: '2026-05-02', source: savings, destination: checking })]),
-      transaction('save-internal', [split({ amount: 20, date: '2026-05-03', source: savings, destination: otherSavings })]),
-      transaction('debt-internal', [split({ amount: 25, date: '2026-05-04', source: card, destination: otherDebt })]),
-      transaction('refund', [split({ amount: 30, date: '2026-05-05', source: expense, destination: checking, categoryId: 'food' })]),
-    ],
-  })
-
-  assert.equal(flow.audit.savingsDeposited, 60)
-  assert.equal(flow.audit.savingsWithdrawn, 0)
-  assert.equal(flow.audit.newDebt, 0)
-  assert.equal(flow.audit.debtRepaid, 25)
-  assert.equal(flow.audit.netRefunds, 30)
-  assert.equal(flow.audit.priorExcessUsed, 55)
-  assert.equal(flow.audit.newExcess, 0)
-  assert.equal(flow.audit.sourceTotal, 85)
-  assert.equal(flow.audit.destinationTotal, 85)
-  assert.equal(flow.audit.equationDifference, 0)
-  assert.equal(flow.isBalanced, true)
-})
-
-test('empty money flow closes exactly within currency tolerance', () => {
-  const flow = buildMonthlyMoneyFlow({
-    monthKey: '2026-06',
-    displayCurrencyCode: 'USD',
-    primaryCurrencyCode: 'USD',
-    rates: { USD: 1 },
-    transactions: [],
-  })
-  assert.equal(flow.audit.equationDifference, 0)
-  assert.equal(flow.isBalanced, true)
-})
-
-test('split groups contribute their parent transaction ID only once per node', () => {
-  const flow = buildMonthlyMoneyFlow({
-    monthKey: '2026-06',
-    displayCurrencyCode: 'USD',
-    primaryCurrencyCode: 'USD',
-    rates: { USD: 1 },
-    transactions: [
-      transaction('split-income', [
-        split({ amount: 10, date: '2026-06-01', source: revenue, destination: checking }),
-        split({ amount: 15, date: '2026-06-01', source: revenue, destination: checking }),
-      ]),
-    ],
-  })
-  const incomeNode = flow.sources.find(({ id }) => id === 'income')
-  assert.equal(incomeNode.value, 25)
-  assert.deepEqual(incomeNode.transactionIds, ['split-income'])
+  assert.equal(Array.isArray(graph.nodes), true)
+  assert.equal(Array.isArray(graph.links), true)
+  assert.equal(graph.sources, undefined)
+  assert.equal(graph.destinations, undefined)
+  assert.deepEqual(graph.meta, { savingsView: 'combined' })
+  assert.equal(linkValue(graph, 'available', 'expenses'), 100)
 })
 
 const flowArgs = { monthKey: '2026-08', displayCurrencyCode: 'USD', primaryCurrencyCode: 'USD', rates: { USD: 1 }, currencyDecimalPlaces: 2, savingsView: 'combined' }
@@ -1103,7 +1024,7 @@ test('classifies layered money-flow endpoints without treating credit cards as d
 })
 
 test('routes card purchases through Available and never through Debt', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [transaction('card-food', [split({ amount: 80, date: '2026-08-02', source: flowAccounts.card, destination: flowAccounts.expense, categoryId: 'food' })])],
   })
@@ -1116,7 +1037,7 @@ test('routes card purchases through Available and never through Debt', () => {
 })
 
 test('routes immediate account transitions through their literal layered endpoints', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('revenue-available', [split({ amount: 10, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
@@ -1156,7 +1077,7 @@ test('routes immediate account transitions through their literal layered endpoin
 })
 
 test('uses the income category before revenue account name and sorts graph drilldowns', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('z-income', [split({ amount: 10, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
@@ -1174,14 +1095,14 @@ test('keeps uncategorized income node IDs stable across account renames and dupl
   const afterRename = typedAccount({ id: 'salary-one', name: 'New Salary', type: 'revenue' })
   const sameNamedAccount = typedAccount({ id: 'salary-two', name: 'Salary', type: 'revenue' })
   const buildGraph = (source) =>
-    buildLayeredMonthlyMoneyFlow({
+    buildMonthlyMoneyFlow({
       ...flowArgs,
       transactions: [transaction('income', [split({ amount: 10, date: '2026-08-01', source, destination: flowAccounts.checking })])],
     })
 
   assert.equal(nodeValue(buildGraph(beforeRename), 'income:salary-one'), 10)
   assert.equal(nodeValue(buildGraph(afterRename), 'income:salary-one'), 10)
-  const duplicateNamesGraph = buildLayeredMonthlyMoneyFlow({
+  const duplicateNamesGraph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('first', [split({ amount: 10, date: '2026-08-01', source: beforeRename, destination: flowAccounts.checking })]),
@@ -1193,7 +1114,7 @@ test('keeps uncategorized income node IDs stable across account renames and dupl
 })
 
 test('preserves immediate Available and Savings funding on shared liability outcomes', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('available-payment', [split({ amount: 30, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.debit })]),
@@ -1206,7 +1127,7 @@ test('preserves immediate Available and Savings funding on shared liability outc
 })
 
 test('keeps a purchase from Available and refund to Savings as separate category paths', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('purchase', [split({ amount: 100, date: '2026-08-02', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
@@ -1219,7 +1140,7 @@ test('keeps a purchase from Available and refund to Savings as separate category
 })
 
 test('retains sorted unique transaction IDs on netted and residual layered nodes', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('z-purchase', [split({ amount: 100, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
@@ -1233,7 +1154,7 @@ test('retains sorted unique transaction IDs on netted and residual layered nodes
 })
 
 test('shows opposing savings account movements and their net', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('hysa-in', [split({ amount: 1000, date: '2026-08-04', source: flowAccounts.checking, destination: flowAccounts.savings })]),
@@ -1247,7 +1168,7 @@ test('shows opposing savings account movements and their net', () => {
 
 test('annotates per-account savings residual nodes with their net-worth group', () => {
   for (const savingsView of ['combined', 'split']) {
-    const graph = buildLayeredMonthlyMoneyFlow({
+    const graph = buildMonthlyMoneyFlow({
       ...flowArgs,
       savingsView,
       transactions: [
@@ -1262,7 +1183,7 @@ test('annotates per-account savings residual nodes with their net-worth group', 
 })
 
 test('keeps liability reallocations out of outer funding while retaining their exact transaction', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [transaction('reallocate', [split({ amount: 30, date: '2026-08-06', source: flowAccounts.debit, destination: flowAccounts.credit })])],
   })
@@ -1273,7 +1194,7 @@ test('keeps liability reallocations out of outer funding while retaining their e
 })
 
 test('reconciles pool and outer equations with literal totals', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('income', [split({ amount: 100, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
@@ -1297,7 +1218,7 @@ test('reconciles pool and outer equations with literal totals', () => {
 })
 
 test('sets each pool node to its reconciled incoming and outgoing link total', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('income', [split({ amount: 100, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
@@ -1314,7 +1235,7 @@ test('sets each pool node to its reconciled incoming and outgoing link total', (
 })
 
 test('withholds unknown, unsupported, and missing-rate transactions from a balanced graph', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({
+  const graph = buildMonthlyMoneyFlow({
     ...flowArgs,
     transactions: [
       transaction('unknown-liability', [split({ amount: 25, date: '2026-08-01', source: flowAccounts.unknownLiability, destination: flowAccounts.checking })]),
@@ -1329,7 +1250,7 @@ test('withholds unknown, unsupported, and missing-rate transactions from a balan
 })
 
 test('returns an empty layered graph as balanced', () => {
-  const graph = buildLayeredMonthlyMoneyFlow({ ...flowArgs, savingsView: 'split', transactions: [] })
+  const graph = buildMonthlyMoneyFlow({ ...flowArgs, savingsView: 'split', transactions: [] })
 
   assert.deepEqual(graph.pools, {
     available: { incoming: 0, outgoing: 0, net: 0 },

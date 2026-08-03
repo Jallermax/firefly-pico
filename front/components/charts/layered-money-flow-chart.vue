@@ -4,6 +4,7 @@
       <g
         v-for="ribbon in layout.ribbons"
         :key="ribbon.id"
+        class="analytics-flow-ribbon"
         role="button"
         tabindex="0"
         :aria-label="linkAriaLabel(ribbon.link)"
@@ -17,8 +18,8 @@
         @keydown.space.prevent="selectLink(ribbon)"
       >
         <title>{{ linkAriaLabel(ribbon.link) }}</title>
-        <rect :x="ribbon.hitBox.x" :y="ribbon.hitBox.y" :width="ribbon.hitBox.width" :height="ribbon.hitBox.height" fill="transparent" />
-        <path :d="ribbon.path" :fill="linkColor(ribbon)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
+        <rect class="analytics-flow-interaction-target" :x="ribbon.hitBox.x" :y="ribbon.hitBox.y" :width="ribbon.hitBox.width" :height="ribbon.hitBox.height" fill="transparent" />
+        <path class="analytics-flow-ribbon-shape" :d="ribbon.path" :fill="linkColor(ribbon)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
       </g>
 
       <g
@@ -38,7 +39,7 @@
         @keydown.space.prevent="selectNode(node)"
       >
         <title>{{ nodeAriaLabel(node.node) }}</title>
-        <rect :x="node.hitBox.x" :y="node.hitBox.y" :width="node.hitBox.width" :height="node.hitBox.height" fill="transparent" />
+        <rect class="analytics-flow-interaction-target" :x="node.hitBox.x" :y="node.hitBox.y" :width="node.hitBox.width" :height="node.hitBox.height" fill="transparent" />
         <rect
           :class="{ 'analytics-flow-pool-bar': isPool(node) }"
           :x="node.x"
@@ -83,7 +84,7 @@ const props = defineProps({
   detailLevel: { type: [Number, String], default: 5 },
 })
 
-const emit = defineEmits(['select-node', 'select-link'])
+const emit = defineEmits(['select-node', 'select-link', 'mode-change'])
 const { t } = useI18n()
 const appStore = useAppStore()
 const root = ref(null)
@@ -92,6 +93,7 @@ const { width: renderedWidth } = useElementSize(root)
 
 const limitedGraph = computed(() => limitMoneyFlowGraphDetail({ graph: props.graph, detailLevel: props.detailLevel }))
 const mode = computed(() => resolveMoneyFlowGraphMode({ nodes: limitedGraph.value.nodes, isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
+watch(mode, (value) => emit('mode-change', value), { immediate: true })
 const layout = computed(() =>
   buildMoneyFlowGraphGeometry({
     nodes: limitedGraph.value.nodes,
@@ -115,15 +117,17 @@ const related = computed(() => {
 })
 
 const semanticLabels = {
-  available: 'analytics.flow.available',
-  savings: 'analytics.balance.savings',
-  income: 'analytics.flow.income',
+  available: 'analytics.flow.available_pool',
+  savings: 'analytics.flow.savings_pool',
+  income: 'analytics.flow.new_income',
   expenses: 'analytics.flow.expenses',
   savingsDeposited: 'analytics.flow.savings_deposited',
   newExcess: 'analytics.flow.new_excess',
-  debtPaid: 'analytics.flow.debt_repaid',
+  debtPaid: 'analytics.flow.debt_paid',
   newDebt: 'analytics.flow.new_debt',
-  refund: 'analytics.flow.net_refunds',
+  liabilityExtended: 'analytics.flow.liability_extended',
+  liabilityCollected: 'analytics.flow.liability_collected',
+  refund: 'analytics.flow.refund_category',
 }
 const nodeLabelText = (node) => node.label ?? (semanticLabels[node.kind] ? t(semanticLabels[node.kind]) : (node.refId ?? node.id))
 const formatValue = (item) => {

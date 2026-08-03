@@ -9,6 +9,7 @@ import {
   convertAnalyticsAmount,
   getAnalyticsAccountGroups,
   getAnalyticsCurrentAmount,
+  limitMoneyFlowGraphDetail,
   normalizeBalanceSeries,
   rankCategoryIds,
   summarizeBalanceMovements,
@@ -19,6 +20,7 @@ import {
 const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt']
 const SAVINGS_VIEWS = ['combined', 'split']
 const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
+const MONEY_FLOW_DETAIL_LEVELS = [5, 10, 'all']
 const CATEGORY_SERIES_LIMIT = 6
 
 const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
@@ -54,6 +56,7 @@ export function createAnalyticsStore(id, useDependencies) {
     const storedVisibleFinancialMetrics = useStoredValue('analyticsVisibleBalanceMetrics', financialMetricIdsForSavingsView('combined'))
     const storedVisibleBalanceMetrics = useStoredValue('analyticsVisibleBalanceTotalMetrics', balanceMetricIdsForSavingsView('combined'))
     const storedFinancialTrendView = useStoredValue('analyticsFinancialTrendView', 'balances')
+    const storedGraphDetail = useStoredValue('analyticsMoneyFlowDetail', 5)
     const normalizeSavingsView = (view) => (SAVINGS_VIEWS.includes(view) ? view : 'combined')
     const normalizeMetrics = (metrics, availableMetrics, view) => {
       const compatibleMetrics = (Array.isArray(metrics) ? metrics : []).flatMap((metric) => {
@@ -92,6 +95,14 @@ export function createAnalyticsStore(id, useDependencies) {
       get: () => (FINANCIAL_TREND_VIEWS.includes(storedFinancialTrendView.value) ? storedFinancialTrendView.value : 'balances'),
       set: (view) => {
         storedFinancialTrendView.value = FINANCIAL_TREND_VIEWS.includes(view) ? view : 'balances'
+      },
+    })
+    const normalizeGraphDetail = (detailLevel) => (MONEY_FLOW_DETAIL_LEVELS.includes(detailLevel) ? detailLevel : 5)
+    if (!MONEY_FLOW_DETAIL_LEVELS.includes(storedGraphDetail.value)) storedGraphDetail.value = 5
+    const graphDetail = computed({
+      get: () => normalizeGraphDetail(storedGraphDetail.value),
+      set: (detailLevel) => {
+        storedGraphDetail.value = normalizeGraphDetail(detailLevel)
       },
     })
     const selectedFlowMonth = ref(startOfMonth(getNow()))
@@ -161,7 +172,7 @@ export function createAnalyticsStore(id, useDependencies) {
         ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: 0 })),
       ]
     })
-    const selectedFlow = computed(() =>
+    const selectedFullFlow = computed(() =>
       buildMonthlyMoneyFlow({
         transactions: transactions.value,
         monthKey: format(selectedFlowMonth.value, 'yyyy-MM'),
@@ -169,8 +180,18 @@ export function createAnalyticsStore(id, useDependencies) {
         primaryCurrencyCode: primaryCurrencyCode.value,
         rates: rates.value,
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
+        savingsView: savingsView.value,
       }),
     )
+    const selectedFlow = computed(() => {
+      const fullGraph = selectedFullFlow.value
+      const graph = limitMoneyFlowGraphDetail({ graph: fullGraph, detailLevel: graphDetail.value })
+      return {
+        ...graph,
+        details: { nodes: fullGraph.nodes, links: fullGraph.links },
+        meta: { ...fullGraph.meta, detailLevel: graphDetail.value },
+      }
+    })
     const flowMonthMin = computed(() => (categoryLedger.value.ledgerStartMonth ? startOfMonth(parseISO(categoryLedger.value.ledgerStartMonth + '-01')) : null))
     const flowMonthMax = computed(() => startOfMonth(getNow()))
 
@@ -452,6 +473,7 @@ export function createAnalyticsStore(id, useDependencies) {
       financialTrendView,
       visibleBalanceMetrics,
       visibleFinancialMetrics,
+      graphDetail,
       selectedFlowMonth,
       balanceState,
       categoryState,

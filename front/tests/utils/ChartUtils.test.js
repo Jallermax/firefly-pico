@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { buildLineChartGeometry, buildMoneyFlowGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../utils/ChartUtils.js'
+import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../utils/ChartUtils.js'
 import * as ChartUtils from '../../utils/ChartUtils.js'
 import { buildFinancialTrendChartSeries } from '../../utils/AnalyticsUtils.js'
 
@@ -398,57 +398,51 @@ test('responsive line chart layout keeps axis labels and persistent markers read
   }
 })
 
-test('money flow uses compact top-to-bottom mobile geometry', () => {
-  const geometry = buildMoneyFlowGeometry({
-    sources: [
-      { id: 'income', value: 75 },
-      { id: 'newDebt', value: 25 },
-    ],
-    destinations: [{ id: 'expenses', value: 100 }],
-    total: 100,
-    isDesktop: false,
-  })
-
-  assert.equal(geometry.viewBox, '0 0 360 620')
-  assert.ok(geometry.sources.every((node) => node.labelY < geometry.bus.y && node.path && node.width <= 48))
-  assert.ok(geometry.destinations.every((node) => node.labelY > geometry.bus.y + geometry.bus.height && node.path && node.width <= 48))
-  assert.equal(geometry.sources[0].textAnchor, 'start')
-  assert.equal(geometry.sources[1].textAnchor, 'end')
-  const sourceStartY = Number(geometry.sources[0].path.match(/^M \S+ (\S+)/)?.[1])
-  const destinationEndY = Number(geometry.destinations[0].path.match(/ (\S+)$/)?.[1])
-  assert.ok(sourceStartY - geometry.sources[0].amountY >= 30)
-  assert.ok(geometry.destinations[0].labelY - destinationEndY >= 48)
-})
-
-test('money flow retains left-to-right desktop geometry', () => {
-  const geometry = buildMoneyFlowGeometry({
-    sources: [{ id: 'income', value: 100 }],
-    destinations: [{ id: 'expenses', value: 100 }],
-    total: 100,
-    isDesktop: true,
-  })
-
-  assert.equal(geometry.viewBox, '0 0 1000 520')
-  assert.ok(geometry.sources[0].labelX < geometry.bus.x)
-  assert.ok(geometry.destinations[0].labelX > geometry.bus.x + geometry.bus.width)
-  assert.equal(geometry.sources[0].width, 180)
-  assert.equal(geometry.destinations[0].width, 180)
-  const sourceStartX = Number(geometry.sources[0].path.match(/^M (\S+)/)?.[1])
-  const destinationEndX = Number(geometry.destinations[0].path.match(/ (\S+) \S+$/)?.[1])
-  assert.ok(sourceStartX - geometry.sources[0].labelX >= geometry.sources[0].width / 2 + 20)
-  assert.ok(geometry.destinations[0].labelX - destinationEndX >= geometry.destinations[0].width / 2 + 20)
-})
-
-test('money flow presentation suppresses an unbalanced diagram without hiding its audit', () => {
-  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: false, hasNodes: true }), {
-    showChart: false,
+test('money flow presentation withholds unclassified activity and keeps its audit', () => {
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: false, hasNodes: true, hasUnclassified: true }), {
+    showGraph: false,
     showEmpty: false,
-    showUnbalancedAudit: true,
+    showAudit: true,
+    reason: 'unclassified',
   })
+})
+
+test('money flow presentation distinguishes empty, full, condensed, stale, missing-rate, and unbalanced states', () => {
   assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: true, hasNodes: false }), {
-    showChart: false,
+    showGraph: false,
     showEmpty: true,
-    showUnbalancedAudit: false,
+    showAudit: false,
+    reason: 'empty',
+  })
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: true, hasNodes: true }), {
+    showGraph: true,
+    showEmpty: false,
+    showAudit: false,
+    reason: null,
+  })
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: true, hasNodes: true, isCondensed: true }), {
+    showGraph: true,
+    showEmpty: false,
+    showAudit: false,
+    reason: 'condensed',
+  })
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: true, hasNodes: true, isStale: true }), {
+    showGraph: true,
+    showEmpty: false,
+    showAudit: false,
+    reason: 'stale',
+  })
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: false, hasNodes: true, hasMissingRates: true }), {
+    showGraph: false,
+    showEmpty: false,
+    showAudit: true,
+    reason: 'missing_rates',
+  })
+  assert.deepEqual(resolveMoneyFlowPresentation({ isBalanced: false, hasNodes: true }), {
+    showGraph: false,
+    showEmpty: false,
+    showAudit: true,
+    reason: 'unbalanced',
   })
 })
 
@@ -560,6 +554,11 @@ test('full mobile flow preserves baseline spacing and separate 44px interaction 
     geometry.ribbons.every(({ hitBox }) => hitBox.width >= 44 && hitBox.height >= 44),
     true,
   )
+  assert.equal(geometry.width, 390)
+  assert.equal(
+    geometry.nodes.every(({ hitBox }) => hitBox.x >= 0 && hitBox.x + hitBox.width <= geometry.width),
+    true,
+  )
 })
 
 test('crowded 390px flow condenses outer details without discarding their selection metadata', () => {
@@ -612,10 +611,25 @@ test('crowded 390px flow condenses outer details without discarding their select
 test('layered flow renderer uses filled ribbons and emits exact selected graph objects', () => {
   const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
 
-  assert.match(component, /<path :d="ribbon\.path" :fill="linkColor\(ribbon\)"/)
+  assert.match(component, /<path[^>]*:d="ribbon\.path" :fill="linkColor\(ribbon\)"/)
   assert.doesNotMatch(component, /stroke-linecap|strokeWidth/)
-  assert.match(component, /defineEmits\(\['select-node', 'select-link'\]\)/)
+  assert.match(component, /defineEmits\(\['select-node', 'select-link', 'mode-change'\]\)/)
   assert.match(component, /emit\('select-node', node\)/)
   assert.match(component, /emit\('select-link', link\)/)
+  assert.match(component, /emit\('mode-change', value\)/)
   assert.match(component, /linkAriaLabel[\s\S]*analytics\.flow\.source[\s\S]*analytics\.flow\.destination/)
+})
+
+test('money flow card uses the layered graph, persisted detail control, and one exact-details popup', () => {
+  const component = readFileSync(new URL('../../components/analytics/analytics-money-flow.vue', import.meta.url), 'utf8')
+
+  assert.match(component, /<layered-money-flow-chart/)
+  assert.doesNotMatch(component, /<money-flow-chart/)
+  assert.match(component, /v-model="analyticsStore\.graphDetail"/)
+  assert.match(component, /@select-node="openDetails"/)
+  assert.match(component, /@select-link="openDetails"/)
+  assert.match(component, /<details class="analytics-flow-exact-values"/)
+  assert.match(component, /v-for="link in fullLinks"/)
+  assert.equal(component.match(/<app-popup/g)?.length, 1)
+  assert.match(component, /TransactionFilterUtils\.filters\.id\.toUrl/)
 })

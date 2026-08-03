@@ -39,6 +39,29 @@ const savingsPresentationKeys = [
   ['common', 'fx_current_rates'],
   ['balance', 'grouped_balance_warning'],
 ]
+const moneyFlowPresentationKeys = [
+  ['flow', 'graph_detail'],
+  ['flow', 'top_5'],
+  ['flow', 'top_10'],
+  ['flow', 'all'],
+  ['flow', 'other'],
+  ['flow', 'available_pool'],
+  ['flow', 'savings_pool'],
+  ['flow', 'existing_available'],
+  ['flow', 'existing_savings_used'],
+  ['flow', 'debt_paid'],
+  ['flow', 'liability_extended'],
+  ['flow', 'liability_collected'],
+  ['flow', 'refund_category'],
+  ['flow', 'expense_category'],
+  ['flow', 'savings_account_deposit'],
+  ['flow', 'condensed_mobile'],
+  ['flow', 'exact_values'],
+  ['flow', 'exact_path'],
+  ['flow', 'state', 'unclassified'],
+  ['flow', 'audit', 'unclassified'],
+  ['flow', 'audit', 'liability_reallocations'],
+]
 
 class AccountRepository {
   async getChartOverview(options) {
@@ -197,6 +220,19 @@ test('provides every Savings presentation label in all supported locales', () =>
   }
 })
 
+test('provides every layered Money flow label and removes the obsolete card-as-debt explanation', () => {
+  for (const locale of localeNames) {
+    const messages = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics
+    for (const key of moneyFlowPresentationKeys) {
+      const value = key.reduce((parent, segment) => parent?.[segment], messages)
+      assert.equal(typeof value, 'string', `${locale}: analytics.${key.join('.')}`)
+      assert.notEqual(value.trim(), '', `${locale}: analytics.${key.join('.')}`)
+    }
+  }
+  const english = JSON.parse(readFileSync(new URL('../../i18n/locales/en.json', import.meta.url), 'utf8')).analytics.flow
+  assert.doesNotMatch(english.definition, /card purchases.*new debt/i)
+})
+
 test('keeps overlapping balance requests isolated to their captured currency and current state', async () => {
   const usdRequest = deferred()
   const eurRequest = deferred()
@@ -251,6 +287,66 @@ test('repairs the shared savings view and requests four logical balance groups w
       .sort(),
     [['checking', 'saving-included'], ['saving-excluded'], ['saving-included'], ['loan', 'receivable']].sort(),
   )
+})
+
+test('defaults and repairs graph detail while accepting every supported level', () => {
+  const defaultStore = (analyticsStore = useAnalyticsStore())
+
+  assert.equal(defaultStore.graphDetail, 5)
+  defaultStore.graphDetail = 10
+  assert.equal(defaultStore.graphDetail, 10)
+  defaultStore.graphDetail = 'all'
+  assert.equal(defaultStore.graphDetail, 'all')
+  defaultStore.graphDetail = 42
+  assert.equal(defaultStore.graphDetail, 5)
+})
+
+test('repairs graph detail and derives layered flow with the shared savings view', async () => {
+  storageOverrides.set('analyticsMoneyFlowDetail', 42)
+  transactionResult = [currentExpenseTransaction(10)]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.graphDetail, 5)
+  assert.equal(Array.isArray(store.selectedFlow.nodes), true)
+  assert.equal(Array.isArray(store.selectedFlow.links), true)
+  assert.equal(store.selectedFlow.sources, undefined)
+  store.graphDetail = 'all'
+  store.savingsView = 'split'
+  await nextTick()
+  assert.equal(store.selectedFlow.meta.savingsView, 'split')
+  assert.equal(store.selectedFlow.meta.detailLevel, 'all')
+})
+
+test('limits only visible flow detail while retaining full audit and transaction details', async () => {
+  transactionResult = [70, 60, 50, 40, 30, 20, 10].map((amount, index) => currentExpenseTransaction(amount, `category-${index + 1}`))
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const topFive = store.selectedFlow
+  assert.equal(topFive.nodes.filter(({ kind }) => ['expenseCategory', 'otherExpenseCategory'].includes(kind)).length, 6)
+  assert.deepEqual(
+    topFive.details.nodes.filter(({ kind }) => kind === 'expenseCategory').map(({ id }) => id),
+    ['expense:category-1', 'expense:category-2', 'expense:category-3', 'expense:category-4', 'expense:category-5', 'expense:category-6', 'expense:category-7'],
+  )
+  assert.deepEqual([...new Set(topFive.details.nodes.flatMap(({ transactionIds }) => transactionIds))].sort(), [
+    'current-10',
+    'current-20',
+    'current-30',
+    'current-40',
+    'current-50',
+    'current-60',
+    'current-70',
+  ])
+
+  store.graphDetail = 'all'
+  await nextTick()
+
+  assert.equal(store.selectedFlow.nodes.filter(({ kind }) => kind === 'expenseCategory').length, 7)
+  assert.equal(store.selectedFlow.audit.totalSources, topFive.audit.totalSources)
+  assert.equal(store.selectedFlow.audit.totalDestinations, topFive.audit.totalDestinations)
 })
 
 test('switching the shared savings view repairs persisted metric selections and retains one selection', () => {

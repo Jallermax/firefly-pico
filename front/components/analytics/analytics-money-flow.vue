@@ -2,7 +2,10 @@
   <van-cell-group inset class="analytics-card analytics-money-flow-card">
     <div class="van-cell-group-title analytics-card-title analytics-flow-card-title">
       <div class="analytics-flow-heading flex-1">
-        <div>{{ $t('analytics.flow.title') }}</div>
+        <div class="flex-center-vertical gap-2">
+          <span>{{ $t('analytics.flow.title') }}</span>
+          <span v-if="flow.isEstimated" class="analytics-fx-badge">{{ $t('analytics.common.fx_current_rates') }}</span>
+        </div>
         <div class="analytics-card-subtitle">{{ $t('analytics.flow.subtitle') }}</div>
       </div>
       <div class="analytics-flow-month-controls">
@@ -14,6 +17,11 @@
           <app-icon :icon="TablerIconConstants.rightArrow" :size="18" />
         </button>
       </div>
+    </div>
+
+    <div class="analytics-flow-detail-control">
+      <span>{{ $t('analytics.flow.graph_detail') }}</span>
+      <app-tabs v-model="analyticsStore.graphDetail" :items="detailItems" />
     </div>
 
     <div v-if="isBlockingLoading" class="analytics-card-state">
@@ -31,9 +39,49 @@
       </div>
       <div v-if="analyticsStore.flowState.isStale && ['loading', 'error'].includes(analyticsStore.flowState.status)" class="analytics-assumption-note">{{ $t('analytics.common.stale') }}</div>
 
-      <div v-if="presentation.showUnbalancedAudit" class="analytics-flow-unbalanced" role="alert">
-        <strong>{{ $t('analytics.flow.audit.unbalanced') }}</strong>
-        <span>{{ $t('analytics.flow.not_balanced') }}</span>
+      <div v-if="presentation.showAudit" class="analytics-flow-unbalanced" role="alert">
+        <strong>{{ stateLabel }}</strong>
+        <span>{{ stateDescription }}</span>
+        <div v-if="hasUnclassified" class="analytics-flow-audit-row">
+          <span>{{ $t('analytics.flow.audit.unclassified') }}</span
+          ><strong>{{ formatCurrency(flow.unclassified.value) }}</strong>
+        </div>
+        <div v-if="flow.unclassified?.transactionIds?.length" class="analytics-flow-transaction-ids">
+          {{ $t('analytics.flow.transaction_ids', { ids: flow.unclassified.transactionIds.join(', ') }) }}
+        </div>
+        <div v-if="hasMissingRates" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: flow.missingCurrencies.join(', ') }) }}</div>
+        <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
+      </div>
+      <div v-else-if="presentation.showEmpty" class="analytics-card-state analytics-flow-empty">{{ $t('analytics.flow.empty') }}</div>
+      <layered-money-flow-chart
+        v-if="presentation.showGraph"
+        :graph="chartGraph"
+        :detail-level="analyticsStore.graphDetail"
+        :aria-label="$t('analytics.flow.chart_label', { month: selectedMonthLabel, currency: analyticsStore.displayCurrencyCode })"
+        @select-node="openDetails"
+        @select-link="openDetails"
+        @mode-change="chartMode = $event"
+      />
+      <div v-if="presentation.showGraph && chartMode === 'condensed'" class="analytics-flow-condensed-notice">{{ $t('analytics.flow.condensed_mobile') }}</div>
+
+      <details class="analytics-flow-exact-values">
+        <summary>
+          <span>{{ $t('analytics.flow.exact_values') }}</span>
+          <strong>{{ fullLinks.length }}</strong>
+        </summary>
+        <div class="analytics-flow-audit-section">
+          <button v-for="link in fullLinks" :key="link.id" type="button" class="analytics-flow-reallocation-row" @click="openDetails(link)">
+            <span>{{ itemLabel(link) }}</span
+            ><strong>{{ formatCurrency(link.value) }}</strong>
+          </button>
+        </div>
+      </details>
+
+      <details class="analytics-flow-audit">
+        <summary>
+          <span>{{ $t('analytics.flow.audit.title') }}</span>
+          <strong :class="flow.isBalanced ? 'success' : 'danger'">{{ flow.isBalanced ? $t('analytics.flow.audit.balanced') : $t('analytics.flow.audit.unbalanced') }}</strong>
+        </summary>
         <section v-for="section in auditSections" :key="section.id" class="analytics-flow-audit-section">
           <h4>{{ section.label }}</h4>
           <div v-for="row in section.rows" :key="row.id" class="analytics-flow-audit-row">
@@ -41,61 +89,38 @@
             ><strong>{{ formatCurrency(row.value) }}</strong>
           </div>
         </section>
-      </div>
-      <div v-else-if="presentation.showEmpty" class="analytics-card-state analytics-flow-empty">{{ $t('analytics.flow.empty') }}</div>
-      <money-flow-chart
-        v-if="presentation.showChart"
-        :sources="sources"
-        :destinations="destinations"
-        :total="flow.total"
-        :bus-label="$t('analytics.flow.available')"
-        :aria-label="$t('analytics.flow.chart_label', { month: selectedMonthLabel, currency: analyticsStore.displayCurrencyCode })"
-        @select-node="onSelectNode"
-      />
-
-      <details class="analytics-flow-audit">
-        <summary>
-          <span>{{ $t('analytics.flow.audit.title') }}</span>
-          <strong :class="flow.isBalanced ? 'success' : 'danger'">{{ flow.isBalanced ? $t('analytics.flow.audit.balanced') : $t('analytics.flow.audit.unbalanced') }}</strong>
-        </summary>
-        <section v-for="section in flow.isBalanced ? auditSections : []" :key="section.id" class="analytics-flow-audit-section">
-          <h4>{{ section.label }}</h4>
-          <div v-for="row in section.rows" :key="row.id" class="analytics-flow-audit-row">
+        <section v-if="liabilityReallocations.length" class="analytics-flow-audit-section">
+          <h4>{{ $t('analytics.flow.audit.liability_reallocations') }}</h4>
+          <button v-for="row in liabilityReallocations" :key="row.id" type="button" class="analytics-flow-reallocation-row" @click="openDetails(row)">
             <span>{{ row.label }}</span
             ><strong>{{ formatCurrency(row.value) }}</strong>
-          </div>
+          </button>
         </section>
         <p class="analytics-flow-definition">{{ $t('analytics.flow.definition') }}</p>
       </details>
-
-      <div v-if="flow.isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
-      <div v-if="flow.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: flow.missingCurrencies.join(', ') }) }}</div>
     </template>
 
-    <template v-if="isBlockingLoading || isBlockingError">
-      <div v-if="flow.isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
-      <div v-if="flow.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: flow.missingCurrencies.join(', ') }) }}</div>
-    </template>
-
-    <app-popup v-model:show="residualDetailsVisible" popup-style="max-width: 520px">
-      <div v-if="residualDetails" class="analytics-flow-residual-details">
+    <app-popup v-model:show="detailsVisible" popup-style="max-width: 560px">
+      <div v-if="selectedItem" class="analytics-flow-details">
         <div class="analytics-flow-details-header">
-          <strong class="flex-1">{{ residualDetails.label }}</strong>
-          <van-button size="small" @click="residualDetailsVisible = false">{{ $t('ok') }}</van-button>
+          <div class="flex-1">
+            <strong>{{ selectedItemLabel }}</strong>
+            <div class="analytics-card-subtitle">{{ formatCurrency(selectedItem.value) }}</div>
+          </div>
+          <van-button size="small" @click="detailsVisible = false">{{ $t('ok') }}</van-button>
         </div>
-        <p>{{ residualDetails.expression }}</p>
-        <div class="analytics-flow-audit-row">
-          <span>{{ residualDetails.leftLabel }}</span
-          ><strong>{{ formatCurrency(residualDetails.leftValue) }}</strong>
+        <div class="analytics-flow-details-list">
+          <div v-for="row in selectedRows" :key="row.id" class="analytics-flow-detail-row">
+            <div class="analytics-flow-detail-value">
+              <span>{{ row.label }}</span
+              ><strong>{{ formatCurrency(row.value) }}</strong>
+            </div>
+            <div v-if="row.transactionIds.length" class="analytics-flow-transaction-ids">{{ $t('analytics.flow.transaction_ids', { ids: row.transactionIds.join(', ') }) }}</div>
+          </div>
         </div>
-        <div class="analytics-flow-audit-row">
-          <span>{{ residualDetails.rightLabel }}</span
-          ><strong>{{ formatCurrency(residualDetails.rightValue) }}</strong>
-        </div>
-        <div class="analytics-flow-audit-row analytics-flow-residual-result">
-          <span>{{ $t('analytics.flow.audit.result') }}</span
-          ><strong>{{ formatCurrency(residualDetails.value) }}</strong>
-        </div>
+        <van-button v-if="selectedTransactionIds.length" block type="primary" @click="openTransactions">
+          {{ $t('analytics.flow.view_transactions', { count: selectedTransactionIds.length }) }}
+        </van-button>
       </div>
     </app-popup>
   </van-cell-group>
@@ -103,37 +128,42 @@
 
 <script setup>
 import { addMonths, startOfMonth } from 'date-fns'
+import Account from '~/models/Account.js'
+import Category from '~/models/Category.js'
 import RouteConstants from '~/constants/RouteConstants.js'
 import TablerIconConstants from '~/constants/TablerIconConstants.js'
+import { useAccountStore } from '~/stores/accountStore.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
+import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { resolveMoneyFlowPresentation } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
-const NODE_CONFIG = {
-  income: { key: 'income', color: 'var(--income1)' },
-  savingsWithdrawn: { key: 'savings_withdrawn', color: 'var(--transfer1)' },
-  newDebt: { key: 'new_debt', color: 'var(--van-warning-color)' },
-  priorExcessUsed: { key: 'prior_excess_used', color: 'var(--van-text-color-3)' },
-  netRefunds: { key: 'net_refunds', color: 'var(--income2)' },
-  expenses: { key: 'expenses', color: 'var(--expense1)' },
-  savingsDeposited: { key: 'savings_deposited', color: 'var(--transfer2)' },
-  debtRepaid: { key: 'debt_repaid', color: 'var(--van-warning-color)' },
-  newExcess: { key: 'new_excess', color: 'var(--primary-action)' },
-}
-const GROSS_AUDIT_IDS = ['income', 'expensePurchases', 'refunds', 'savingsIn', 'savingsOut', 'debtIncrease', 'debtRepayment']
-const NET_AUDIT_IDS = ['expenses', 'netRefunds', 'savingsDeposited', 'savingsWithdrawn', 'newDebt', 'debtRepaid']
-const EQUATION_AUDIT_IDS = ['classifiedSources', 'priorExcessUsed', 'sourceTotal', 'classifiedDestinations', 'newExcess', 'destinationTotal', 'equationDifference']
-const RESIDUAL_IDS = new Set(['priorExcessUsed', 'newExcess'])
-
 const analyticsStore = useAnalyticsStore()
+const accountStore = useAccountStore()
+const categoryStore = useCategoryStore()
 const profileStore = useProfileStore()
 const { t } = useI18n()
-const residualDetailsVisible = ref(false)
-const selectedResidual = ref(null)
+const detailsVisible = ref(false)
+const selectedItem = ref(null)
+const chartMode = ref('full')
 
-const emptyFlow = { sources: [], destinations: [], total: 0, audit: {}, isEstimated: false, missingCurrencies: [], isBalanced: true }
+const emptyFlow = {
+  nodes: [],
+  links: [],
+  details: { nodes: [], links: [] },
+  audit: { pools: { available: { incoming: 0, outgoing: 0, net: 0 }, savings: { incoming: 0, outgoing: 0, net: 0 } }, liabilityReallocations: [] },
+  unclassified: { value: 0, transactionIds: [] },
+  isEstimated: false,
+  missingCurrencies: [],
+  isBalanced: true,
+}
+const detailItems = computed(() => [
+  { label: t('analytics.flow.top_5'), value: 5 },
+  { label: t('analytics.flow.top_10'), value: 10 },
+  { label: t('analytics.flow.all'), value: 'all' },
+])
 const flow = computed(() => analyticsStore.selectedFlow ?? emptyFlow)
 const selectedMonth = computed(() => startOfMonth(analyticsStore.selectedFlowMonth ?? new Date()))
 const monthMin = computed(() => (analyticsStore.flowMonthMin ? startOfMonth(analyticsStore.flowMonthMin) : null))
@@ -141,57 +171,129 @@ const monthMax = computed(() => startOfMonth(analyticsStore.flowMonthMax ?? new 
 const canPrevious = computed(() => monthMin.value !== null && selectedMonth.value.getTime() > monthMin.value.getTime())
 const canNext = computed(() => selectedMonth.value.getTime() < monthMax.value.getTime())
 const selectedMonthLabel = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(selectedMonth.value))
-const hasNodes = computed(() => flow.value.sources.length + flow.value.destinations.length > 0)
-const presentation = computed(() => resolveMoneyFlowPresentation({ isBalanced: flow.value.isBalanced, hasNodes: hasNodes.value }))
-const hasRetainedData = computed(() => analyticsStore.flowState.isStale)
+const hasNodes = computed(() => flow.value.nodes.length > 0)
+const hasUnclassified = computed(() => Math.abs(Number(flow.value.unclassified?.value) || 0) > 0)
+const hasMissingRates = computed(() => flow.value.missingCurrencies?.length > 0)
+const presentation = computed(() =>
+  resolveMoneyFlowPresentation({
+    isBalanced: flow.value.isBalanced,
+    hasNodes: hasNodes.value,
+    hasUnclassified: hasUnclassified.value,
+    hasMissingRates: hasMissingRates.value,
+    isCondensed: chartMode.value === 'condensed',
+    isStale: analyticsStore.flowState.isStale,
+  }),
+)
+const hasRetainedData = computed(() => analyticsStore.flowState.isStale && hasNodes.value)
 const isBlockingLoading = computed(() => analyticsStore.flowState.status === 'loading' && !hasRetainedData.value)
 const isBlockingError = computed(() => analyticsStore.flowState.status === 'error' && !hasRetainedData.value)
+const stateLabel = computed(() => t(`analytics.flow.state.${presentation.value.reason}`))
+const stateDescription = computed(() => t(`analytics.flow.state.${presentation.value.reason}_description`))
 const formatCurrency = (value) => [formatNumberForDashboard(Number(value) || 0), analyticsStore.displayCurrencyCode].filter(Boolean).join(' ')
+const categoryLabel = (id) => (['uncategorized', 'uncategorized-income'].includes(id) ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[id]) || id)
+const accountLabel = (id) => Account.getDisplayName(accountStore.accountDictionary[id]) || id
+
+const semanticLabelKeys = {
+  available: 'available_pool',
+  savings: 'savings_pool',
+  income: 'new_income',
+  expenses: 'expenses',
+  savingsDeposited: 'savings_deposited',
+  newExcess: 'new_excess',
+  debtPaid: 'debt_paid',
+  liabilityExtended: 'liability_extended',
+  existingAvailable: 'existing_available',
+  existingSavings: 'existing_savings_used',
+  newDebt: 'new_debt',
+  liabilityCollected: 'liability_collected',
+  refund: 'refund_category',
+  expenseCategory: 'expense_category',
+  savingsDeposit: 'savings_account_deposit',
+}
+const accountKinds = new Set(['existingSavings', 'savingsDeposit', 'newDebt', 'liabilityCollected', 'debtPaid', 'liabilityExtended'])
+const categoryKinds = new Set(['expenseCategory', 'refund'])
+const nodeLabel = (node) => {
+  if (!node) return ''
+  if (String(node.kind).startsWith('other')) return t('analytics.flow.other')
+  if (node.kind === 'income' && node.refId) return categoryStore.categoryDictionary[node.refId] ? categoryLabel(node.refId) : node.label || node.refId
+  if (categoryKinds.has(node.kind) && node.refId) return categoryLabel(node.refId)
+  if (accountKinds.has(node.kind) && node.refId) return accountLabel(node.refId)
+  return semanticLabelKeys[node.kind] ? t(`analytics.flow.${semanticLabelKeys[node.kind]}`) : node.label || node.refId || node.id
+}
+const colorFor = (item) => {
+  if (item.fundingPool === 'savings' || ['savings', 'savingsDeposited', 'savingsDeposit', 'existingSavings'].includes(item.kind)) return 'var(--income2)'
+  if (['expenses', 'expense', 'expenseCategory'].includes(item.kind)) return 'var(--expense2)'
+  if (['newDebt', 'debtPaid', 'liabilityExtended', 'liabilityCollected'].includes(item.kind)) return 'var(--van-warning-color)'
+  return 'var(--transfer2)'
+}
+const chartGraph = computed(() => ({
+  ...flow.value,
+  nodes: flow.value.nodes.map((node) => ({ ...node, label: nodeLabel(node), valueLabel: formatCurrency(node.value), color: colorFor(node) })),
+  links: flow.value.links.map((link) => ({ ...link, valueLabel: formatCurrency(link.value), color: colorFor(link) })),
+}))
+
 const auditLabel = (id) => t(`analytics.flow.audit.${id.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`)
-const enrichNodes = (nodes, side) =>
-  nodes.map((node) => ({
-    ...node,
-    label: t(`analytics.flow.${NODE_CONFIG[node.id].key}`),
-    color: NODE_CONFIG[node.id].color,
-    valueLabel: formatCurrency(node.value),
-    sideLabel: t(`analytics.flow.${side}`),
-  }))
-
-const sources = computed(() => enrichNodes(flow.value.sources, 'source'))
-const destinations = computed(() => enrichNodes(flow.value.destinations, 'destination'))
 const auditRows = (ids) => ids.map((id) => ({ id, label: auditLabel(id), value: flow.value.audit?.[id] ?? 0 }))
+const poolRows = (pool) => ['incoming', 'outgoing', 'net'].map((id) => ({ id: `${pool}-${id}`, label: t(`analytics.flow.audit.${pool}_${id}`), value: flow.value.audit?.pools?.[pool]?.[id] ?? 0 }))
 const auditSections = computed(() => [
-  { id: 'gross', label: t('analytics.flow.audit.gross'), rows: auditRows(GROSS_AUDIT_IDS) },
-  { id: 'net', label: t('analytics.flow.audit.net'), rows: auditRows(NET_AUDIT_IDS) },
-  { id: 'equation', label: t('analytics.flow.audit.equation'), rows: auditRows(EQUATION_AUDIT_IDS) },
+  { id: 'available', label: t('analytics.flow.available_pool'), rows: poolRows('available') },
+  { id: 'savings', label: t('analytics.flow.savings_pool'), rows: poolRows('savings') },
+  { id: 'outer', label: t('analytics.flow.audit.outer'), rows: auditRows(['totalSources', 'totalDestinations', 'equationDifference', 'unclassified']) },
+  { id: 'savings-movement', label: t('analytics.flow.audit.savings_movement'), rows: auditRows(['positiveSavingsMovement', 'negativeSavingsMovement', 'netSavings']) },
+  { id: 'liabilities', label: t('analytics.flow.audit.liabilities'), rows: auditRows(['liabilityIncrease', 'liabilityReduction', 'netDebtChange']) },
 ])
+const liabilityReallocations = computed(() =>
+  (flow.value.audit?.liabilityReallocations ?? []).map((item) => ({
+    ...item,
+    id: `reallocation:${item.sourceId}:${item.targetId}`,
+    label: t('analytics.flow.liability_reallocation', { source: accountLabel(item.sourceId), destination: accountLabel(item.targetId) }),
+  })),
+)
 
-const residualDetails = computed(() => {
-  if (!selectedResidual.value) return null
-  const isPrior = selectedResidual.value.id === 'priorExcessUsed'
-  return {
-    ...selectedResidual.value,
-    expression: isPrior ? 'max(0, classifiedDestinations - classifiedSources)' : 'max(0, classifiedSources - classifiedDestinations)',
-    leftLabel: auditLabel(isPrior ? 'classifiedDestinations' : 'classifiedSources'),
-    leftValue: flow.value.audit?.[isPrior ? 'classifiedDestinations' : 'classifiedSources'] ?? 0,
-    rightLabel: auditLabel(isPrior ? 'classifiedSources' : 'classifiedDestinations'),
-    rightValue: flow.value.audit?.[isPrior ? 'classifiedSources' : 'classifiedDestinations'] ?? 0,
-  }
+const fullNodes = computed(() => flow.value.details?.nodes ?? flow.value.nodes)
+const fullLinks = computed(() => flow.value.details?.links ?? flow.value.links)
+const fullNodeDictionary = computed(() => new Map(fullNodes.value.map((node) => [node.id, node])))
+const itemLabel = (item) => {
+  if (!item) return ''
+  if (item.label) return item.label
+  if (!item.sourceId) return nodeLabel(item)
+  return t('analytics.flow.exact_path', { source: nodeLabel(fullNodeDictionary.value.get(item.sourceId)), destination: nodeLabel(fullNodeDictionary.value.get(item.targetId)) })
+}
+const nodeDetailRows = (item) => {
+  if (item.details?.nodes?.length) return item.details.nodes
+  const related = fullLinks.value.filter(({ sourceId, targetId }) => sourceId === item.id || targetId === item.id)
+  const detailed = related.map(({ sourceId, targetId }) => fullNodeDictionary.value.get(sourceId === item.id ? targetId : sourceId)).filter((node) => node?.refId)
+  return detailed.length ? [...new Map(detailed.map((node) => [node.id, node])).values()] : [fullNodeDictionary.value.get(item.id) ?? item]
+}
+const linkDetailRows = (item) => {
+  const visibleSource = flow.value.nodes.find(({ id }) => id === item.sourceId)
+  const visibleTarget = flow.value.nodes.find(({ id }) => id === item.targetId)
+  const sourceIds = new Set(visibleSource?.details?.nodes?.map(({ id }) => id) ?? [item.sourceId])
+  const targetIds = new Set(visibleTarget?.details?.nodes?.map(({ id }) => id) ?? [item.targetId])
+  const rows = fullLinks.value.filter(
+    ({ sourceId, targetId, kind, fundingPool }) => sourceIds.has(sourceId) && targetIds.has(targetId) && kind === item.kind && (fundingPool ?? null) === (item.fundingPool ?? null),
+  )
+  return rows.length ? rows : [item]
+}
+const selectedRows = computed(() => {
+  if (!selectedItem.value) return []
+  const items = selectedItem.value.sourceId && selectedItem.value.targetId ? linkDetailRows(selectedItem.value) : nodeDetailRows(selectedItem.value)
+  return items.map((item) => ({ id: item.id, label: itemLabel(item), value: item.value, transactionIds: [...new Set(item.transactionIds ?? [])].sort() }))
 })
+const selectedItemLabel = computed(() => itemLabel(selectedItem.value))
+const selectedTransactionIds = computed(() => [...new Set(selectedRows.value.flatMap(({ transactionIds }) => transactionIds))].sort())
 
 const moveMonth = (amount) => {
   if ((amount < 0 && !canPrevious.value) || (amount > 0 && !canNext.value)) return
   analyticsStore.selectedFlowMonth = startOfMonth(addMonths(selectedMonth.value, amount))
 }
-
-const onSelectNode = async (node) => {
-  if (node.transactionIds?.length > 0) {
-    const ids = [...new Set(node.transactionIds)].join(',')
-    await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + TransactionFilterUtils.filters.id.toUrl(ids))
-    return
-  }
-  if (!RESIDUAL_IDS.has(node.id)) return
-  selectedResidual.value = node
-  residualDetailsVisible.value = true
+const openDetails = (item) => {
+  selectedItem.value = item
+  detailsVisible.value = true
+}
+const openTransactions = async () => {
+  const query = TransactionFilterUtils.filters.id.toUrl(selectedTransactionIds.value.join(','))
+  detailsVisible.value = false
+  await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + query)
 }
 </script>

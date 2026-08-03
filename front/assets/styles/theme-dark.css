@@ -563,13 +563,7 @@
     outline-color: #64b5f6;
 }
 
-.van-theme-dark .analytics-flow-bus {
-    fill: #444;
-    stroke: #666;
-}
-
-.van-theme-dark .analytics-flow-node-label,
-.van-theme-dark .analytics-flow-bus-label {
+.van-theme-dark .analytics-flow-node-label {
     fill: var(--van-text-color);
 }
 
@@ -577,27 +571,31 @@
     fill: var(--van-text-color);
 }
 
-.van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-band-hit {
+.van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-interaction-target,
+.van-theme-dark .analytics-flow-ribbon:focus-visible .analytics-flow-interaction-target {
     stroke: #64b5f6;
-    opacity: 0.28;
 }
 
 .van-theme-dark .analytics-flow-month-button,
 .van-theme-dark .analytics-flow-list button,
 .van-theme-dark .analytics-flow-unbalanced,
+.van-theme-dark .analytics-flow-condensed-notice,
 .van-theme-dark .analytics-flow-audit,
-.van-theme-dark .analytics-flow-values,
-.van-theme-dark .analytics-flow-residual-details p {
+.van-theme-dark .analytics-flow-exact-values,
+.van-theme-dark .analytics-flow-detail-row {
     background: var(--van-background-3);
 }
 
 .van-theme-dark .analytics-flow-audit summary:focus-visible,
-.van-theme-dark .analytics-flow-values summary:focus-visible {
+.van-theme-dark .analytics-flow-exact-values summary:focus-visible {
     outline-color: #64b5f6;
 }
 
 .van-theme-dark .analytics-flow-audit-section h4,
-.van-theme-dark .analytics-flow-details-header,
-.van-theme-dark .analytics-flow-residual-result {
+.van-theme-dark .analytics-flow-details-header {
     border-color: #444;
+}
+
+.van-theme-dark .analytics-flow-pool-bar {
+    stroke: #f5f5f5;
 }
