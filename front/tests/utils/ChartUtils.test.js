@@ -510,6 +510,65 @@ test('packed ribbons close at square node edges and never overfill a pool', () =
   )
 })
 
+test('alternating origins order endpoints by topology and pack ribbons toward their counterparts', () => {
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({
+    nodes: [
+      { id: 'available', layer: 0, kind: 'available', value: 10, transactionIds: [] },
+      { id: 'savings', layer: 0, kind: 'savings', value: 10, transactionIds: [] },
+      { id: 'destination:a', layer: 1, kind: 'expenseCategory', value: 10, transactionIds: [] },
+      { id: 'destination:z', layer: 1, kind: 'expenseCategory', value: 10, transactionIds: [] },
+    ],
+    links: [
+      { id: '01-savings-a', sourceId: 'savings', targetId: 'destination:a', kind: 'expense', value: 7, transactionIds: [] },
+      { id: '02-available-a', sourceId: 'available', targetId: 'destination:a', kind: 'expense', value: 3, transactionIds: [] },
+      { id: '03-savings-z', sourceId: 'savings', targetId: 'destination:z', kind: 'expense', value: 3, transactionIds: [] },
+      { id: '04-available-z', sourceId: 'available', targetId: 'destination:z', kind: 'expense', value: 7, transactionIds: [] },
+    ],
+    isDesktop: true,
+    renderedWidth: 900,
+    mode: 'full',
+  })
+  const nodePosition = new Map(geometry.nodes.map((node) => [node.id, node.y + node.height / 2]))
+  const layerOrder = (layer) =>
+    geometry.nodes
+      .filter((node) => node.layer === layer)
+      .sort((left, right) => left.y - right.y)
+      .map(({ id }) => id)
+  const endpoints = (ribbon) => {
+    const values = ribbon.path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi).map(Number)
+    return { source: (values[1] + values[15]) / 2, target: (values[7] + values[9]) / 2 }
+  }
+
+  assert.deepEqual(layerOrder(0), ['available', 'savings'])
+  assert.deepEqual(layerOrder(1), ['destination:z', 'destination:a'])
+  for (const sourceId of layerOrder(0)) {
+    const ribbons = geometry.ribbons.filter((ribbon) => ribbon.sourceId === sourceId).sort((left, right) => endpoints(left).source - endpoints(right).source)
+    assert.deepEqual(
+      ribbons.map(({ targetId }) => targetId),
+      ribbons.map(({ targetId }) => targetId).sort((left, right) => nodePosition.get(left) - nodePosition.get(right)),
+    )
+  }
+  for (const targetId of layerOrder(1)) {
+    const ribbons = geometry.ribbons.filter((ribbon) => ribbon.targetId === targetId).sort((left, right) => endpoints(left).target - endpoints(right).target)
+    assert.deepEqual(
+      ribbons.map(({ sourceId }) => sourceId),
+      ribbons.map(({ sourceId }) => sourceId).sort((left, right) => nodePosition.get(left) - nodePosition.get(right)),
+    )
+  }
+})
+
+test('reduced Other nodes retain their semantic colors', () => {
+  const component = readFileSync(new URL('../../components/analytics/analytics-money-flow.vue', import.meta.url), 'utf8')
+
+  assert.equal(typeof ChartUtils.resolveMoneyFlowSemanticColor, 'function')
+  assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherExpenseCategory' }), 'var(--expense2)')
+  assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherSavingsDeposit' }), 'var(--income2)')
+  assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherDebtPaid' }), 'var(--van-warning-color)')
+  assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherIncome' }), 'var(--transfer2)')
+  assert.match(component, /color: resolveMoneyFlowSemanticColor\(node\)/)
+  assert.match(component, /color: resolveMoneyFlowSemanticColor\(link\)/)
+})
+
 test('desktop money flow reserves outer label gutters without collapsing internal layers', () => {
   const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth: 1000, mode: 'full' })
   const layerPositions = [...new Set(geometry.nodes.map(({ layer, x }) => `${layer}:${x}`))].map((entry) => Number(entry.split(':')[1]))

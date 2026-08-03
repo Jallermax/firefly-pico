@@ -87,7 +87,10 @@ export function convertAnalyticsAmount({ amount, currencyCode, primaryAmount, pr
   }
 
   const sourceAmount = Number(sourceAmountValue)
-  if (!Number.isFinite(sourceAmount) || !sourceCurrency || !displayCurrencyCode) {
+  if (!Number.isFinite(sourceAmount)) {
+    return { value: null, isEstimated: false, missingCurrency: null }
+  }
+  if (!sourceCurrency || !displayCurrencyCode) {
     return { value: null, isEstimated: false, missingCurrency: sourceCurrency ?? displayCurrencyCode ?? null }
   }
   if (sourceCurrency === displayCurrencyCode) {
@@ -191,7 +194,8 @@ export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyC
     savingsChanges.set(id, change)
   }
   const addUnclassified = (value, transactionId) => {
-    unclassified.value += value
+    if (!Number.isFinite(value)) unclassified.value = null
+    else if (Number.isFinite(unclassified.value)) unclassified.value += value
     if (transactionId) unclassified.transactionIds.add(transactionId)
   }
   const addPair = (pool, category, direction, value, transactionId) => {
@@ -271,7 +275,7 @@ export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyC
     for (const item of transaction?.attributes?.transactions ?? []) {
       if (splitMonthKey(item) !== monthKey) continue
       const converted = convertAnalyticsAmount({
-        amount: Math.abs(Number(item.amount)),
+        amount: item.amount,
         currencyCode: item.currency_code,
         primaryAmount: item.primary_amount,
         primaryCurrencyCode,
@@ -283,7 +287,7 @@ export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyC
         continue
       }
       if (!Number.isFinite(converted.value)) {
-        addUnclassified(0, transaction.id)
+        addUnclassified(null, transaction.id)
         continue
       }
 
@@ -456,6 +460,7 @@ export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyC
     Math.abs(availableDifference) <= tolerance &&
     Math.abs(savingsDifference) <= tolerance &&
     Math.abs(audit.equationDifference) <= tolerance &&
+    Number.isFinite(unclassified.value) &&
     Math.abs(unclassified.value) <= tolerance &&
     missingCurrencies.size === 0
 
@@ -575,6 +580,7 @@ export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
 export function buildCategoryLedger({ transactions, displayCurrencyCode, primaryCurrencyCode, rates }) {
   const months = {}
   const missingCurrencies = []
+  const unclassifiedTransactionIds = new Set()
   let isEstimated = false
   let ledgerStartMonth = null
 
@@ -587,7 +593,7 @@ export function buildCategoryLedger({ transactions, displayCurrencyCode, primary
       if (direction === 0 || !monthKey || !day) continue
 
       const converted = convertAnalyticsAmount({
-        amount: Math.abs(Number(item.amount)),
+        amount: item.amount,
         currencyCode: item.currency_code,
         primaryAmount: item.primary_amount,
         primaryCurrencyCode,
@@ -598,11 +604,14 @@ export function buildCategoryLedger({ transactions, displayCurrencyCode, primary
         missingCurrencies.push(converted.missingCurrency)
         continue
       }
-
+      if (!Number.isFinite(converted.value)) {
+        if (transaction.id) unclassifiedTransactionIds.add(transaction.id)
+        continue
+      }
       const categoryId = item.category_id ?? ANALYTICS_UNCATEGORIZED_ID
       const month = (months[monthKey] ??= { categories: {} })
       const category = (month.categories[categoryId] ??= { amount: 0, byDay: {}, transactionIds: [], transactionIdsByDay: {} })
-      const value = direction * converted.value
+      const value = direction * Math.abs(converted.value)
       category.amount += value
       category.byDay[day] = (category.byDay[day] ?? 0) + value
       category.transactionIds.push(transaction.id)
@@ -619,6 +628,7 @@ export function buildCategoryLedger({ transactions, displayCurrencyCode, primary
     ledgerStartMonth,
     isEstimated,
     missingCurrencies: unique(missingCurrencies),
+    unclassified: { value: unclassifiedTransactionIds.size ? null : 0, transactionIds: [...unclassifiedTransactionIds].sort() },
   }
 }
 

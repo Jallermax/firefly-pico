@@ -209,6 +209,18 @@ test('keeps absent source amounts missing instead of coercing them to zero', () 
   }
 })
 
+test('withholds invalid category amounts and audits their transaction IDs', () => {
+  const transactions = [
+    transaction('null-amount', [{ ...split({ amount: 1, date: '2026-08-01', source: checking, destination: expense, categoryId: 'food' }), amount: null }]),
+    transaction('blank-amount', [{ ...split({ amount: 1, date: '2026-08-02', source: checking, destination: expense, categoryId: 'food' }), amount: '   ' }]),
+    transaction('non-finite-amount', [{ ...split({ amount: 1, date: '2026-08-03', source: checking, destination: expense, categoryId: 'food' }), amount: Number.NaN }]),
+  ]
+  const ledger = buildCategoryLedger({ transactions, displayCurrencyCode: 'USD', primaryCurrencyCode: 'USD', rates: { USD: 1 } })
+
+  assert.deepEqual(ledger.months, {})
+  assert.deepEqual(ledger.unclassified, { value: null, transactionIds: ['blank-amount', 'non-finite-amount', 'null-amount'] })
+})
+
 test('aligns dates, carries forward only after first history, and normalizes debt owed', () => {
   const result = normalizeBalanceSeries({
     metric: 'debt',
@@ -1040,6 +1052,20 @@ const flowAccounts = {
   unknownLiability: typedAccount({ id: 'unknown-liability', type: 'liabilities' }),
   other: typedAccount({ id: 'other', type: 'bill' }),
 }
+
+test('withholds invalid Money flow amounts and blocks on their transaction IDs', () => {
+  const transactions = [
+    transaction('null-amount', [{ ...split({ amount: 1, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' }), amount: null }]),
+    transaction('blank-amount', [{ ...split({ amount: 1, date: '2026-08-02', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' }), amount: '   ' }]),
+    transaction('non-finite-amount', [{ ...split({ amount: 1, date: '2026-08-03', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' }), amount: Number.NaN }]),
+  ]
+  const graph = buildMonthlyMoneyFlow({ ...flowArgs, transactions })
+
+  assert.deepEqual(graph.nodes, [])
+  assert.deepEqual(graph.links, [])
+  assert.deepEqual(graph.unclassified, { value: null, transactionIds: ['blank-amount', 'non-finite-amount', 'null-amount'] })
+  assert.equal(graph.isBalanced, false)
+})
 
 test('classifies layered money-flow endpoints without treating credit cards as debt', () => {
   assert.equal(AnalyticsUtils.getAnalyticsAccountKind(flowAccounts.card), 'available')

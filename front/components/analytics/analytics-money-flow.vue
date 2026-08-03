@@ -136,7 +136,7 @@ import { useAccountStore } from '~/stores/accountStore.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
-import { resolveMoneyFlowPresentation } from '~/utils/ChartUtils.js'
+import { resolveMoneyFlowPresentation, resolveMoneyFlowSemanticColor } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
@@ -172,7 +172,7 @@ const canPrevious = computed(() => monthMin.value !== null && selectedMonth.valu
 const canNext = computed(() => selectedMonth.value.getTime() < monthMax.value.getTime())
 const selectedMonthLabel = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(selectedMonth.value))
 const hasNodes = computed(() => flow.value.nodes.length > 0)
-const hasUnclassified = computed(() => Math.abs(Number(flow.value.unclassified?.value) || 0) > 0)
+const hasUnclassified = computed(() => !Number.isFinite(flow.value.unclassified?.value) || Math.abs(flow.value.unclassified.value) > 0)
 const hasMissingRates = computed(() => flow.value.missingCurrencies?.length > 0)
 const presentation = computed(() =>
   resolveMoneyFlowPresentation({
@@ -189,7 +189,7 @@ const isBlockingLoading = computed(() => analyticsStore.flowState.status === 'lo
 const isBlockingError = computed(() => analyticsStore.flowState.status === 'error' && !hasRetainedData.value)
 const stateLabel = computed(() => t(`analytics.flow.state.${presentation.value.reason}`))
 const stateDescription = computed(() => t(`analytics.flow.state.${presentation.value.reason}_description`))
-const formatCurrency = (value) => [formatNumberForDashboard(Number(value) || 0), analyticsStore.displayCurrencyCode].filter(Boolean).join(' ')
+const formatCurrency = (value) => (Number.isFinite(value) ? [formatNumberForDashboard(value), analyticsStore.displayCurrencyCode].filter(Boolean).join(' ') : '—')
 const categoryLabel = (id) => (['uncategorized', 'uncategorized-income'].includes(id) ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[id]) || id)
 const accountLabel = (id) => Account.getDisplayName(accountStore.accountDictionary[id]) || id
 
@@ -220,16 +220,10 @@ const nodeLabel = (node) => {
   if (accountKinds.has(node.kind) && node.refId) return accountLabel(node.refId)
   return semanticLabelKeys[node.kind] ? t(`analytics.flow.${semanticLabelKeys[node.kind]}`) : node.label || node.refId || node.id
 }
-const colorFor = (item) => {
-  if (item.fundingPool === 'savings' || ['savings', 'savingsDeposited', 'savingsDeposit', 'existingSavings'].includes(item.kind)) return 'var(--income2)'
-  if (['expenses', 'expense', 'expenseCategory'].includes(item.kind)) return 'var(--expense2)'
-  if (['newDebt', 'debtPaid', 'liabilityExtended', 'liabilityCollected'].includes(item.kind)) return 'var(--van-warning-color)'
-  return 'var(--transfer2)'
-}
 const chartGraph = computed(() => ({
   ...flow.value,
-  nodes: flow.value.nodes.map((node) => ({ ...node, label: nodeLabel(node), valueLabel: formatCurrency(node.value), color: colorFor(node) })),
-  links: flow.value.links.map((link) => ({ ...link, valueLabel: formatCurrency(link.value), color: colorFor(link) })),
+  nodes: flow.value.nodes.map((node) => ({ ...node, label: nodeLabel(node), valueLabel: formatCurrency(node.value), color: resolveMoneyFlowSemanticColor(node) })),
+  links: flow.value.links.map((link) => ({ ...link, valueLabel: formatCurrency(link.value), color: resolveMoneyFlowSemanticColor(link) })),
 }))
 
 const auditLabel = (id) => t(`analytics.flow.audit.${id.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`)

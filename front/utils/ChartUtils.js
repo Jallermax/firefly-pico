@@ -147,10 +147,31 @@ const MONEY_FLOW_GRAPH_NODE_THICKNESS = 12
 const MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER = 192
 
 const moneyFlowGraphWidth = (renderedWidth, isDesktop) => (Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : isDesktop ? 1000 : 360)
-const moneyFlowGraphLayerGroups = (nodes) => {
+const moneyFlowGraphLayerGroups = (nodes, links = []) => {
   const layers = new Map()
   for (const node of nodes) layers.set(node.layer, [...(layers.get(node.layer) ?? []), node])
-  return [...layers.entries()].sort(([left], [right]) => left - right).map(([layer, entries]) => ({ layer, nodes: entries.sort((left, right) => left.id.localeCompare(right.id)) }))
+  const groups = [...layers.entries()].sort(([left], [right]) => left - right).map(([layer, entries]) => ({ layer, nodes: entries.sort((left, right) => left.id.localeCompare(right.id)) }))
+  const orderByCounterpart = (groupIndex, counterpartGroups, nodeIdKey, counterpartIdKey) => {
+    const counterpartPositions = new Map(counterpartGroups.flatMap(({ nodes: entries }) => entries.map(({ id }, index) => [id, entries.length > 1 ? index / (entries.length - 1) : 0.5])))
+    const scores = new Map(
+      groups[groupIndex].nodes.map((node) => {
+        const connected = links.filter((link) => link[nodeIdKey] === node.id && counterpartPositions.has(link[counterpartIdKey]) && Number.isFinite(link.value) && link.value !== 0)
+        const total = connected.reduce((sum, link) => sum + Math.abs(link.value), 0)
+        const score = total ? connected.reduce((sum, link) => sum + counterpartPositions.get(link[counterpartIdKey]) * Math.abs(link.value), 0) / total : null
+        return [node.id, score]
+      }),
+    )
+    groups[groupIndex].nodes.sort((left, right) => {
+      const leftScore = scores.get(left.id)
+      const rightScore = scores.get(right.id)
+      if (leftScore === null && rightScore !== null) return 1
+      if (leftScore !== null && rightScore === null) return -1
+      return (leftScore ?? 0) - (rightScore ?? 0) || left.id.localeCompare(right.id)
+    })
+  }
+  for (let index = 1; index < groups.length; index++) orderByCounterpart(index, groups.slice(0, index), 'targetId', 'sourceId')
+  for (let index = groups.length - 2; index >= 0; index--) orderByCounterpart(index, groups.slice(index + 1), 'sourceId', 'targetId')
+  return groups
 }
 
 export function resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth }) {
@@ -206,7 +227,7 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
   const visibleNodeIds = new Set(visibleNodes.map(({ id }) => id))
   const visibleLinks = links.filter(({ sourceId, targetId, value }) => visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId) && Number.isFinite(value) && value !== 0)
   const hiddenLinks = resolvedMode === 'condensed' ? links.filter(({ sourceId, targetId }) => hiddenNodeIds.has(sourceId) || hiddenNodeIds.has(targetId)) : []
-  const layerGroups = moneyFlowGraphLayerGroups(visibleNodes)
+  const layerGroups = moneyFlowGraphLayerGroups(visibleNodes, visibleLinks)
   const incoming = new Map(visibleNodes.map(({ id }) => [id, 0]))
   const outgoing = new Map(visibleNodes.map(({ id }) => [id, 0]))
   for (const link of visibleLinks) {
@@ -252,18 +273,31 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
   })
 
   const nodeGeometry = new Map(graphNodes.map((node) => [node.id, node]))
-  const sourceOffsets = new Map(graphNodes.map(({ id }) => [id, 0]))
-  const targetOffsets = new Map(graphNodes.map(({ id }) => [id, 0]))
+  const crossPosition = (node) => (isDesktop ? node.y + node.height / 2 : node.x + node.width / 2)
+  const allocateOffsets = (nodeIdKey, counterpartIdKey) => {
+    const offsets = new Map()
+    for (const { id } of graphNodes) {
+      let offset = 0
+      const connected = visibleLinks
+        .filter((link) => link[nodeIdKey] === id)
+        .sort((left, right) => crossPosition(nodeGeometry.get(left[counterpartIdKey])) - crossPosition(nodeGeometry.get(right[counterpartIdKey])) || left.id.localeCompare(right.id))
+      for (const link of connected) {
+        offsets.set(link, offset)
+        offset += Math.abs(link.value) * scale
+      }
+    }
+    return offsets
+  }
+  const sourceOffsets = allocateOffsets('sourceId', 'targetId')
+  const targetOffsets = allocateOffsets('targetId', 'sourceId')
   const ribbons = [...visibleLinks]
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((link) => {
       const source = nodeGeometry.get(link.sourceId)
       const target = nodeGeometry.get(link.targetId)
       const ribbonWidth = Math.abs(link.value) * scale
-      const sourceOffset = sourceOffsets.get(link.sourceId)
-      const targetOffset = targetOffsets.get(link.targetId)
-      sourceOffsets.set(link.sourceId, sourceOffset + ribbonWidth)
-      targetOffsets.set(link.targetId, targetOffset + ribbonWidth)
+      const sourceOffset = sourceOffsets.get(link)
+      const targetOffset = targetOffsets.get(link)
       const { path, bounds } = moneyFlowGraphRibbonPath({ source, target, sourceOffset, targetOffset, width: ribbonWidth, isDesktop })
       return { ...link, link, width: ribbonWidth, path, source, target, hitBox: moneyFlowGraphHitBox(bounds) }
     })
@@ -289,6 +323,15 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
     pools: graphNodes.filter(({ kind }) => ['available', 'savings'].includes(kind)),
     details: resolvedMode === 'condensed' ? { nodes: hiddenNodes, links: hiddenLinks } : null,
   }
+}
+
+export function resolveMoneyFlowSemanticColor(item) {
+  const kind = String(item.kind ?? '')
+  const semanticKind = kind.startsWith('other') && kind.length > 5 ? kind.charAt(5).toLowerCase() + kind.slice(6) : kind
+  if (item.fundingPool === 'savings' || ['savings', 'savingsDeposited', 'savingsDeposit', 'existingSavings'].includes(semanticKind)) return 'var(--income2)'
+  if (['expenses', 'expense', 'expenseCategory'].includes(semanticKind)) return 'var(--expense2)'
+  if (['newDebt', 'debtPaid', 'liabilityExtended', 'liabilityCollected'].includes(semanticKind)) return 'var(--van-warning-color)'
+  return 'var(--transfer2)'
 }
 
 export function resolveMoneyFlowPresentation({ isBalanced, hasNodes, hasUnclassified = false, hasMissingRates = false, isCondensed = false, isStale = false }) {
