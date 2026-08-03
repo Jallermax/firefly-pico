@@ -132,6 +132,14 @@ export function resolveFinancialTrendSourceState({ hasAccountSelection, expenses
   }
 }
 
+export function projectSelectedBalanceWarnings({ warnings, selectedMetrics }) {
+  const metricLabels = new Map(selectedMetrics.map(({ id, label }) => [id, label]))
+  return warnings.flatMap((warning) => {
+    const metricIds = warning.metricIds.filter((id) => metricLabels.has(id))
+    return metricIds.length ? [{ ...warning, metricIds, metricLabels: metricIds.map((id) => metricLabels.get(id)) }] : []
+  })
+}
+
 const moneyFlowBandWidth = (value, total, maxWidth) => Math.max(4, clamp(Math.max(0, Number(value)) / Math.max(1, Number(total)), 0, 1) * maxWidth)
 const moneyFlowLabelPosition = (index, count, start, end) => (count <= 1 ? (start + end) / 2 : start + (index / (count - 1)) * (end - start))
 const moneyFlowAnchors = (nodes, total, maxWidth, center) => {

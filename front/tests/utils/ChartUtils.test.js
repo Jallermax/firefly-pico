@@ -240,6 +240,56 @@ test('metric facet filters labels and refuses to remove the final selection', ()
   assert.deepEqual(ChartUtils.toggleRequiredChartFacetSelection(['netWorth', 'expenses'], 'netWorth'), ['expenses'])
 })
 
+test('selected balance warning projection keeps one group with both selected labels', () => {
+  assert.equal(typeof ChartUtils.projectSelectedBalanceWarnings, 'function')
+
+  const warnings = ChartUtils.projectSelectedBalanceWarnings({
+    warnings: [{ type: 'current-balance-unverified', sampleDate: '2026-08-03', metricIds: ['netWorth', 'savings'] }],
+    selectedMetrics: [
+      { id: 'netWorth', label: 'Net worth' },
+      { id: 'savings', label: 'Savings' },
+    ],
+  })
+
+  assert.deepEqual(warnings, [
+    {
+      type: 'current-balance-unverified',
+      sampleDate: '2026-08-03',
+      metricIds: ['netWorth', 'savings'],
+      metricLabels: ['Net worth', 'Savings'],
+    },
+  ])
+})
+
+test('selected balance warning projection removes an unselected metric label', () => {
+  assert.equal(typeof ChartUtils.projectSelectedBalanceWarnings, 'function')
+
+  const warnings = ChartUtils.projectSelectedBalanceWarnings({
+    warnings: [{ type: 'current-balance-unverified', sampleDate: '2026-08-03', metricIds: ['netWorth', 'savings'] }],
+    selectedMetrics: [{ id: 'netWorth', label: 'Net worth' }],
+  })
+
+  assert.deepEqual(warnings, [
+    {
+      type: 'current-balance-unverified',
+      sampleDate: '2026-08-03',
+      metricIds: ['netWorth'],
+      metricLabels: ['Net worth'],
+    },
+  ])
+})
+
+test('selected balance warning projection omits balance warnings for expenses-only selection', () => {
+  assert.equal(typeof ChartUtils.projectSelectedBalanceWarnings, 'function')
+
+  const warnings = ChartUtils.projectSelectedBalanceWarnings({
+    warnings: [{ type: 'current-balance-unverified', sampleDate: '2026-08-03', metricIds: ['netWorth', 'savings'] }],
+    selectedMetrics: [],
+  })
+
+  assert.deepEqual(warnings, [])
+})
+
 test('financial trend source states keep account and transaction failures independent', () => {
   assert.equal(typeof ChartUtils.resolveFinancialTrendSourceState, 'function')
 

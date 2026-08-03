@@ -89,7 +89,7 @@ import { format, parseISO } from 'date-fns'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { buildFinancialTrendChartSeries, formatFinancialTrendForecastValue } from '~/utils/AnalyticsUtils.js'
-import { decorateLineChartPoint, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
+import { decorateLineChartPoint, projectSelectedBalanceWarnings, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 
 const analyticsStore = useAnalyticsStore()
@@ -260,17 +260,16 @@ const isEstimated = computed(
 const missingCurrencies = computed(() => [
   ...new Set([...selectedAccountSourceSeries.value.flatMap((series) => series.missingCurrencies), ...(expensesSelected.value ? (analyticsStore.categorySummary.missingCurrencies ?? []) : [])]),
 ])
-const validationWarnings = computed(() => analyticsStore.balanceWarnings)
+const validationWarnings = computed(() => projectSelectedBalanceWarnings({ warnings: analyticsStore.balanceWarnings, selectedMetrics: selectedAccountMetrics.value }))
 const warningMetricFormatter = computed(() => new Intl.ListFormat(profileStore.language, { style: 'long', type: 'conjunction' }))
 const validationWarningLabel = (warning) => {
   const reasonKey = {
     'current-balance-mismatch': 'analytics.balance.current_balance_mismatch',
     'current-balance-unverified': 'analytics.balance.current_balance_unverified',
   }[warning.type]
-  const metricLabels = warning.metricIds.map((id) => metrics.value.find((metric) => metric.id === id)?.label).filter(Boolean)
   return t('analytics.balance.grouped_balance_warning', {
     reason: reasonKey ? t(reasonKey, warning) : warning.type,
-    metrics: warningMetricFormatter.value.format(metricLabels),
+    metrics: warningMetricFormatter.value.format(warning.metricLabels),
   })
 }
 </script>
