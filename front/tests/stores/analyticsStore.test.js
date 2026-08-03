@@ -90,12 +90,12 @@ const activeAsset = () => ({
   id: 'checking',
   attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'defaultAsset' }, include_net_worth: true, currency_code: 'USD', current_balance: '100' },
 })
-const includedSavings = () => ({
-  id: 'savings',
+const includedSaving = () => ({
+  id: 'saving-included',
   attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'savingAsset' }, include_net_worth: true, currency_code: 'USD', current_balance: '200' },
 })
-const excludedSavings = () => ({
-  id: 'excluded-savings',
+const excludedSaving = () => ({
+  id: 'saving-excluded',
   attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'savingAsset' }, include_net_worth: false, currency_code: 'USD', current_balance: '50' },
 })
 const debitLiability = () => ({
@@ -109,6 +109,19 @@ const debitLiability = () => ({
     current_balance: null,
     current_balance_date: format(new Date(), 'yyyy-MM-dd') + 'T23:59:59+00:00',
     current_debt: '250',
+  },
+})
+const creditLiability = () => ({
+  id: 'receivable',
+  attributes: {
+    active: true,
+    type: { fireflyCode: 'liabilities' },
+    liability_direction: { fireflyCode: 'credit' },
+    include_net_worth: false,
+    currency_code: 'USD',
+    current_balance: '150',
+    current_balance_date: format(new Date(), 'yyyy-MM-dd') + 'T23:59:59+00:00',
+    current_debt: '150',
   },
 })
 const chartResponse = (value, date = format(new Date(), 'yyyy-MM-dd')) => ({ status: 200, data: [{ currency_code: 'USD', entries: { [date]: String(value) } }] })
@@ -196,20 +209,149 @@ test('initializes a fallback currency with one request per non-empty group and r
   assert.equal(accountRequests.length, 1)
 })
 
-test('initializes the real store factory with an included savings account', async () => {
-  accountStore.accountList = [activeAsset(), includedSavings(), excludedSavings()]
+test('repairs the shared savings view and requests four logical balance groups without a unified fifth request', async () => {
+  storageOverrides.set('analyticsSavingsView', 'corrupt')
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  accountStore.accountList = [activeAsset(), includedSaving(), excludedSaving(), debitLiability(), creditLiability()]
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
 
-  assert.equal(store.balanceState.status, 'ready')
+  assert.equal(store.savingsView, 'combined')
+  assert.equal(accountRequests.filter(({ period }) => period !== '1D').length, 4)
   assert.deepEqual(
-    accountRequests.map(({ accountIds }) => accountIds.sort()),
-    [
-      ['checking', 'savings'],
-      ['excluded-savings', 'savings'],
-    ],
+    accountRequests
+      .filter(({ period }) => period !== '1D')
+      .map(({ accountIds }) => [...accountIds].sort())
+      .sort(),
+    [['checking', 'saving-included'], ['saving-excluded'], ['saving-included'], ['loan', 'receivable']].sort(),
   )
+})
+
+test('switching the shared savings view repairs persisted metric selections and retains one selection', () => {
+  storageOverrides.set('analyticsVisibleBalanceTotalMetrics', ['savings'])
+  storageOverrides.set('analyticsVisibleBalanceMetrics', ['savings', 'expenses'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  store.savingsView = 'split'
+
+  assert.equal(store.savingsView, 'split')
+  assert.deepEqual(store.availableBalanceMetricIds, ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'])
+  assert.deepEqual(store.availableFinancialMetricIds, ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt', 'expenses'])
+  assert.deepEqual(store.visibleBalanceMetrics, ['savingsIncluded', 'savingsExcluded'])
+  assert.deepEqual(store.visibleFinancialMetrics, ['savingsIncluded', 'savingsExcluded', 'expenses'])
+
+  store.visibleBalanceMetrics = []
+  store.visibleFinancialMetrics = []
+  store.savingsView = 'corrupt'
+
+  assert.equal(store.savingsView, 'combined')
+  assert.deepEqual(store.visibleBalanceMetrics, ['netWorth'])
+  assert.deepEqual(store.visibleFinancialMetrics, ['netWorth'])
+})
+
+test('combines included and excluded savings without refetching when the view changes', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  const included = includedSaving()
+  const excluded = excludedSaving()
+  accountStore.accountList = [
+    { ...included, attributes: { ...included.attributes, current_balance: '100' } },
+    { ...excluded, attributes: { ...excluded.attributes, current_balance: '40' } },
+  ]
+  accountResponse = async ({ accountIds }) => chartResponse(accountIds.includes('saving-excluded') ? 40 : 100, '2026-08-10')
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').points, [{ x: '2026-08-10', value: 140 }])
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').currentPoint, { x: '2026-08-10', value: 140 })
+  const requestCount = accountRequests.length
+
+  store.savingsView = 'split'
+  await nextTick()
+
+  assert.deepEqual(
+    store.balanceSeries.map(({ id }) => id),
+    ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'],
+  )
+  assert.equal(accountRequests.length, requestCount)
+})
+
+test('uses included savings as the complete combined series when the excluded group is empty', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const included = includedSaving()
+  accountStore.accountList = [{ ...included, attributes: { ...included.attributes, current_balance: '100' } }]
+  accountResponse = async () => chartResponse(100, '2026-08-10')
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const savings = store.balanceSeries.find(({ id }) => id === 'savings')
+  assert.deepEqual(savings.points, [{ x: '2026-08-10', value: 100 }])
+  assert.deepEqual(savings.currentPoint, { x: '2026-08-10', value: 100 })
+})
+
+test('retains a complete combined savings series as stale when the excluded refresh fails', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  const included = includedSaving()
+  const excluded = excludedSaving()
+  accountStore.accountList = [
+    { ...included, attributes: { ...included.attributes, current_balance: '100' } },
+    { ...excluded, attributes: { ...excluded.attributes, current_balance: '40' } },
+  ]
+  let excludedFails = false
+  accountResponse = async ({ accountIds }) => {
+    if (accountIds.includes('saving-excluded')) return excludedFails ? { status: 500, data: {} } : chartResponse(40, '2026-08-10')
+    return chartResponse(excludedFails ? 999 : 100, '2026-08-10')
+  }
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+  excludedFails = true
+  await store.retryBalance()
+
+  assert.equal(store.balanceState.status, 'error')
+  assert.equal(store.balanceState.isStale, true)
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').points, [{ x: '2026-08-10', value: 140 }])
+})
+
+test('groups the same selected balance warning under both metric IDs', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const sampleDate = '2026-08-07'
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  storageOverrides.set('analyticsVisibleBalanceTotalMetrics', ['netWorth', 'savings'])
+  accountStore.accountList = [includedSaving(), excludedSaving()]
+  accountResponse = async ({ accountIds }) => chartResponse(accountIds.includes('saving-excluded') ? 50 : 200, sampleDate)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.balanceWarnings, [{ type: 'current-balance-unverified', sampleDate, metricIds: ['netWorth', 'savings'] }])
+})
+
+test('limits four incomplete non-empty groups to four primary and four current fallbacks', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  const available = activeAsset()
+  const included = includedSaving()
+  const excluded = excludedSaving()
+  const debt = debitLiability()
+  accountStore.accountList = [
+    { ...available, attributes: { ...available.attributes, current_balance: null } },
+    { ...included, attributes: { ...included.attributes, current_balance: null } },
+    { ...excluded, attributes: { ...excluded.attributes, current_balance: null } },
+    { ...debt, attributes: { ...debt.attributes, current_balance: null, current_debt: null } },
+  ]
+  accountResponse = async ({ period }) => chartResponse(100, period === '1D' ? '2026-08-10' : '2026-07-31')
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(accountRequests.length, 8)
+  assert.equal(accountRequests.filter(({ period }) => period === '1W').length, 4)
+  assert.equal(accountRequests.filter(({ period }) => period === '1D').length, 4)
 })
 
 test('normalizes a current Firefly chart timestamp before validating balances', async () => {

@@ -5,6 +5,7 @@ import DateUtils from '../utils/DateUtils.js'
 import {
   buildCategoryLedger,
   buildMonthlyMoneyFlow,
+  combineSavingsBalanceSeries,
   convertAnalyticsAmount,
   getAnalyticsAccountGroups,
   getAnalyticsCurrentAmount,
@@ -15,10 +16,14 @@ import {
   summarizeTotalExpenseWindow,
 } from '../utils/AnalyticsUtils.js'
 
-const BALANCE_METRICS = ['netWorth', 'savings', 'debt']
-const FINANCIAL_TREND_METRICS = [...BALANCE_METRICS, 'expenses']
+const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt']
+const SAVINGS_VIEWS = ['combined', 'split']
 const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
 const CATEGORY_SERIES_LIMIT = 6
+
+const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
+const financialMetricIdsForSavingsView = (view) => [...balanceMetricIdsForSavingsView(view), 'expenses']
+const emptyBalanceSeries = (id) => ({ id, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })
 
 export function createAnalyticsStore(id, useDependencies) {
   return defineStore(id, () => {
@@ -45,23 +50,42 @@ export function createAnalyticsStore(id, useDependencies) {
     const selectedCategoryIds = useStoredValue('analyticsSelectedCategoryIds', [])
     const persistedSelectedCategoryIds = computed(() => [...new Set((Array.isArray(selectedCategoryIds.value) ? selectedCategoryIds.value : []).filter(Boolean))])
     const normalizedSelectedCategoryIds = computed(() => persistedSelectedCategoryIds.value.slice(0, CATEGORY_SERIES_LIMIT))
-    const storedVisibleFinancialMetrics = useStoredValue('analyticsVisibleBalanceMetrics', FINANCIAL_TREND_METRICS)
-    const storedVisibleBalanceMetrics = useStoredValue('analyticsVisibleBalanceTotalMetrics', BALANCE_METRICS)
+    const storedSavingsView = useStoredValue('analyticsSavingsView', 'combined')
+    const storedVisibleFinancialMetrics = useStoredValue('analyticsVisibleBalanceMetrics', financialMetricIdsForSavingsView('combined'))
+    const storedVisibleBalanceMetrics = useStoredValue('analyticsVisibleBalanceTotalMetrics', balanceMetricIdsForSavingsView('combined'))
     const storedFinancialTrendView = useStoredValue('analyticsFinancialTrendView', 'balances')
-    const normalizeMetrics = (metrics, availableMetrics) => {
-      const normalized = [...new Set((Array.isArray(metrics) ? metrics : []).filter((metric) => availableMetrics.includes(metric)))]
+    const normalizeSavingsView = (view) => (SAVINGS_VIEWS.includes(view) ? view : 'combined')
+    const normalizeMetrics = (metrics, availableMetrics, view) => {
+      const compatibleMetrics = (Array.isArray(metrics) ? metrics : []).flatMap((metric) => {
+        if (view === 'split' && metric === 'savings') return ['savingsIncluded', 'savingsExcluded']
+        if (view === 'combined' && ['savingsIncluded', 'savingsExcluded'].includes(metric)) return ['savings']
+        return [metric]
+      })
+      const normalized = [...new Set(compatibleMetrics.filter((metric) => availableMetrics.includes(metric)))]
       return normalized.length > 0 ? normalized : [availableMetrics[0]]
     }
+    if (!SAVINGS_VIEWS.includes(storedSavingsView.value)) storedSavingsView.value = 'combined'
+    const savingsView = computed({
+      get: () => normalizeSavingsView(storedSavingsView.value),
+      set: (view) => {
+        const normalizedView = normalizeSavingsView(view)
+        storedSavingsView.value = normalizedView
+        storedVisibleBalanceMetrics.value = normalizeMetrics(storedVisibleBalanceMetrics.value, balanceMetricIdsForSavingsView(normalizedView), normalizedView)
+        storedVisibleFinancialMetrics.value = normalizeMetrics(storedVisibleFinancialMetrics.value, financialMetricIdsForSavingsView(normalizedView), normalizedView)
+      },
+    })
+    const availableBalanceMetricIds = computed(() => balanceMetricIdsForSavingsView(savingsView.value))
+    const availableFinancialMetricIds = computed(() => financialMetricIdsForSavingsView(savingsView.value))
     const visibleFinancialMetrics = computed({
-      get: () => normalizeMetrics(storedVisibleFinancialMetrics.value, FINANCIAL_TREND_METRICS),
+      get: () => normalizeMetrics(storedVisibleFinancialMetrics.value, availableFinancialMetricIds.value, savingsView.value),
       set: (metrics) => {
-        storedVisibleFinancialMetrics.value = normalizeMetrics(metrics, FINANCIAL_TREND_METRICS)
+        storedVisibleFinancialMetrics.value = normalizeMetrics(metrics, availableFinancialMetricIds.value, savingsView.value)
       },
     })
     const visibleBalanceMetrics = computed({
-      get: () => normalizeMetrics(storedVisibleBalanceMetrics.value, BALANCE_METRICS),
+      get: () => normalizeMetrics(storedVisibleBalanceMetrics.value, availableBalanceMetricIds.value, savingsView.value),
       set: (metrics) => {
-        storedVisibleBalanceMetrics.value = normalizeMetrics(metrics, BALANCE_METRICS)
+        storedVisibleBalanceMetrics.value = normalizeMetrics(metrics, availableBalanceMetricIds.value, savingsView.value)
       },
     })
     const financialTrendView = computed({
@@ -92,10 +116,7 @@ export function createAnalyticsStore(id, useDependencies) {
       return decimalPlaces === null || decimalPlaces === undefined ? 2 : Number(decimalPlaces)
     })
     const rates = computed(() => currencyStore.exchangeRates?.rates ?? {})
-    const accountGroups = computed(() => {
-      const groups = getAnalyticsAccountGroups(accountStore.accountList)
-      return { ...groups, savings: [...groups.savingsIncluded, ...groups.savingsExcluded] }
-    })
+    const accountGroups = computed(() => getAnalyticsAccountGroups(accountStore.accountList))
     const categoryLedger = computed(() =>
       buildCategoryLedger({
         transactions: transactions.value,
@@ -155,7 +176,7 @@ export function createAnalyticsStore(id, useDependencies) {
 
     function getBalanceSnapshot() {
       const groups = Object.fromEntries(
-        BALANCE_METRICS.map((metric) => [
+        BALANCE_GROUPS.map((metric) => [
           metric,
           accountGroups.value[metric].map((account) => {
             const currentDate = account?.attributes?.current_balance_date
@@ -171,11 +192,11 @@ export function createAnalyticsStore(id, useDependencies) {
       const displayCode = displayCurrencyCode.value
       const primaryCode = primaryCurrencyCode.value
       const rateSnapshot = { ...rates.value }
-      const currencyCodes = [displayCode, primaryCode, ...BALANCE_METRICS.flatMap((metric) => groups[metric].map(({ currencyCode }) => currencyCode))].filter(Boolean).sort()
+      const currencyCodes = [displayCode, primaryCode, ...BALANCE_GROUPS.flatMap((metric) => groups[metric].map(({ currencyCode }) => currencyCode))].filter(Boolean).sort()
       const relevantRates = Object.fromEntries([...new Set(currencyCodes)].map((currencyCode) => [currencyCode, rateSnapshot[currencyCode] ?? null]))
       const months = Number(balancePeriod.value)
       const today = getNow()
-      const groupIds = Object.fromEntries(BALANCE_METRICS.map((metric) => [metric, groups[metric].map(({ id }) => id).sort()]))
+      const groupIds = Object.fromEntries(BALANCE_GROUPS.map((metric) => [metric, groups[metric].map(({ id }) => id).sort()]))
       const cacheKey = JSON.stringify({ period: months, displayCurrencyCode: displayCode, primaryCurrencyCode: primaryCode, rates: relevantRates, groups: groupIds })
       return {
         cacheKey,
@@ -191,11 +212,42 @@ export function createAnalyticsStore(id, useDependencies) {
     }
 
     const balanceCacheKey = computed(() => getBalanceSnapshot().cacheKey)
-    const balanceSeries = computed(
-      () =>
-        balanceCache.value[balanceCacheKey.value] ??
-        FINANCIAL_TREND_METRICS.filter((metric) => metric !== 'expenses').map((metric) => ({ id: metric, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })),
-    )
+    const currentFourGroupSeries = computed(() => {
+      const cached = balanceCache.value[balanceCacheKey.value] ?? []
+      return Object.fromEntries(BALANCE_GROUPS.map((metric) => [metric, cached.find(({ id }) => id === metric) ?? emptyBalanceSeries(metric)]))
+    })
+    const combinedSavingsSeries = computed(() => {
+      const includedIsEmpty = accountGroups.value.savingsIncluded.length === 0
+      const excludedIsEmpty = accountGroups.value.savingsExcluded.length === 0
+      if (includedIsEmpty && excludedIsEmpty) return emptyBalanceSeries('savings')
+      const combined = combineSavingsBalanceSeries({
+        includedSeries: currentFourGroupSeries.value.savingsIncluded,
+        excludedSeries: currentFourGroupSeries.value.savingsExcluded,
+        includedIsEmpty,
+        excludedIsEmpty,
+      })
+      return combined ? { id: 'savings', ...combined } : emptyBalanceSeries('savings')
+    })
+    const balanceSeries = computed(() => {
+      const base = currentFourGroupSeries.value
+      if (savingsView.value === 'split') return [base.netWorth, base.savingsIncluded, base.savingsExcluded, base.debt]
+      return [base.netWorth, combinedSavingsSeries.value, base.debt]
+    })
+    const balanceWarnings = computed(() => {
+      const selectedMetricIds = financialTrendView.value === 'balances' ? visibleBalanceMetrics.value : visibleFinancialMetrics.value
+      const grouped = new Map()
+      balanceSeries.value
+        .filter(({ id: metricId }) => selectedMetricIds.includes(metricId))
+        .forEach(({ id: metricId, warnings }) => {
+          warnings.forEach(({ type, sampleDate }) => {
+            const key = JSON.stringify([type, sampleDate])
+            const warning = grouped.get(key)
+            if (!warning) grouped.set(key, { type, sampleDate, metricIds: [metricId] })
+            else if (!warning.metricIds.includes(metricId)) warning.metricIds.push(metricId)
+          })
+        })
+      return [...grouped.values()]
+    })
     const financialTrend = computed(() => ({
       ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() }),
       expenses: summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() }),
@@ -274,7 +326,7 @@ export function createAnalyticsStore(id, useDependencies) {
       const request = (async () => {
         const repository = createAccountRepository()
         const responses = await Promise.all(
-          BALANCE_METRICS.map(async (metric) => {
+          BALANCE_GROUPS.map(async (metric) => {
             const accountIds = snapshot.groups[metric].map(({ id }) => id)
             if (accountIds.length === 0) return { metric, response: null }
             const response = await repository.getChartOverview({ start: snapshot.start, end: snapshot.end, period: snapshot.period, accountIds })
@@ -394,6 +446,9 @@ export function createAnalyticsStore(id, useDependencies) {
       balancePeriod,
       categoryAverageMonths,
       selectedCategoryIds,
+      savingsView,
+      availableBalanceMetricIds,
+      availableFinancialMetricIds,
       financialTrendView,
       visibleBalanceMetrics,
       visibleFinancialMetrics,
@@ -402,6 +457,7 @@ export function createAnalyticsStore(id, useDependencies) {
       categoryState,
       flowState,
       balanceSeries,
+      balanceWarnings,
       financialTrend,
       categoryRanking,
       categoryRankingItems,
