@@ -2,7 +2,10 @@
   <van-cell-group inset class="analytics-card analytics-category-card">
     <div class="van-cell-group-title analytics-card-title analytics-category-card-title">
       <div class="flex-1">
-        <div>{{ $t('analytics.category.title') }}</div>
+        <div class="flex-center-vertical gap-2">
+          <span>{{ $t('analytics.category.title') }}</span>
+          <span v-if="summary.isEstimated" class="analytics-fx-badge">{{ $t('analytics.common.fx_current_rates') }}</span>
+        </div>
         <div class="analytics-card-subtitle">{{ $t('analytics.category.subtitle') }}</div>
       </div>
       <analytics-category-facet v-model="analyticsStore.selectedCategoryIds" :items="facetItems" :max="6" />
@@ -68,14 +71,12 @@
         <p>{{ $t('analytics.category.definition') }}</p>
         <p>{{ $t('analytics.category.current_month_separate') }}</p>
       </details>
-      <div v-if="readyPresentation.showEstimatedRates" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
       <div v-if="readyPresentation.showMissingRates" class="analytics-warning">
         {{ $t('analytics.common.missing_rates', { currencies: readyPresentation.missingCurrencies.join(', ') }) }}
       </div>
     </template>
 
     <template v-if="analyticsStore.categoryState.status !== 'loading' && (analyticsStore.categoryState.status === 'empty' || chartSeries.length === 0)">
-      <div v-if="summary.isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
       <div v-if="summary.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: summary.missingCurrencies.join(', ') }) }}</div>
     </template>
 
@@ -225,7 +226,6 @@ const readyPresentation = computed(() =>
   buildCategoryReadyPresentation({
     usedMonths: summary.value.usedMonths,
     requestedMonths: summary.value.requestedMonths,
-    isEstimated: summary.value.isEstimated,
     missingCurrencies: summary.value.missingCurrencies ?? [],
   }),
 )

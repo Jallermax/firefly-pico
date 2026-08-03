@@ -35,10 +35,9 @@ export const buildCategoryForecastDetailsPresentation = ({ point, labels, format
   { id: 'usedMonths', label: labels.usedMonths, value: point.usedMonths },
 ]
 
-export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, isEstimated, missingCurrencies }) => ({
+export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, missingCurrencies }) => ({
   showShortHistory: usedMonths !== requestedMonths,
   showCalculation: true,
-  showEstimatedRates: isEstimated,
   showMissingRates: missingCurrencies.length > 0,
   missingCurrencies,
 })

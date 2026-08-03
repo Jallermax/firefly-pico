@@ -510,6 +510,26 @@ test('packed ribbons close at square node edges and never overfill a pool', () =
   )
 })
 
+test('desktop money flow reserves outer label gutters without collapsing internal layers', () => {
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth: 1000, mode: 'full' })
+  const layerPositions = [...new Set(geometry.nodes.map(({ layer, x }) => `${layer}:${x}`))].map((entry) => Number(entry.split(':')[1]))
+  const firstLayerNodes = geometry.nodes.filter(({ layer }) => layer === 0)
+  const lastLayerNodes = geometry.nodes.filter(({ layer }) => layer === 4)
+
+  assert.ok(firstLayerNodes.every(({ x }) => x >= 176))
+  assert.ok(lastLayerNodes.every(({ x, width }) => x + width <= geometry.width - 176))
+  assert.equal(layerPositions.length, 5)
+  assert.equal(
+    layerPositions.slice(1).every((position, index) => position - layerPositions[index] > 0),
+    true,
+  )
+  assert.ok(geometry.scale > 0)
+  assert.equal(
+    geometry.ribbons.every(({ width }) => width > 0),
+    true,
+  )
+})
+
 test('desktop full geometry grows before scaling eleven packed peers', () => {
   const sourceNodes = Array.from({ length: 11 }, (_, index) => ({ id: `income:${index + 1}`, layer: 0, kind: 'income', refId: String(index + 1), value: 10, transactionIds: [`income-${index + 1}`] }))
   const sourceLinks = sourceNodes.map((node) => ({

@@ -144,6 +144,7 @@ const MONEY_FLOW_GRAPH_PADDING = 16
 const MONEY_FLOW_GRAPH_GAP = 28
 const MONEY_FLOW_GRAPH_HIT_SIZE = 44
 const MONEY_FLOW_GRAPH_NODE_THICKNESS = 12
+const MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER = 176
 
 const moneyFlowGraphWidth = (renderedWidth, isDesktop) => (Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : isDesktop ? 1000 : 360)
 const moneyFlowGraphLayerGroups = (nodes) => {
@@ -224,7 +225,7 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
   const layerCrossExtents = layerGroups.map(({ nodes: entries }) => entries.reduce((sum, node) => sum + spanValues.get(node.id) * scale, 0) + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP)
   const height = isDesktop ? Math.max(360, Math.max(0, ...layerCrossExtents) + MONEY_FLOW_GRAPH_PADDING * 2) : Math.max(280, layerGroups.length * 104 + MONEY_FLOW_GRAPH_PADDING * 2)
   const directionExtent = isDesktop ? width : height
-  const layerStart = isDesktop ? 48 : 44
+  const layerStart = isDesktop ? MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER + MONEY_FLOW_GRAPH_NODE_THICKNESS / 2 : 44
   const layerEnd = directionExtent - layerStart
   const layerPosition = (index) => (layerGroups.length <= 1 ? directionExtent / 2 : layerStart + (index / (layerGroups.length - 1)) * (layerEnd - layerStart))
   const graphNodes = []

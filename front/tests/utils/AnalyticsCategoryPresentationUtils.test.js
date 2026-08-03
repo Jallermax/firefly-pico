@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '../../utils/AnalyticsCategoryPresentationUtils.js'
 import * as CategoryPresentation from '../../utils/AnalyticsCategoryPresentationUtils.js'
@@ -133,27 +134,33 @@ test('category forecast details expose every input and both forecast values', ()
   ])
 })
 
-test('category ready presentation keeps calculation disclosure and warnings independently visible', () => {
+test('category ready presentation keeps calculation disclosure and missing-rate warnings independently visible', () => {
   const presentation = buildCategoryReadyPresentation({
     usedMonths: 2,
     requestedMonths: 6,
-    isEstimated: true,
     missingCurrencies: ['EUR'],
   })
 
   assert.deepEqual(presentation, {
     showShortHistory: true,
     showCalculation: true,
-    showEstimatedRates: true,
     showMissingRates: true,
     missingCurrencies: ['EUR'],
   })
 
-  assert.deepEqual(buildCategoryReadyPresentation({ usedMonths: 6, requestedMonths: 6, isEstimated: false, missingCurrencies: [] }), {
+  assert.deepEqual(buildCategoryReadyPresentation({ usedMonths: 6, requestedMonths: 6, missingCurrencies: [] }), {
     showShortHistory: false,
     showCalculation: true,
-    showEstimatedRates: false,
     showMissingRates: false,
     missingCurrencies: [],
   })
+})
+
+test('category card renders estimated FX only as a compact title badge', () => {
+  const component = readFileSync(new URL('../../components/analytics/analytics-category-spending.vue', import.meta.url), 'utf8')
+  const template = component.slice(0, component.indexOf('<script setup>'))
+
+  assert.match(template, /v-if="summary\.isEstimated" class="analytics-fx-badge"[\s\S]*analytics\.common\.fx_current_rates/)
+  assert.doesNotMatch(template, /analytics\.common\.estimated_current_rates/)
+  assert.equal(template.match(/analytics\.common\.missing_rates/g)?.length, 2)
 })
