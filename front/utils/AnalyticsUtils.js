@@ -51,14 +51,13 @@ export function combineSavingsBalanceSeries({ includedSeries, excludedSeries, in
     return [{ x, value: constituents.reduce((total, point) => total + point.value, 0), ...(isEstimated ? { isEstimated: true } : {}) }]
   })
   const currentPoints = nonEmptySeries.map(({ currentPoint }) => (Number.isFinite(currentPoint?.value) ? currentPoint : null))
-  const currentPoint =
-    currentPoints.length === nonEmptySeries.length
-      ? {
-          x: currentPoints.at(-1)?.x ?? null,
-          value: currentPoints.reduce((total, point) => total + point.value, 0),
-          ...(currentPoints.some((point) => point.isEstimated) ? { isEstimated: true } : {}),
-        }
-      : null
+  const currentPoint = currentPoints.every((point) => Number.isFinite(point?.value))
+    ? {
+        x: currentPoints.at(-1)?.x ?? null,
+        value: currentPoints.reduce((total, point) => total + point.value, 0),
+        ...(currentPoints.some((point) => point.isEstimated) ? { isEstimated: true } : {}),
+      }
+    : null
 
   return { points, currentPoint, ...metadata }
 }
