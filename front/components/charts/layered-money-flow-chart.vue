@@ -57,18 +57,6 @@
         </text>
       </g>
     </svg>
-
-    <details v-if="accessibleNodes.length || accessibleLinks.length" class="analytics-flow-values">
-      <summary>{{ $t('analytics.common.exact_values') }}</summary>
-      <ul class="analytics-flow-list">
-        <li v-for="node in accessibleNodes" :key="`node:${node.id}`">
-          <button type="button" @click="emit('select-node', node)">{{ nodeAriaLabel(node) }}</button>
-        </li>
-        <li v-for="link in accessibleLinks" :key="`link:${link.id}`">
-          <button type="button" @click="emit('select-link', link)">{{ linkAriaLabel(link) }}</button>
-        </li>
-      </ul>
-    </details>
   </div>
 </template>
 
@@ -104,8 +92,6 @@ const layout = computed(() =>
   }),
 )
 const nodeDictionary = computed(() => new Map(limitedGraph.value.nodes.map((node) => [node.id, node])))
-const accessibleNodes = computed(() => [...layout.value.nodes.map(({ node }) => node), ...(layout.value.details?.nodes ?? [])])
-const accessibleLinks = computed(() => [...layout.value.ribbons.map(({ link }) => link), ...(layout.value.details?.links ?? [])])
 const related = computed(() => {
   if (!active.value) return null
   if (active.value.type === 'link') {

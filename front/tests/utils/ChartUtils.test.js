@@ -618,6 +618,7 @@ test('layered flow renderer uses filled ribbons and emits exact selected graph o
   assert.match(component, /emit\('select-link', link\)/)
   assert.match(component, /emit\('mode-change', value\)/)
   assert.match(component, /linkAriaLabel[\s\S]*analytics\.flow\.source[\s\S]*analytics\.flow\.destination/)
+  assert.doesNotMatch(component, /<details[\s\S]*analytics-flow-values/)
 })
 
 test('money flow card uses the layered graph, persisted detail control, and one exact-details popup', () => {
@@ -632,4 +633,22 @@ test('money flow card uses the layered graph, persisted detail control, and one 
   assert.match(component, /v-for="link in fullLinks"/)
   assert.equal(component.match(/<app-popup/g)?.length, 1)
   assert.match(component, /TransactionFilterUtils\.filters\.id\.toUrl/)
+})
+
+test('money flow detail popup keeps long drilldowns inside a bounded scroll region', () => {
+  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const ruleBody = (selector) => {
+    const start = whiteCss.indexOf(`${selector} {`)
+    assert.notEqual(start, -1, `missing ${selector}`)
+    return whiteCss.slice(start, whiteCss.indexOf('}', start) + 1)
+  }
+  const detailsRule = ruleBody('.analytics-flow-details')
+  const listRule = ruleBody('.analytics-flow-details-list')
+
+  assert.match(detailsRule, /height:\s*100%/)
+  assert.match(detailsRule, /min-height:\s*0/)
+  assert.match(detailsRule, /max-height:\s*100%/)
+  assert.match(listRule, /flex:\s*1/)
+  assert.match(listRule, /min-height:\s*0/)
+  assert.match(listRule, /overflow-y:\s*auto/)
 })

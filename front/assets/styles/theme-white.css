@@ -2868,8 +2868,7 @@ body {
     opacity: 0.45;
 }
 
-.analytics-flow-month-button:focus-visible,
-.analytics-flow-list button:focus-visible {
+.analytics-flow-month-button:focus-visible {
     outline: 2px solid var(--primary-action);
     outline-offset: 2px;
 }
@@ -2942,31 +2941,6 @@ body {
 .analytics-flow-ribbon:focus-visible .analytics-flow-interaction-target {
     stroke: var(--primary-action);
     stroke-width: 2;
-}
-
-.analytics-flow-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px 10px;
-    margin: 0;
-    padding: 0 10px 10px;
-    list-style: none;
-}
-
-.analytics-flow-list button {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    min-height: 44px;
-    padding: 7px 10px;
-    border: 0;
-    border-radius: 6px;
-    color: var(--van-text-color);
-    background: var(--van-background-2-5);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    text-align: left;
-    cursor: pointer;
 }
 
 .analytics-flow-empty {
@@ -3090,6 +3064,9 @@ body {
 .analytics-flow-details {
     display: flex;
     flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
     gap: 12px;
     padding-bottom: 12px;
 }
@@ -3106,8 +3083,11 @@ body {
 .analytics-flow-details-list {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
     gap: 6px;
     padding: 0 12px;
+    overflow-y: auto;
 }
 
 .analytics-flow-detail-row {
@@ -3154,10 +3134,6 @@ body {
 
 .analytics-flow-mobile .analytics-flow-svg {
     max-width: 100%;
-}
-
-.analytics-flow-mobile .analytics-flow-list {
-    grid-template-columns: 1fr;
 }
 
 .analytics-page-switch {
