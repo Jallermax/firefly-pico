@@ -516,6 +516,35 @@ test('packed ribbons close at square node edges and never overfill a pool', () =
   )
 })
 
+test('desktop full geometry grows before scaling eleven packed peers', () => {
+  const sourceNodes = Array.from({ length: 11 }, (_, index) => ({ id: `income:${index + 1}`, layer: 0, kind: 'income', refId: String(index + 1), value: 10, transactionIds: [`income-${index + 1}`] }))
+  const sourceLinks = sourceNodes.map((node) => ({
+    id: `${node.id}->income`,
+    sourceId: node.id,
+    targetId: 'income',
+    kind: 'income',
+    value: 10,
+    transactionIds: node.transactionIds,
+  }))
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({
+    nodes: [...sourceNodes, { id: 'income', layer: 1, kind: 'income', value: 110, transactionIds: [] }, { id: 'available', layer: 2, kind: 'available', value: 110, transactionIds: [] }],
+    links: [...sourceLinks, { id: 'income->available', sourceId: 'income', targetId: 'available', kind: 'income', fundingPool: 'available', value: 110, transactionIds: [] }],
+    isDesktop: true,
+    renderedWidth: 900,
+    mode: 'full',
+  })
+  const available = geometry.pools.find(({ id }) => id === 'available')
+
+  assert.ok(geometry.scale > 0)
+  assert.equal(
+    geometry.ribbons.every(({ width }) => width > 0),
+    true,
+  )
+  assert.ok(geometry.height > 360)
+  assert.ok(available.span > 0)
+  assert.ok(available.incomingWidth <= available.span && available.outgoingWidth <= available.span)
+})
+
 test('full mobile flow preserves baseline spacing and separate 44px interaction targets', () => {
   assert.equal(typeof ChartUtils.resolveMoneyFlowGraphMode, 'function')
   assert.equal(ChartUtils.resolveMoneyFlowGraphMode({ nodes: layeredGeometryGraph.nodes, isDesktop: false, renderedWidth: 390 }), 'full')

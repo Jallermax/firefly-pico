@@ -636,20 +636,30 @@ export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
     const sign = side === 'source' || node.value < 0 ? 'negative' : 'positive'
     const groupName = moneyFlowOtherGroups[node.kind] ?? node.kind
     const key = [side, groupName, parentIds.join(','), fundingPools.join(','), fundingPool, sign, node.savingsGroup ?? ''].join(':')
-    const group = groups.get(key) ?? { nodes: [], side, groupName, fundingPool, sign, savingsGroup: node.savingsGroup }
+    const group = groups.get(key) ?? { nodes: [], side, groupName, parentIds, fundingPools, fundingPool, sign, savingsGroup: node.savingsGroup }
     group.nodes.push(node)
     groups.set(key, group)
   }
 
   const hiddenToOther = new Map()
   const otherNodes = []
+  const reducedGroups = []
   for (const group of groups.values()) {
     const ranked = [...group.nodes].sort((left, right) => Math.abs(right.value) - Math.abs(left.value) || String(left.refId ?? left.id).localeCompare(String(right.refId ?? right.id)))
     const hidden = ranked.slice(Number.isFinite(limit) && limit >= 0 ? limit : ranked.length)
     if (!hidden.length) continue
 
     const suffix = group.savingsGroup ? `:${group.savingsGroup}` : ''
-    const id = `other:${group.groupName}:${group.fundingPool}:${group.sign}${suffix}`
+    reducedGroups.push({ group, hidden, baseId: `other:${group.groupName}:${group.fundingPool}:${group.sign}${suffix}` })
+  }
+
+  const baseIdCounts = new Map()
+  for (const { baseId } of reducedGroups) baseIdCounts.set(baseId, (baseIdCounts.get(baseId) ?? 0) + 1)
+  for (const { group, hidden, baseId } of reducedGroups) {
+    const parentIdentity = group.parentIds.map(encodeURIComponent).join('+')
+    const poolIdentity = group.fundingPools.length ? group.fundingPools.map(encodeURIComponent).join('+') : encodeURIComponent(group.fundingPool)
+    const compatibilitySuffix = [encodeURIComponent(group.side), parentIdentity, poolIdentity].join(':')
+    const id = baseIdCounts.get(baseId) > 1 ? `${baseId}:${compatibilitySuffix}` : baseId
     for (const node of hidden) hiddenToOther.set(node.id, id)
     otherNodes.push({
       id,

@@ -277,7 +277,8 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
     incoming.set(link.targetId, incoming.get(link.targetId) + Math.abs(link.value))
   }
   const spanValues = new Map(visibleNodes.map((node) => [node.id, Math.max(Math.abs(Number(node.value) || 0), incoming.get(node.id), outgoing.get(node.id))]))
-  const crossExtent = isDesktop ? 280 : Math.max(1, width - MONEY_FLOW_GRAPH_PADDING * 2)
+  const maximumGapExtent = Math.max(0, ...layerGroups.map(({ nodes: entries }) => Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP))
+  const crossExtent = isDesktop ? 280 + maximumGapExtent : Math.max(1, width - MONEY_FLOW_GRAPH_PADDING * 2)
   const scaleCandidates = layerGroups.flatMap(({ nodes: entries }) => {
     const total = entries.reduce((sum, node) => sum + spanValues.get(node.id), 0)
     const available = crossExtent - Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP

@@ -1448,6 +1448,40 @@ test('never combines incompatible graph sides, pools, signs, or savings groups i
   ])
 })
 
+test('keeps colliding Other identities path-unique and independently rewired', () => {
+  const nodes = []
+  const links = []
+  for (const parentId of ['expenses-primary', 'expenses-secondary']) {
+    nodes.push({ id: parentId, layer: 3, kind: 'expenses', value: 21, transactionIds: [] })
+    for (let index = 1; index <= 6; index++) {
+      const value = 7 - index
+      const id = `${parentId}:category-${index}`
+      const transactionId = `${parentId}-${index}`
+      nodes.push({ id, layer: 4, kind: 'expenseCategory', refId: `${parentId}-${index}`, value, transactionIds: [transactionId] })
+      links.push({ id: `${parentId}->category-${index}`, sourceId: parentId, targetId: id, kind: 'expense', fundingPool: 'available', value, transactionIds: [transactionId] })
+    }
+  }
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: { ...manyCategoryGraph, nodes, links }, detailLevel: 5 })
+  const reversed = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: { ...manyCategoryGraph, nodes: [...nodes].reverse(), links: [...links].reverse() }, detailLevel: 5 })
+  const otherIds = limited.nodes.filter(({ id }) => id.startsWith('other:')).map(({ id }) => id)
+
+  assert.deepEqual(otherIds, ['other:expenses:available:positive:destination:expenses-primary:available', 'other:expenses:available:positive:destination:expenses-secondary:available'])
+  assert.deepEqual(
+    reversed.nodes.filter(({ id }) => id.startsWith('other:')).map(({ id }) => id),
+    otherIds,
+  )
+  for (const [parentId, otherId] of [
+    ['expenses-primary', otherIds[0]],
+    ['expenses-secondary', otherIds[1]],
+  ]) {
+    assert.equal(nodeValue(limited, otherId), 1)
+    assert.deepEqual(nodeTransactions(limited, otherId), [`${parentId}-6`])
+    assert.equal(linkValue(limited, parentId, otherId), 1)
+    assert.equal(linkTotal(limited, parentId, 'source'), 21)
+  }
+})
+
 test('All graph detail preserves every original node and link', () => {
   assert.equal(typeof AnalyticsUtils.limitMoneyFlowGraphDetail, 'function')
 
