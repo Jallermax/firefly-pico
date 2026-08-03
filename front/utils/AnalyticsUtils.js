@@ -41,6 +41,8 @@ export function combineSavingsBalanceSeries({ includedSeries, excludedSeries, in
     missingCurrencies: unique(series.flatMap(({ value }) => value?.missingCurrencies ?? [])),
     warnings: unique(series.flatMap(({ value }) => value?.warnings ?? [])),
   }
+  if (metadata.missingCurrencies.length > 0) return { points: [], currentPoint: null, ...metadata }
+
   const dates = unique(nonEmptySeries.flatMap(({ points }) => points?.filter((point) => Number.isFinite(point.value)).map(({ x }) => x) ?? [])).sort()
   const points = dates.flatMap((x) => {
     const constituents = nonEmptySeries.map(({ points }) => points?.filter((point) => point.x <= x && Number.isFinite(point.value)).at(-1))

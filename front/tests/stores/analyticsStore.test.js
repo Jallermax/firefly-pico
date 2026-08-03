@@ -278,6 +278,35 @@ test('combines included and excluded savings without refetching when the view ch
   assert.equal(accountRequests.length, requestCount)
 })
 
+test('withholds public combined savings when a non-empty group contains convertible and missing-rate data', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const included = includedSaving()
+  const excluded = excludedSaving()
+  accountStore.accountList = [
+    { ...included, attributes: { ...included.attributes, current_balance: '100' } },
+    { ...excluded, attributes: { ...excluded.attributes, current_balance: '40' } },
+    { ...excluded, id: 'saving-excluded-jpy', attributes: { ...excluded.attributes, currency_code: 'JPY', current_balance: '500' } },
+  ]
+  accountResponse = async ({ accountIds }) =>
+    accountIds.includes('saving-excluded-jpy')
+      ? {
+          status: 200,
+          data: [
+            { currency_code: 'USD', entries: { '2026-08-10': '40' } },
+            { currency_code: 'JPY', entries: { '2026-08-10': '500' } },
+          ],
+        }
+      : chartResponse(100, '2026-08-10')
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const savings = store.balanceSeries.find(({ id }) => id === 'savings')
+  assert.deepEqual(savings.points, [])
+  assert.equal(savings.currentPoint, null)
+  assert.deepEqual(savings.missingCurrencies, ['JPY'])
+})
+
 test('uses included savings as the complete combined series when the excluded group is empty', async () => {
   now = new Date('2026-08-10T12:00:00')
   const included = includedSaving()

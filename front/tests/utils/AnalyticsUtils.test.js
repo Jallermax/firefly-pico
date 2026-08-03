@@ -251,7 +251,7 @@ test('combines complete savings groups on their union of dates without inventing
       ],
       currentPoint: { x: '2026-04-10', value: 160 },
       isEstimated: true,
-      missingCurrencies: ['EUR'],
+      missingCurrencies: [],
       warnings: ['included warning'],
     },
     excludedSeries: {
@@ -261,7 +261,7 @@ test('combines complete savings groups on their union of dates without inventing
         { x: '2026-03-31', value: 50 },
       ],
       currentPoint: { x: '2026-04-10', value: 55 },
-      missingCurrencies: ['JPY'],
+      missingCurrencies: [],
       warnings: ['excluded warning'],
     },
     includedIsEmpty: false,
@@ -274,8 +274,35 @@ test('combines complete savings groups on their union of dates without inventing
   ])
   assert.equal(combined.currentPoint.value, 215)
   assert.equal(combined.isEstimated, true)
-  assert.deepEqual(combined.missingCurrencies, ['EUR', 'JPY'])
+  assert.deepEqual(combined.missingCurrencies, [])
   assert.deepEqual(combined.warnings, ['included warning', 'excluded warning'])
+})
+
+test('withholds combined savings when a non-empty group reports a missing currency', () => {
+  const combined = combineSavingsBalanceSeries({
+    includedSeries: {
+      points: [{ x: '2026-03-31', value: 100 }],
+      currentPoint: { x: '2026-04-10', value: 100 },
+      missingCurrencies: [],
+      warnings: [],
+    },
+    excludedSeries: {
+      points: [{ x: '2026-03-31', value: 40 }],
+      currentPoint: { x: '2026-04-10', value: 40 },
+      missingCurrencies: ['JPY'],
+      warnings: ['missing rate'],
+    },
+    includedIsEmpty: false,
+    excludedIsEmpty: false,
+  })
+
+  assert.deepEqual(combined, {
+    points: [],
+    currentPoint: null,
+    isEstimated: false,
+    missingCurrencies: ['JPY'],
+    warnings: ['missing rate'],
+  })
 })
 
 test('requires each non-empty savings group but treats an empty group as zero', () => {
