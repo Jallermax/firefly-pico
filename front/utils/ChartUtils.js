@@ -144,7 +144,7 @@ const MONEY_FLOW_GRAPH_PADDING = 16
 const MONEY_FLOW_GRAPH_GAP = 28
 const MONEY_FLOW_GRAPH_HIT_SIZE = 44
 const MONEY_FLOW_GRAPH_NODE_THICKNESS = 12
-const MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER = 176
+const MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER = 192
 
 const moneyFlowGraphWidth = (renderedWidth, isDesktop) => (Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : isDesktop ? 1000 : 360)
 const moneyFlowGraphLayerGroups = (nodes) => {

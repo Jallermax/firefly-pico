@@ -516,8 +516,8 @@ test('desktop money flow reserves outer label gutters without collapsing interna
   const firstLayerNodes = geometry.nodes.filter(({ layer }) => layer === 0)
   const lastLayerNodes = geometry.nodes.filter(({ layer }) => layer === 4)
 
-  assert.ok(firstLayerNodes.every(({ x }) => x >= 176))
-  assert.ok(lastLayerNodes.every(({ x, width }) => x + width <= geometry.width - 176))
+  assert.ok(firstLayerNodes.every(({ x }) => x >= 192))
+  assert.ok(lastLayerNodes.every(({ x, width }) => x + width <= geometry.width - 192))
   assert.equal(layerPositions.length, 5)
   assert.equal(
     layerPositions.slice(1).every((position, index) => position - layerPositions[index] > 0),
