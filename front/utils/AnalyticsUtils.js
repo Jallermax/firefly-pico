@@ -311,7 +311,7 @@ export function buildLayeredMonthlyMoneyFlow({ transactions, monthKey, displayCu
   }
   const addSavingsChange = (account, value, transactionId) => {
     const id = accountId(account, 'unknown-savings')
-    const change = savingsChanges.get(id) ?? { value: 0, transactionIds: new Set() }
+    const change = savingsChanges.get(id) ?? { value: 0, transactionIds: new Set(), savingsGroup: account?.attributes?.include_net_worth === true ? 'included' : 'excluded' }
     change.value += value
     if (transactionId) change.transactionIds.add(transactionId)
     savingsChanges.set(id, change)
@@ -329,10 +329,11 @@ export function buildLayeredMonthlyMoneyFlow({ transactions, monthKey, displayCu
   }
   const addIncome = (item, amount, transactionId, target) => {
     const revenueAccount = item.accountSource
-    const label = String(item.category_id ?? revenueAccount?.attributes?.name ?? revenueAccount?.id ?? 'uncategorized-income')
-    addNode(`income:${label}`, { layer: 0, kind: 'income', refId: label }, amount, transactionId)
+    const id = String(item.category_id ?? revenueAccount?.id ?? 'uncategorized-income')
+    const label = String(item.category_name ?? revenueAccount?.attributes?.name ?? revenueAccount?.id ?? 'uncategorized-income')
+    addNode(`income:${id}`, { layer: 0, kind: 'income', refId: id, label }, amount, transactionId)
     addNode('income', { layer: 1, kind: 'income' }, amount, transactionId)
-    addLink(`income:${label}`, 'income', { kind: 'income' }, amount, transactionId)
+    addLink(`income:${id}`, 'income', { kind: 'income' }, amount, transactionId)
     totals.income += amount
     if (target === 'available' || target === 'savings') {
       addNode(target, { layer: 2, kind: target }, amount, transactionId)
@@ -526,14 +527,14 @@ export function buildLayeredMonthlyMoneyFlow({ transactions, monthKey, displayCu
     if (change.value > 0) {
       positiveSavingsMovement += change.value
       addNodeFromIds('savingsDeposited', { layer: 3, kind: 'savingsDeposited' }, change.value, change.transactionIds)
-      addNodeFromIds(`savingsDeposit:${id}`, { layer: 4, kind: 'savingsDeposit', refId: id }, change.value, change.transactionIds)
+      addNodeFromIds(`savingsDeposit:${id}`, { layer: 4, kind: 'savingsDeposit', refId: id, savingsGroup: change.savingsGroup }, change.value, change.transactionIds)
       addLinkFromIds('savings', 'savingsDeposited', { kind: 'savingsDeposit' }, change.value, change.transactionIds)
       addLinkFromIds('savingsDeposited', `savingsDeposit:${id}`, { kind: 'savingsDeposit' }, change.value, change.transactionIds)
     }
     if (change.value < 0) {
       const value = -change.value
       negativeSavingsMovement += value
-      addNodeFromIds(`existingSavings:${id}`, { layer: 0, kind: 'existingSavings', refId: id }, value, change.transactionIds)
+      addNodeFromIds(`existingSavings:${id}`, { layer: 0, kind: 'existingSavings', refId: id, savingsGroup: change.savingsGroup }, value, change.transactionIds)
       addLinkFromIds(`existingSavings:${id}`, 'savings', { kind: 'existingSavings' }, value, change.transactionIds)
     }
   }
@@ -549,6 +550,12 @@ export function buildLayeredMonthlyMoneyFlow({ transactions, monthKey, displayCu
   if (existingAvailableFundsUsed > 0) {
     addNode('existingAvailable', { layer: 0, kind: 'existingAvailable' }, existingAvailableFundsUsed, null)
     addLink('existingAvailable', 'available', { kind: 'existingAvailable' }, existingAvailableFundsUsed, null)
+  }
+
+  for (const pool of ['available', 'savings']) {
+    const node = nodes.get(pool)
+    if (!node) continue
+    node.value = [...links.values()].filter((link) => link.targetId === pool).reduce((total, link) => total + link.value, 0)
   }
 
   const audit = {

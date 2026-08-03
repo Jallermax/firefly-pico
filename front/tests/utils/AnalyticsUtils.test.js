@@ -40,7 +40,7 @@ const typedAccount = ({ id = null, name = null, type, role = null, direction = n
   },
 })
 
-const split = ({ amount, date, source, destination, categoryId = null, primaryAmount = null, currencyCode = 'USD' }) => ({
+const split = ({ amount, date, source, destination, categoryId = null, categoryName = null, primaryAmount = null, currencyCode = 'USD' }) => ({
   amount: String(amount),
   primary_amount: primaryAmount,
   currency_code: currencyCode,
@@ -48,6 +48,7 @@ const split = ({ amount, date, source, destination, categoryId = null, primaryAm
   accountSource: source,
   accountDestination: destination,
   category_id: categoryId,
+  category_name: categoryName,
 })
 
 const transaction = (id, parts) => ({
@@ -1048,6 +1049,7 @@ const flowArgs = { monthKey: '2026-08', displayCurrencyCode: 'USD', primaryCurre
 const nodeValue = (graph, id) => graph.nodes.find((node) => node.id === id)?.value ?? 0
 const nodeTransactions = (graph, id) => graph.nodes.find((node) => node.id === id)?.transactionIds ?? []
 const linkValue = (graph, sourceId, targetId) => graph.links.filter((link) => link.sourceId === sourceId && link.targetId === targetId).reduce((sum, link) => sum + link.value, 0)
+const linkTotal = (graph, id, direction) => graph.links.filter((link) => link[`${direction}Id`] === id).reduce((sum, link) => sum + link.value, 0)
 
 const flowAccounts = {
   checking: typedAccount({ id: 'checking', type: 'asset' }),
@@ -1136,6 +1138,29 @@ test('uses the income category before revenue account name and sorts graph drill
   assert.equal(graph.links.find(({ sourceId, targetId }) => sourceId === 'income:salary' && targetId === 'income').transactionIds.join(','), 'a-income,z-income')
 })
 
+test('keeps uncategorized income node IDs stable across account renames and duplicate account names', () => {
+  const beforeRename = typedAccount({ id: 'salary-one', name: 'Salary', type: 'revenue' })
+  const afterRename = typedAccount({ id: 'salary-one', name: 'New Salary', type: 'revenue' })
+  const sameNamedAccount = typedAccount({ id: 'salary-two', name: 'Salary', type: 'revenue' })
+  const buildGraph = (source) =>
+    buildLayeredMonthlyMoneyFlow({
+      ...flowArgs,
+      transactions: [transaction('income', [split({ amount: 10, date: '2026-08-01', source, destination: flowAccounts.checking })])],
+    })
+
+  assert.equal(nodeValue(buildGraph(beforeRename), 'income:salary-one'), 10)
+  assert.equal(nodeValue(buildGraph(afterRename), 'income:salary-one'), 10)
+  const duplicateNamesGraph = buildLayeredMonthlyMoneyFlow({
+    ...flowArgs,
+    transactions: [
+      transaction('first', [split({ amount: 10, date: '2026-08-01', source: beforeRename, destination: flowAccounts.checking })]),
+      transaction('second', [split({ amount: 20, date: '2026-08-02', source: sameNamedAccount, destination: flowAccounts.checking })]),
+    ],
+  })
+  assert.equal(nodeValue(duplicateNamesGraph, 'income:salary-one'), 10)
+  assert.equal(nodeValue(duplicateNamesGraph, 'income:salary-two'), 20)
+})
+
 test('preserves immediate Available and Savings funding on shared liability outcomes', () => {
   const graph = buildLayeredMonthlyMoneyFlow({
     ...flowArgs,
@@ -1189,6 +1214,22 @@ test('shows opposing savings account movements and their net', () => {
   assert.equal(graph.audit.netSavings, 500)
 })
 
+test('annotates per-account savings residual nodes with their net-worth group', () => {
+  for (const savingsView of ['combined', 'split']) {
+    const graph = buildLayeredMonthlyMoneyFlow({
+      ...flowArgs,
+      savingsView,
+      transactions: [
+        transaction('hysa-in', [split({ amount: 1000, date: '2026-08-04', source: flowAccounts.checking, destination: flowAccounts.savings })]),
+        transaction('hsa-out', [split({ amount: 500, date: '2026-08-05', source: flowAccounts.hsa, destination: flowAccounts.checking })]),
+      ],
+    })
+
+    assert.equal(graph.nodes.find(({ id }) => id === 'savingsDeposit:hysa').savingsGroup, 'included')
+    assert.equal(graph.nodes.find(({ id }) => id === 'existingSavings:hsa').savingsGroup, 'excluded')
+  }
+})
+
 test('keeps liability reallocations out of outer funding while retaining their exact transaction', () => {
   const graph = buildLayeredMonthlyMoneyFlow({
     ...flowArgs,
@@ -1222,6 +1263,23 @@ test('reconciles pool and outer equations with literal totals', () => {
   assert.equal(graph.audit.negativeSavingsMovement, 0)
   assert.equal(graph.isBalanced, true)
   assert.deepEqual(graph.meta, { savingsView: 'combined' })
+})
+
+test('sets each pool node to its reconciled incoming and outgoing link total', () => {
+  const graph = buildLayeredMonthlyMoneyFlow({
+    ...flowArgs,
+    transactions: [
+      transaction('income', [split({ amount: 100, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
+      transaction('expense-available', [split({ amount: 60, date: '2026-08-02', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
+      transaction('save', [split({ amount: 20, date: '2026-08-03', source: flowAccounts.checking, destination: flowAccounts.savings })]),
+      transaction('expense-savings', [split({ amount: 10, date: '2026-08-04', source: flowAccounts.savings, destination: flowAccounts.expense, categoryId: 'food' })]),
+    ],
+  })
+
+  for (const pool of ['available', 'savings']) {
+    assert.equal(nodeValue(graph, pool), linkTotal(graph, pool, 'target'))
+    assert.equal(linkTotal(graph, pool, 'target'), linkTotal(graph, pool, 'source'))
+  }
 })
 
 test('withholds unknown, unsupported, and missing-rate transactions from a balanced graph', () => {
