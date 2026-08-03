@@ -693,8 +693,43 @@ test('summarizes total expense from every category and forecasts only with two c
   )
   assert.equal(result.currentActual, 10)
   assert.equal(result.average, 50)
-  assert.equal(result.currentForecast, 40)
+  assert.equal(result.currentForecast, 60)
+  assert.equal(result.remainingFromToday, 50)
   assert.equal(result.forecastAvailable, true)
+})
+
+test('total forecast sums every category forecast including current-only uncategorized', () => {
+  const completedCategories = {
+    housing: { amount: 2321, byDay: { 2: 2321 }, transactionIds: [], transactionIdsByDay: {} },
+    food: { amount: 1000, byDay: { 25: 1000 }, transactionIds: [], transactionIdsByDay: {} },
+  }
+  const ledger = {
+    ledgerStartMonth: '2026-05',
+    months: {
+      '2026-05': { categories: structuredClone(completedCategories) },
+      '2026-06': { categories: structuredClone(completedCategories) },
+      '2026-07': { categories: structuredClone(completedCategories) },
+      '2026-08': {
+        categories: {
+          food: { amount: 2000, byDay: { 3: 2000 }, transactionIds: ['food-now'], transactionIdsByDay: { 3: ['food-now'] } },
+          [ANALYTICS_UNCATEGORIZED_ID]: { amount: 140, byDay: { 3: 140 }, transactionIds: ['uncategorized-now'], transactionIdsByDay: { 3: ['uncategorized-now'] } },
+        },
+      },
+    },
+  }
+  assert.equal(typeof AnalyticsUtils.getForecastCategoryIds, 'function')
+  assert.deepEqual(AnalyticsUtils.getForecastCategoryIds({ ledger, averageMonths: 3, today: new Date('2026-08-03T12:00:00') }), ['food', 'housing', ANALYTICS_UNCATEGORIZED_ID])
+
+  const result = summarizeTotalExpenseWindow({ ledger, averageMonths: 3, today: new Date('2026-08-03T12:00:00') })
+  assert.equal(result.categoryIds.includes(ANALYTICS_UNCATEGORIZED_ID), true)
+  assert.equal(result.currentActual, 2140)
+  assert.equal(result.average, 3321)
+  assert.equal(
+    result.currentForecast,
+    result.categoryForecasts.reduce((sum, item) => sum + item.currentForecast, 0),
+  )
+  assert.equal(result.currentForecast, 5461)
+  assert.equal(result.remainingFromToday, 3321)
 })
 
 test('category ledger counts purchases, subtracts refunds, preserves uncategorized, and keeps group IDs', () => {
@@ -725,6 +760,68 @@ for (const { timeZone, dateParts, expected } of [
   })
 }
 
+const completedMonths = (keys, categories) => Object.fromEntries(keys.map((key) => [key, { categories: structuredClone(categories) }]))
+const housingLedger = {
+  ledgerStartMonth: '2026-05',
+  months: {
+    ...completedMonths(['2026-05', '2026-06', '2026-07'], {
+      housing: { amount: 2321, byDay: { 2: 2321 }, transactionIds: [], transactionIdsByDay: {} },
+    }),
+    '2026-08': { categories: {} },
+  },
+}
+const overspentLedger = {
+  ledgerStartMonth: '2026-02',
+  months: {
+    ...completedMonths(['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'], {
+      food: { amount: 7500, byDay: { 1: 7500 }, transactionIds: [], transactionIdsByDay: {} },
+    }),
+    '2026-08': {
+      categories: {
+        food: { amount: 9000, byDay: { 25: 9000 }, transactionIds: ['food-now'], transactionIdsByDay: { 25: ['food-now'] } },
+      },
+    },
+  },
+}
+const pacedLedger = {
+  ledgerStartMonth: '2026-05',
+  months: {
+    ...completedMonths(['2026-05', '2026-06', '2026-07'], {
+      food: { amount: 1000, byDay: { 2: 600, 25: 400 }, transactionIds: [], transactionIdsByDay: {} },
+    }),
+    '2026-08': {
+      categories: {
+        food: { amount: 1000, byDay: { 3: 1000 }, transactionIds: ['food-now'], transactionIdsByDay: { 3: ['food-now'] } },
+      },
+    },
+  },
+}
+
+test('category forecast preserves a recurring expense missing early this month', () => {
+  const summary = summarizeCategoryWindow({ ledger: housingLedger, categoryIds: ['housing'], averageMonths: 3, today: new Date('2026-08-03T12:00:00') }).series[0]
+  assert.equal(summary.currentActual, 0)
+  assert.equal(summary.average, 2321)
+  assert.equal(summary.currentForecast, 2321)
+  assert.equal(summary.remainingFromToday, 2321)
+})
+
+test('category forecast never falls below spending already recorded', () => {
+  const summary = summarizeCategoryWindow({ ledger: overspentLedger, categoryIds: ['food'], averageMonths: 6, today: new Date('2026-08-25T12:00:00') }).series[0]
+  assert.equal(summary.average, 7500)
+  assert.equal(summary.currentActual, 9000)
+  assert.equal(summary.currentForecast >= 9000, true)
+  assert.equal(summary.remainingFromToday, summary.currentForecast - 9000)
+})
+
+test('category forecast preserves the historical remainder after today', () => {
+  const summary = summarizeCategoryWindow({ ledger: pacedLedger, categoryIds: ['food'], averageMonths: 3, today: new Date('2026-08-03T12:00:00') }).series[0]
+  assert.equal(summary.average, 1000)
+  assert.equal(summary.currentActual, 1000)
+  assert.equal(summary.pacedForecast, 1400)
+  assert.equal(summary.currentForecast, 1400)
+  assert.equal(summary.remainingFromToday, 400)
+})
+
 test('completed-month averages count zero months only after ledger history begins', () => {
   const ledger = {
     ledgerStartMonth: '2026-01',
@@ -753,7 +850,9 @@ test('completed-month averages count zero months only after ledger history begin
   assert.equal(summary.series[0].average, 40)
   assert.equal(summary.series[0].currentActual, 12)
   assert.deepEqual(summary.series[0].currentTransactionIds, ['apr'])
-  assert.ok(Math.abs(summary.series[0].currentForecast - (12 + 70 / 3)) < 0.000001)
+  assert.ok(Math.abs(summary.series[0].pacedForecast - (12 + 70 / 3)) < 0.000001)
+  assert.equal(summary.series[0].currentForecast, 40)
+  assert.equal(summary.series[0].remainingFromToday, 28)
   assert.equal(summary.series[0].forecastAvailable, true)
 })
 

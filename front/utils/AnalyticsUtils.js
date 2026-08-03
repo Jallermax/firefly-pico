@@ -323,9 +323,14 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
     const completed = monthKeys.map((key) => categoryForMonth(ledger, key, categoryId))
     const completedTotal = completed.reduce((total, category) => total + category.amount, 0)
     const remainderTotal = completed.reduce((total, category) => total + Object.entries(category.byDay).reduce((monthTotal, [day, value]) => monthTotal + (Number(day) > todayDay ? value : 0), 0), 0)
-    const averageRemainderAfterToday = usedMonths > 0 ? remainderTotal / usedMonths : 0
+    const averageHistoricalRemainder = usedMonths > 0 ? remainderTotal / usedMonths : 0
     const currentActual = Object.entries(current.byDay).reduce((total, [day, value]) => total + (Number(day) <= todayDay ? value : 0), 0)
     const currentTransactionIds = unique(Object.entries(current.transactionIdsByDay ?? {}).flatMap(([day, transactionIds]) => (Number(day) <= todayDay ? transactionIds : [])))
+    const average = usedMonths > 0 ? completedTotal / usedMonths : null
+    const forecastAvailable = usedMonths >= 2
+    const pacedForecast = forecastAvailable ? currentActual + averageHistoricalRemainder : null
+    const currentForecast = forecastAvailable ? Math.max(currentActual, average, pacedForecast) : null
+    const remainingFromToday = forecastAvailable ? currentForecast - currentActual : null
 
     return {
       id: categoryId,
@@ -334,44 +339,44 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
         value: categoryForMonth(ledger, key, categoryId).amount,
         transactionIds: categoryForMonth(ledger, key, categoryId).transactionIds,
       })),
-      average: usedMonths > 0 ? completedTotal / usedMonths : null,
+      average,
       currentActual,
       currentTransactionIds,
-      currentForecast: usedMonths >= 2 ? currentActual + averageRemainderAfterToday : null,
-      forecastAvailable: usedMonths >= 2,
+      pacedForecast,
+      currentForecast,
+      remainingFromToday,
+      forecastAvailable,
     }
   })
 
   return { requestedMonths: averageMonths, usedMonths, monthKeys, series }
 }
 
-const totalForMonth = (ledger, key) => Object.values(ledger.months?.[key]?.categories ?? {}).reduce((total, category) => total + category.amount, 0)
-
-const totalByDay = (categories, predicate) =>
-  Object.values(categories ?? {}).reduce(
-    (total, category) => total + Object.entries(category.byDay ?? {}).reduce((categoryTotal, [day, value]) => categoryTotal + (predicate(Number(day)) ? value : 0), 0),
-    0,
-  )
+export function getForecastCategoryIds({ ledger, averageMonths, today }) {
+  const monthKeys = [...completedMonthKeys({ today, averageMonths, ledgerStartMonth: ledger.ledgerStartMonth }), monthKey(today)]
+  return unique(monthKeys.flatMap((key) => Object.keys(ledger.months?.[key]?.categories ?? {}))).sort((left, right) => left.localeCompare(right))
+}
 
 export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
-  const monthKeys = completedMonthKeys({ today, averageMonths, ledgerStartMonth: ledger.ledgerStartMonth })
-  const usedMonths = monthKeys.length
-  const currentMonthKey = monthKey(today)
-  const todayDay = today.getDate()
-  const currentCategories = ledger.months?.[currentMonthKey]?.categories
-  const actualPoints = monthKeys.map((key) => ({ x: key, value: totalForMonth(ledger, key), kind: 'actual' }))
-  const currentActual = totalByDay(currentCategories, (day) => day <= todayDay)
-  const remainderTotal = monthKeys.reduce((total, key) => total + totalByDay(ledger.months?.[key]?.categories, (day) => day > todayDay), 0)
-  const forecastAvailable = usedMonths >= 2
+  const categoryIds = getForecastCategoryIds({ ledger, averageMonths, today })
+  const categorySummary = summarizeCategoryWindow({ ledger, categoryIds, averageMonths, today })
+  const categoryForecasts = categorySummary.series
+  const actualPoints = categorySummary.monthKeys.map((key, index) => ({ x: key, value: categoryForecasts.reduce((total, category) => total + category.actualPoints[index].value, 0), kind: 'actual' }))
+  const currentActual = categoryForecasts.reduce((total, category) => total + category.currentActual, 0)
+  const forecastAvailable = categorySummary.usedMonths >= 2
+  const currentForecast = forecastAvailable ? categoryForecasts.reduce((total, category) => total + category.currentForecast, 0) : null
 
   return {
     requestedMonths: averageMonths,
-    usedMonths,
+    usedMonths: categorySummary.usedMonths,
     actualPoints,
-    average: usedMonths > 0 ? actualPoints.reduce((total, point) => total + point.value, 0) / usedMonths : null,
+    average: categorySummary.usedMonths > 0 ? categoryForecasts.reduce((total, category) => total + category.average, 0) : null,
     currentActual,
-    currentForecast: forecastAvailable ? currentActual + remainderTotal / usedMonths : null,
+    currentForecast,
+    remainingFromToday: forecastAvailable ? currentForecast - currentActual : null,
     forecastAvailable,
+    categoryIds,
+    categoryForecasts,
   }
 }
 
