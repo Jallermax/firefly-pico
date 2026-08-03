@@ -2415,6 +2415,28 @@ body {
     flex-wrap: wrap;
 }
 
+.analytics-balance-heading-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.analytics-fx-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 2px 7px;
+    border-radius: 25px;
+    color: #1565c0;
+    background: #e3f2fd;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    text-transform: none;
+    white-space: nowrap;
+}
+
 .analytics-balance-view {
     display: flex;
     padding: 0 16px 8px;
@@ -2531,6 +2553,12 @@ body {
     font-weight: 600;
 }
 
+.analytics-metric-summary-savings-split .analytics-metric-summary-title,
+.analytics-metric-facet-row .flex-1 {
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
 .analytics-metric-summary-row {
     justify-content: space-between;
     color: var(--van-text-color-2);
@@ -2562,6 +2590,12 @@ body {
 
 .analytics-warning {
     color: var(--van-danger-color);
+}
+
+.analytics-grouped-warning {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
 }
 
 .analytics-calculation-details {
@@ -3084,6 +3118,40 @@ body {
 
 .analytics-page-switch {
     margin: 10px 16px;
+}
+
+.analytics-savings-view-control {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    max-width: 1200px;
+    gap: 10px;
+    margin: 0 auto 10px;
+    padding: 0 16px;
+}
+
+.analytics-savings-view-label {
+    color: var(--van-text-color-2);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+@media (max-width: 480px) {
+    .analytics-savings-view-control {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .analytics-savings-view-control .app-tabs {
+        display: flex;
+        width: 100%;
+    }
+
+    .analytics-savings-view-control .app-tabs-item {
+        flex: 1;
+        padding-inline: 8px;
+    }
 }
 
 .analytics-layout {

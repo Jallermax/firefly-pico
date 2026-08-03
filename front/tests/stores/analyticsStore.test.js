@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test, { afterEach, beforeEach } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, reactive, ref } from 'vue'
@@ -25,6 +26,19 @@ let transactionResult = []
 let transactionResponse = async () => ({ ok: true, data: transactionResult })
 let analyticsStore = null
 let now = new Date()
+
+const localeNames = ['de-DE', 'en', 'es-MX', 'fr', 'it', 'ko', 'pl', 'pt-BR', 'ro', 'ru-RU', 'zh-CN']
+const savingsPresentationKeys = [
+  ['savings_view', 'label'],
+  ['savings_view', 'combined'],
+  ['savings_view', 'split'],
+  ['balance', 'savings_included'],
+  ['balance', 'savings_excluded'],
+  ['balance', 'savings_included_change'],
+  ['balance', 'savings_excluded_change'],
+  ['common', 'fx_current_rates'],
+  ['balance', 'grouped_balance_warning'],
+]
 
 class AccountRepository {
   async getChartOverview(options) {
@@ -171,6 +185,17 @@ beforeEach(() => {
 })
 
 afterEach(() => analyticsStore?.$dispose())
+
+test('provides every Savings presentation label in all supported locales', () => {
+  for (const locale of localeNames) {
+    const messages = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics
+    for (const key of savingsPresentationKeys) {
+      const value = key.reduce((parent, segment) => parent?.[segment], messages)
+      assert.equal(typeof value, 'string', `${locale}: analytics.${key.join('.')}`)
+      assert.notEqual(value.trim(), '', `${locale}: analytics.${key.join('.')}`)
+    }
+  }
+})
 
 test('keeps overlapping balance requests isolated to their captured currency and current state', async () => {
   const usdRequest = deferred()

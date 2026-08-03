@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "Media di {count} mesi"
     },
+    "savings_view": {
+      "label": "Vista risparmi",
+      "combined": "Combinata",
+      "split": "Per inclusione nel patrimonio netto"
+    },
     "common": {
       "actual": "Effettivo",
       "loading": "Caricamento delle analisi",
@@ -15,6 +20,7 @@
       "average": "Media",
       "current_month": "Mese corrente",
       "estimated_current_rates": "Stimato ai tassi di cambio correnti",
+      "fx_current_rates": "Valute: tassi correnti",
       "missing_rates": "Tassi di cambio mancanti: {currencies}",
       "based_on_months": "Basato su {used} di {requested} mesi",
       "retry": "Riprova",
@@ -36,9 +42,13 @@
       "view_changes": "Variazione mensile",
       "net_worth": "Patrimonio netto",
       "savings": "Risparmi",
+      "savings_included": "Risparmi inclusi nel patrimonio netto",
+      "savings_excluded": "Risparmi esclusi dal patrimonio netto",
       "debt": "Debiti",
       "net_worth_change": "Variazione del patrimonio netto",
       "savings_change": "Variazione dei risparmi",
+      "savings_included_change": "Variazione dei risparmi inclusi nel patrimonio netto",
+      "savings_excluded_change": "Variazione dei risparmi esclusi dal patrimonio netto",
       "debt_change": "Variazione dei debiti",
       "total_expenses": "Spese totali",
       "current_total": "Totale corrente",
@@ -57,7 +67,8 @@
       "error": "Impossibile caricare lo storico dei saldi",
       "definition": "I conti attivi seguono le regole relative al patrimonio netto, al ruolo di risparmio e ai conti di debito.",
       "current_balance_mismatch": "L’ultimo saldo del grafico non corrisponde al saldo corrente del conto.",
-      "current_balance_unverified": "Non è stato possibile verificare l’ultimo saldo del grafico con un saldo della stessa data."
+      "current_balance_unverified": "Non è stato possibile verificare l’ultimo saldo del grafico con un saldo della stessa data.",
+      "grouped_balance_warning": "{reason} Metriche interessate: {metrics}."
     },
     "category": {
       "title": "Spese per categoria",

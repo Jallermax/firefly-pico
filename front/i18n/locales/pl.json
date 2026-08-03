@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "Średnia z {count} miesięcy"
     },
+    "savings_view": {
+      "label": "Widok oszczędności",
+      "combined": "Łącznie",
+      "split": "Według uwzględnienia w wartości netto"
+    },
     "common": {
       "actual": "Wartość rzeczywista",
       "loading": "Ładowanie analiz",
@@ -15,6 +20,7 @@
       "average": "Średnia",
       "current_month": "Bieżący miesiąc",
       "estimated_current_rates": "Oszacowano według bieżących kursów wymiany",
+      "fx_current_rates": "Waluty: bieżące kursy",
       "missing_rates": "Brakujące kursy wymiany: {currencies}",
       "based_on_months": "Na podstawie {used} z {requested} miesięcy",
       "retry": "Spróbuj ponownie",
@@ -36,9 +42,13 @@
       "view_changes": "Zmiana miesięczna",
       "net_worth": "Wartość netto",
       "savings": "Oszczędności",
+      "savings_included": "Oszczędności uwzględnione w wartości netto",
+      "savings_excluded": "Oszczędności nieuwzględnione w wartości netto",
       "debt": "Zadłużenie",
       "net_worth_change": "Zmiana wartości netto",
       "savings_change": "Zmiana oszczędności",
+      "savings_included_change": "Zmiana oszczędności uwzględnionych w wartości netto",
+      "savings_excluded_change": "Zmiana oszczędności nieuwzględnionych w wartości netto",
       "debt_change": "Zmiana zadłużenia",
       "total_expenses": "Łączne wydatki",
       "current_total": "Bieżąca suma",
@@ -57,7 +67,8 @@
       "error": "Nie udało się wczytać historii sald",
       "definition": "Aktywne konta podlegają regułom wartości netto, roli oszczędności oraz kont zadłużenia.",
       "current_balance_mismatch": "Najnowsze saldo na wykresie nie zgadza się z bieżącym saldem konta.",
-      "current_balance_unverified": "Nie udało się zweryfikować najnowszego salda na wykresie względem salda z tego samego dnia."
+      "current_balance_unverified": "Nie udało się zweryfikować najnowszego salda na wykresie względem salda z tego samego dnia.",
+      "grouped_balance_warning": "{reason} Dotyczy wskaźników: {metrics}."
     },
     "category": {
       "title": "Wydatki według kategorii",

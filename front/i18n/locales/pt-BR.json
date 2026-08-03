@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "Média de {count} meses"
     },
+    "savings_view": {
+      "label": "Visão da poupança",
+      "combined": "Combinada",
+      "split": "Por inclusão no patrimônio líquido"
+    },
     "common": {
       "actual": "Real",
       "loading": "Carregando análises",
@@ -15,6 +20,7 @@
       "average": "Média",
       "current_month": "Mês atual",
       "estimated_current_rates": "Estimado com as taxas de câmbio atuais",
+      "fx_current_rates": "Câmbio: taxas atuais",
       "missing_rates": "Taxas de câmbio ausentes: {currencies}",
       "based_on_months": "Com base em {used} de {requested} meses",
       "retry": "Tentar novamente",
@@ -36,9 +42,13 @@
       "view_changes": "Variação mensal",
       "net_worth": "Patrimônio líquido",
       "savings": "Poupança",
+      "savings_included": "Poupança incluída no patrimônio líquido",
+      "savings_excluded": "Poupança excluída do patrimônio líquido",
       "debt": "Dívida",
       "net_worth_change": "Variação do patrimônio líquido",
       "savings_change": "Variação da poupança",
+      "savings_included_change": "Variação da poupança incluída no patrimônio líquido",
+      "savings_excluded_change": "Variação da poupança excluída do patrimônio líquido",
       "debt_change": "Variação da dívida",
       "total_expenses": "Gastos totais",
       "current_total": "Total atual",
@@ -57,7 +67,8 @@
       "error": "Não foi possível carregar o histórico de saldos",
       "definition": "As contas ativas seguem as regras de patrimônio líquido, função de poupança e contas de dívida.",
       "current_balance_mismatch": "O saldo mais recente do gráfico não corresponde ao saldo atual da conta.",
-      "current_balance_unverified": "Não foi possível verificar o saldo mais recente do gráfico com um saldo da mesma data."
+      "current_balance_unverified": "Não foi possível verificar o saldo mais recente do gráfico com um saldo da mesma data.",
+      "grouped_balance_warning": "{reason} Métricas afetadas: {metrics}."
     },
     "category": {
       "title": "Gastos por categoria",

@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "{count}个月平均值"
     },
+    "savings_view": {
+      "label": "储蓄视图",
+      "combined": "合并",
+      "split": "按是否计入净资产"
+    },
     "common": {
       "actual": "实际",
       "loading": "正在加载分析",
@@ -15,6 +20,7 @@
       "average": "平均值",
       "current_month": "本月",
       "estimated_current_rates": "按当前汇率估算",
+      "fx_current_rates": "外汇：当前汇率",
       "missing_rates": "缺少汇率：{currencies}",
       "based_on_months": "基于 {requested} 个月中的 {used} 个月",
       "retry": "重试",
@@ -36,9 +42,13 @@
       "view_changes": "月度变动",
       "net_worth": "净资产",
       "savings": "储蓄",
+      "savings_included": "计入净资产的储蓄",
+      "savings_excluded": "未计入净资产的储蓄",
       "debt": "债务",
       "net_worth_change": "净资产变动",
       "savings_change": "储蓄变动",
+      "savings_included_change": "计入净资产的储蓄变动",
+      "savings_excluded_change": "未计入净资产的储蓄变动",
       "debt_change": "债务变动",
       "total_expenses": "总支出",
       "current_total": "当前总额",
@@ -57,7 +67,8 @@
       "error": "无法加载余额历史记录",
       "definition": "活跃账户遵循净资产、储蓄角色和债务账户规则。",
       "current_balance_mismatch": "图表中的最新余额与当前账户余额不一致。",
-      "current_balance_unverified": "无法使用同一日期的余额验证图表中的最新余额。"
+      "current_balance_unverified": "无法使用同一日期的余额验证图表中的最新余额。",
+      "grouped_balance_warning": "{reason} 受影响的指标：{metrics}。"
     },
     "category": {
       "title": "按类别统计支出",

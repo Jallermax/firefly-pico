@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "{count}개월 평균"
     },
+    "savings_view": {
+      "label": "저축 보기",
+      "combined": "합산",
+      "split": "순자산 포함 여부별"
+    },
     "common": {
       "actual": "실제",
       "loading": "분석을 불러오는 중",
@@ -15,6 +20,7 @@
       "average": "평균",
       "current_month": "현재 월",
       "estimated_current_rates": "현재 환율로 추정",
+      "fx_current_rates": "환율: 현재 환율",
       "missing_rates": "누락된 환율: {currencies}",
       "based_on_months": "요청한 {requested}개월 중 {used}개월 기준",
       "retry": "다시 시도",
@@ -36,9 +42,13 @@
       "view_changes": "월별 변동",
       "net_worth": "순자산",
       "savings": "저축",
+      "savings_included": "순자산에 포함된 저축",
+      "savings_excluded": "순자산에서 제외된 저축",
       "debt": "부채",
       "net_worth_change": "순자산 변동",
       "savings_change": "저축 변동",
+      "savings_included_change": "순자산에 포함된 저축 변동",
+      "savings_excluded_change": "순자산에서 제외된 저축 변동",
       "debt_change": "부채 변동",
       "total_expenses": "총지출",
       "current_total": "현재 합계",
@@ -57,7 +67,8 @@
       "error": "잔액 기록을 불러올 수 없습니다",
       "definition": "활성 계좌에는 순자산, 저축 역할 및 부채 계좌 규칙이 적용됩니다.",
       "current_balance_mismatch": "차트의 최신 잔액이 현재 계좌 잔액과 일치하지 않습니다.",
-      "current_balance_unverified": "차트의 최신 잔액을 같은 날짜의 잔액과 대조하여 확인할 수 없습니다."
+      "current_balance_unverified": "차트의 최신 잔액을 같은 날짜의 잔액과 대조하여 확인할 수 없습니다.",
+      "grouped_balance_warning": "{reason} 영향을 받는 지표: {metrics}."
     },
     "category": {
       "title": "카테고리별 지출",

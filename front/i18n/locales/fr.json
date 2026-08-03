@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "Moyenne sur {count} mois"
     },
+    "savings_view": {
+      "label": "Vue de l’épargne",
+      "combined": "Combinée",
+      "split": "Selon l’inclusion dans le patrimoine net"
+    },
     "common": {
       "actual": "Réel",
       "loading": "Chargement des analyses",
@@ -15,6 +20,7 @@
       "average": "Moyenne",
       "current_month": "Mois en cours",
       "estimated_current_rates": "Estimé aux taux de change actuels",
+      "fx_current_rates": "Devises : taux actuels",
       "missing_rates": "Taux de change manquants : {currencies}",
       "based_on_months": "Basé sur {used} mois sur {requested}",
       "retry": "Réessayer",
@@ -36,9 +42,13 @@
       "view_changes": "Variation mensuelle",
       "net_worth": "Patrimoine net",
       "savings": "Épargne",
+      "savings_included": "Épargne incluse dans le patrimoine net",
+      "savings_excluded": "Épargne exclue du patrimoine net",
       "debt": "Dette",
       "net_worth_change": "Variation du patrimoine net",
       "savings_change": "Variation de l’épargne",
+      "savings_included_change": "Variation de l’épargne incluse dans le patrimoine net",
+      "savings_excluded_change": "Variation de l’épargne exclue du patrimoine net",
       "debt_change": "Variation de la dette",
       "total_expenses": "Dépenses totales",
       "current_total": "Total actuel",
@@ -57,7 +67,8 @@
       "error": "Impossible de charger l’historique des soldes",
       "definition": "Les comptes actifs suivent les règles de patrimoine net, de rôle d’épargne et de comptes de dette.",
       "current_balance_mismatch": "Le dernier solde du graphique ne correspond pas au solde actuel du compte.",
-      "current_balance_unverified": "Le dernier solde du graphique n’a pas pu être vérifié avec un solde de la même date."
+      "current_balance_unverified": "Le dernier solde du graphique n’a pas pu être vérifié avec un solde de la même date.",
+      "grouped_balance_warning": "{reason} Indicateurs concernés : {metrics}."
     },
     "category": {
       "title": "Dépenses par catégorie",

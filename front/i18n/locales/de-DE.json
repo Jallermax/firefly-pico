@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "{count}-Monats-Durchschnitt"
     },
+    "savings_view": {
+      "label": "Sparansicht",
+      "combined": "Kombiniert",
+      "split": "Nach Einbeziehung ins Nettovermögen"
+    },
     "common": {
       "actual": "Istwert",
       "loading": "Analysen werden geladen",
@@ -15,6 +20,7 @@
       "average": "Durchschnitt",
       "current_month": "Aktueller Monat",
       "estimated_current_rates": "Zu aktuellen Wechselkursen geschätzt",
+      "fx_current_rates": "Devisen: aktuelle Kurse",
       "missing_rates": "Fehlende Wechselkurse: {currencies}",
       "based_on_months": "Basiert auf {used} von {requested} Monaten",
       "retry": "Erneut versuchen",
@@ -36,9 +42,13 @@
       "view_changes": "Monatliche Veränderung",
       "net_worth": "Nettovermögen",
       "savings": "Ersparnisse",
+      "savings_included": "Im Nettovermögen enthaltene Ersparnisse",
+      "savings_excluded": "Vom Nettovermögen ausgeschlossene Ersparnisse",
       "debt": "Schulden",
       "net_worth_change": "Veränderung des Nettovermögens",
       "savings_change": "Veränderung der Ersparnisse",
+      "savings_included_change": "Veränderung der im Nettovermögen enthaltenen Ersparnisse",
+      "savings_excluded_change": "Veränderung der vom Nettovermögen ausgeschlossenen Ersparnisse",
       "debt_change": "Veränderung der Schulden",
       "total_expenses": "Gesamtausgaben",
       "current_total": "Aktueller Gesamtwert",
@@ -57,7 +67,8 @@
       "error": "Der Saldoverlauf konnte nicht geladen werden",
       "definition": "Aktive Konten folgen den Regeln für Nettovermögen, Sparfunktion und Schuldenkonten.",
       "current_balance_mismatch": "Der letzte Diagrammsaldo stimmt nicht mit dem aktuellen Kontosaldo überein.",
-      "current_balance_unverified": "Der letzte Diagrammsaldo konnte nicht mit einem Saldo vom selben Datum abgeglichen werden."
+      "current_balance_unverified": "Der letzte Diagrammsaldo konnte nicht mit einem Saldo vom selben Datum abgeglichen werden.",
+      "grouped_balance_warning": "{reason} Betroffene Kennzahlen: {metrics}."
     },
     "category": {
       "title": "Ausgaben nach Kategorie",

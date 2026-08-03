@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "Media pe {count} luni"
     },
+    "savings_view": {
+      "label": "Vizualizare economii",
+      "combined": "Combinat",
+      "split": "După includerea în averea netă"
+    },
     "common": {
       "actual": "Valoare efectivă",
       "loading": "Se încarcă analizele",
@@ -15,6 +20,7 @@
       "average": "Medie",
       "current_month": "Luna curentă",
       "estimated_current_rates": "Estimat la cursurile de schimb actuale",
+      "fx_current_rates": "Valută: cursuri actuale",
       "missing_rates": "Cursuri de schimb lipsă: {currencies}",
       "based_on_months": "Pe baza a {used} din {requested} luni",
       "retry": "Reîncearcă",
@@ -36,9 +42,13 @@
       "view_changes": "Modificare lunară",
       "net_worth": "Avere netă",
       "savings": "Economii",
+      "savings_included": "Economii incluse în averea netă",
+      "savings_excluded": "Economii excluse din averea netă",
       "debt": "Datorii",
       "net_worth_change": "Modificarea averii nete",
       "savings_change": "Modificarea economiilor",
+      "savings_included_change": "Modificarea economiilor incluse în averea netă",
+      "savings_excluded_change": "Modificarea economiilor excluse din averea netă",
       "debt_change": "Modificarea datoriilor",
       "total_expenses": "Cheltuieli totale",
       "current_total": "Total curent",
@@ -57,7 +67,8 @@
       "error": "Istoricul soldurilor nu a putut fi încărcat",
       "definition": "Conturile active respectă regulile pentru avere netă, rolul de economisire și conturile de datorii.",
       "current_balance_mismatch": "Cel mai recent sold din grafic nu corespunde soldului curent al contului.",
-      "current_balance_unverified": "Cel mai recent sold din grafic nu a putut fi verificat cu un sold din aceeași dată."
+      "current_balance_unverified": "Cel mai recent sold din grafic nu a putut fi verificat cu un sold din aceeași dată.",
+      "grouped_balance_warning": "{reason} Indicatori afectați: {metrics}."
     },
     "category": {
       "title": "Cheltuieli pe categorii",

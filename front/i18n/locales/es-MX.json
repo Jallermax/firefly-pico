@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "Promedio de {count} meses"
     },
+    "savings_view": {
+      "label": "Vista de ahorros",
+      "combined": "Combinados",
+      "split": "Según inclusión en el patrimonio neto"
+    },
     "common": {
       "actual": "Real",
       "loading": "Cargando análisis",
@@ -15,6 +20,7 @@
       "average": "Promedio",
       "current_month": "Mes actual",
       "estimated_current_rates": "Estimado con los tipos de cambio actuales",
+      "fx_current_rates": "Divisas: tipos actuales",
       "missing_rates": "Faltan tipos de cambio: {currencies}",
       "based_on_months": "Basado en {used} de {requested} meses",
       "retry": "Reintentar",
@@ -36,9 +42,13 @@
       "view_changes": "Cambio mensual",
       "net_worth": "Patrimonio neto",
       "savings": "Ahorros",
+      "savings_included": "Ahorros incluidos en el patrimonio neto",
+      "savings_excluded": "Ahorros excluidos del patrimonio neto",
       "debt": "Deuda",
       "net_worth_change": "Cambio del patrimonio neto",
       "savings_change": "Cambio de ahorros",
+      "savings_included_change": "Cambio en ahorros incluidos en el patrimonio neto",
+      "savings_excluded_change": "Cambio en ahorros excluidos del patrimonio neto",
       "debt_change": "Cambio de deuda",
       "total_expenses": "Gastos totales",
       "current_total": "Total actual",
@@ -57,7 +67,8 @@
       "error": "No se pudo cargar el historial de saldos",
       "definition": "Las cuentas activas siguen las reglas de patrimonio neto, función de ahorro y cuentas de deuda.",
       "current_balance_mismatch": "El último saldo de la gráfica no coincide con el saldo actual de la cuenta.",
-      "current_balance_unverified": "No se pudo verificar el último saldo de la gráfica con un saldo de la misma fecha."
+      "current_balance_unverified": "No se pudo verificar el último saldo de la gráfica con un saldo de la misma fecha.",
+      "grouped_balance_warning": "{reason} Métricas afectadas: {metrics}."
     },
     "category": {
       "title": "Gastos por categoría",

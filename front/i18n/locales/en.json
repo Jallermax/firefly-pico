@@ -6,6 +6,11 @@
       "months_short": "{count}M",
       "average_months": "{count}-month average"
     },
+    "savings_view": {
+      "label": "Savings view",
+      "combined": "Combined",
+      "split": "By net-worth inclusion"
+    },
     "common": {
       "actual": "Actual",
       "loading": "Loading analytics",
@@ -15,6 +20,7 @@
       "average": "Average",
       "current_month": "Current month",
       "estimated_current_rates": "Estimated at current rates",
+      "fx_current_rates": "FX: current rates",
       "missing_rates": "Missing exchange rates: {currencies}",
       "based_on_months": "Based on {used} of {requested} months",
       "retry": "Retry",
@@ -36,9 +42,13 @@
       "view_changes": "Monthly change",
       "net_worth": "Net worth",
       "savings": "Savings",
+      "savings_included": "Savings included in net worth",
+      "savings_excluded": "Savings excluded from net worth",
       "debt": "Debt",
       "net_worth_change": "Net-worth change",
       "savings_change": "Savings change",
+      "savings_included_change": "Change in savings included in net worth",
+      "savings_excluded_change": "Change in savings excluded from net worth",
       "debt_change": "Debt change",
       "total_expenses": "Total expenses",
       "current_total": "Current total",
@@ -57,7 +67,8 @@
       "error": "Balance history could not be loaded",
       "definition": "Active accounts follow the net-worth, savings-role, and debt account rules.",
       "current_balance_mismatch": "The latest chart balance does not match the current account balance.",
-      "current_balance_unverified": "The latest chart balance could not be verified against a balance from the same date."
+      "current_balance_unverified": "The latest chart balance could not be verified against a balance from the same date.",
+      "grouped_balance_warning": "{reason} Affected metrics: {metrics}."
     },
     "category": {
       "title": "Spending by category",

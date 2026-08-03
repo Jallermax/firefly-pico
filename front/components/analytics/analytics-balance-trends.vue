@@ -1,8 +1,11 @@
 <template>
   <van-cell-group inset class="analytics-card analytics-balance-card">
     <div class="van-cell-group-title analytics-card-title analytics-balance-card-title">
-      <div class="flex-1">
-        <div>{{ $t('analytics.balance.title') }}</div>
+      <div class="flex-1 analytics-balance-heading">
+        <div class="analytics-balance-heading-row">
+          <div>{{ $t('analytics.balance.title') }}</div>
+          <span v-if="isEstimated" class="analytics-fx-badge">{{ $t('analytics.common.fx_current_rates') }}</span>
+        </div>
         <div class="analytics-card-subtitle">{{ $t('analytics.balance.subtitle') }}</div>
       </div>
       <analytics-metric-facet v-model="selectedMetricIds" :items="metrics" />
@@ -52,7 +55,7 @@
       <div v-else-if="selectedSourcesSettled" class="analytics-card-state">{{ $t('analytics.balance.empty') }}</div>
 
       <div v-if="summaries.length" class="analytics-metric-summary-grid">
-        <div v-for="summary in summaries" :key="summary.id" class="analytics-metric-summary">
+        <div v-for="summary in summaries" :key="summary.id" class="analytics-metric-summary" :class="{ 'analytics-metric-summary-savings-split': isSplitSavingsMetric(summary.id) }">
           <div class="analytics-metric-summary-title">
             <span class="analytics-chart-legend-marker" :class="'analytics-chart-legend-marker-' + summary.marker" :style="{ backgroundColor: summary.color }" />
             <span>{{ summary.label }}</span>
@@ -75,9 +78,8 @@
       <div v-if="expensesSelected && analyticsStore.categoryState.status === 'loading' && analyticsStore.categoryState.isStale" class="analytics-assumption-note">
         {{ $t('analytics.common.stale') }}
       </div>
-      <div v-if="isEstimated" class="analytics-assumption-note">{{ $t('analytics.common.estimated_current_rates') }}</div>
       <div v-if="missingCurrencies.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: missingCurrencies.join(', ') }) }}</div>
-      <div v-for="(warning, index) in validationWarnings" :key="warning.type + warning.sampleDate + index" class="analytics-warning">{{ validationWarningLabel(warning) }}</div>
+      <div v-for="warning in validationWarnings" :key="warning.type + warning.sampleDate" class="analytics-warning analytics-grouped-warning">{{ validationWarningLabel(warning) }}</div>
     </template>
   </van-cell-group>
 </template>
@@ -99,12 +101,28 @@ const viewItems = computed(() => [
   { label: t('analytics.balance.view_changes'), value: 'changes' },
 ])
 const periodItems = computed(() => [3, 6, 12].map((value) => ({ label: t('analytics.period.months_short', { count: value }), value })))
-const metricDefinitions = computed(() => [
-  { id: 'netWorth', balanceLabel: t('analytics.balance.net_worth'), changeLabel: t('analytics.balance.net_worth_change'), color: 'var(--analytics-net-worth)', marker: 'circle' },
-  { id: 'savings', balanceLabel: t('analytics.balance.savings'), changeLabel: t('analytics.balance.savings_change'), color: 'var(--analytics-savings)', marker: 'square' },
-  { id: 'debt', balanceLabel: t('analytics.balance.debt'), changeLabel: t('analytics.balance.debt_change'), color: 'var(--analytics-debt)', marker: 'diamond' },
-  { id: 'expenses', balanceLabel: null, changeLabel: t('analytics.balance.total_expenses'), color: 'var(--analytics-expenses)', marker: 'triangle' },
-])
+const metricDefinitions = computed(() =>
+  [
+    { id: 'netWorth', balanceLabel: t('analytics.balance.net_worth'), changeLabel: t('analytics.balance.net_worth_change'), color: 'var(--analytics-net-worth)', marker: 'circle' },
+    { id: 'savings', balanceLabel: t('analytics.balance.savings'), changeLabel: t('analytics.balance.savings_change'), color: 'var(--analytics-savings)', marker: 'square' },
+    {
+      id: 'savingsIncluded',
+      balanceLabel: t('analytics.balance.savings_included'),
+      changeLabel: t('analytics.balance.savings_included_change'),
+      color: 'var(--analytics-savings)',
+      marker: 'square',
+    },
+    {
+      id: 'savingsExcluded',
+      balanceLabel: t('analytics.balance.savings_excluded'),
+      changeLabel: t('analytics.balance.savings_excluded_change'),
+      color: 'var(--analytics-savings)',
+      marker: 'square',
+    },
+    { id: 'debt', balanceLabel: t('analytics.balance.debt'), changeLabel: t('analytics.balance.debt_change'), color: 'var(--analytics-debt)', marker: 'diamond' },
+    { id: 'expenses', balanceLabel: null, changeLabel: t('analytics.balance.total_expenses'), color: 'var(--analytics-expenses)', marker: 'triangle' },
+  ].filter(({ id }) => analyticsStore.availableFinancialMetricIds.includes(id)),
+)
 const metrics = computed(() =>
   metricDefinitions.value
     .filter((metric) => analyticsStore.financialTrendView === 'changes' || metric.id !== 'expenses')
@@ -231,6 +249,7 @@ const expenseSummary = computed(() => {
   }
 })
 const summaries = computed(() => [...accountSummaries.value, ...(expenseSummary.value ? [expenseSummary.value] : [])])
+const isSplitSavingsMetric = (id) => ['savingsIncluded', 'savingsExcluded'].includes(id)
 
 const selectedAccountSourceSeries = computed(() =>
   selectedAccountMetrics.value.map((metric) => analyticsStore.balanceSeries.find((series) => series.id === metric.id) ?? { isEstimated: false, missingCurrencies: [], warnings: [] }),
@@ -241,13 +260,17 @@ const isEstimated = computed(
 const missingCurrencies = computed(() => [
   ...new Set([...selectedAccountSourceSeries.value.flatMap((series) => series.missingCurrencies), ...(expensesSelected.value ? (analyticsStore.categorySummary.missingCurrencies ?? []) : [])]),
 ])
-const validationWarnings = computed(() => selectedAccountSourceSeries.value.flatMap((series) => series.warnings))
-const validationWarningLabel = (warning) =>
-  t(
-    {
-      'current-balance-mismatch': 'analytics.balance.current_balance_mismatch',
-      'current-balance-unverified': 'analytics.balance.current_balance_unverified',
-    }[warning.type],
-    warning,
-  )
+const validationWarnings = computed(() => analyticsStore.balanceWarnings)
+const warningMetricFormatter = computed(() => new Intl.ListFormat(profileStore.language, { style: 'long', type: 'conjunction' }))
+const validationWarningLabel = (warning) => {
+  const reasonKey = {
+    'current-balance-mismatch': 'analytics.balance.current_balance_mismatch',
+    'current-balance-unverified': 'analytics.balance.current_balance_unverified',
+  }[warning.type]
+  const metricLabels = warning.metricIds.map((id) => metrics.value.find((metric) => metric.id === id)?.label).filter(Boolean)
+  return t('analytics.balance.grouped_balance_warning', {
+    reason: reasonKey ? t(reasonKey, warning) : warning.type,
+    metrics: warningMetricFormatter.value.format(metricLabels),
+  })
+}
 </script>

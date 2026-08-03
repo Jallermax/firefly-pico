@@ -4,6 +4,7 @@
     <analytics-page-switch />
 
     <van-pull-refresh v-model="isRefreshing" @refresh="onRefresh">
+      <analytics-savings-view-control v-model="analyticsStore.savingsView" />
       <div class="analytics-layout">
         <analytics-balance-trends class="analytics-layout-balance" />
         <analytics-category-spending v-if="profileStore.categoriesEnabled" class="analytics-layout-category" />

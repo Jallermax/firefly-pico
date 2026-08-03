@@ -528,6 +528,11 @@
     color: #fff;
 }
 
+.van-theme-dark .analytics-fx-badge {
+    color: #90caf9;
+    background: rgba(30, 136, 229, 0.18);
+}
+
 .van-theme-dark .analytics-metric-summary,
 .van-theme-dark .analytics-calculation-details,
 .van-theme-dark .analytics-assumption-note,
