@@ -22,6 +22,7 @@
       "estimated_current_rates": "Estimé aux taux de change actuels",
       "fx_current_rates": "Devises : taux actuels",
       "missing_rates": "Taux de change manquants : {currencies}",
+      "unavailable_amounts": "Certains montants de transaction sont indisponibles, les calculs concernés sont donc masqués. Identifiants des transactions : {ids}",
       "based_on_months": "Basé sur {used} mois sur {requested}",
       "retry": "Réessayer",
       "stale": "Affichage du dernier résultat complet pendant l’actualisation",

@@ -22,6 +22,7 @@
       "estimated_current_rates": "Estimated at current rates",
       "fx_current_rates": "FX: current rates",
       "missing_rates": "Missing exchange rates: {currencies}",
+      "unavailable_amounts": "Some transaction amounts are unavailable, so affected calculations are withheld. Transaction IDs: {ids}",
       "based_on_months": "Based on {used} of {requested} months",
       "retry": "Retry",
       "stale": "Showing the previous complete result while refreshing",

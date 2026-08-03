@@ -22,6 +22,7 @@
       "estimated_current_rates": "Zu aktuellen Wechselkursen geschätzt",
       "fx_current_rates": "Devisen: aktuelle Kurse",
       "missing_rates": "Fehlende Wechselkurse: {currencies}",
+      "unavailable_amounts": "Einige Transaktionsbeträge sind nicht verfügbar, daher werden betroffene Berechnungen ausgeblendet. Transaktions-IDs: {ids}",
       "based_on_months": "Basiert auf {used} von {requested} Monaten",
       "retry": "Erneut versuchen",
       "stale": "Während der Aktualisierung wird das vorherige vollständige Ergebnis angezeigt",

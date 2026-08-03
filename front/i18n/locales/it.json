@@ -22,6 +22,7 @@
       "estimated_current_rates": "Stimato ai tassi di cambio correnti",
       "fx_current_rates": "Valute: tassi correnti",
       "missing_rates": "Tassi di cambio mancanti: {currencies}",
+      "unavailable_amounts": "Alcuni importi delle transazioni non sono disponibili, quindi i calcoli interessati sono nascosti. ID transazioni: {ids}",
       "based_on_months": "Basato su {used} di {requested} mesi",
       "retry": "Riprova",
       "stale": "Durante l’aggiornamento viene mostrato il precedente risultato completo",

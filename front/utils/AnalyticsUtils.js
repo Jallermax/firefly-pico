@@ -777,7 +777,7 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
   return metrics.flatMap((metric) => {
     if (!selected.has(metric.id)) return []
     if (metric.id === 'expenses') {
-      if (view !== 'changes') return []
+      if (view !== 'changes' || !expenses) return []
       return [
         {
           ...metric,

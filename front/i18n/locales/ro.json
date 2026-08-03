@@ -22,6 +22,7 @@
       "estimated_current_rates": "Estimat la cursurile de schimb actuale",
       "fx_current_rates": "Valută: cursuri actuale",
       "missing_rates": "Cursuri de schimb lipsă: {currencies}",
+      "unavailable_amounts": "Unele sume ale tranzacțiilor nu sunt disponibile, astfel că rezultatele afectate sunt ascunse. ID-uri tranzacții: {ids}",
       "based_on_months": "Pe baza a {used} din {requested} luni",
       "retry": "Reîncearcă",
       "stale": "Se afișează rezultatul complet anterior în timpul actualizării",

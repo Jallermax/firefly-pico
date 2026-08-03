@@ -22,6 +22,7 @@
       "estimated_current_rates": "按当前汇率估算",
       "fx_current_rates": "外汇：当前汇率",
       "missing_rates": "缺少汇率：{currencies}",
+      "unavailable_amounts": "部分交易金额不可用，因此相关计算已隐藏。交易 ID：{ids}",
       "based_on_months": "基于 {requested} 个月中的 {used} 个月",
       "retry": "重试",
       "stale": "刷新时显示上一次完整结果",

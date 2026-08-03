@@ -22,6 +22,7 @@
       "estimated_current_rates": "Oszacowano według bieżących kursów wymiany",
       "fx_current_rates": "Waluty: bieżące kursy",
       "missing_rates": "Brakujące kursy wymiany: {currencies}",
+      "unavailable_amounts": "Niektóre kwoty transakcji są niedostępne, dlatego powiązane obliczenia zostały ukryte. Identyfikatory transakcji: {ids}",
       "based_on_months": "Na podstawie {used} z {requested} miesięcy",
       "retry": "Spróbuj ponownie",
       "stale": "Podczas odświeżania wyświetlany jest poprzedni kompletny wynik",

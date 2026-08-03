@@ -22,6 +22,9 @@
       <span>{{ $t('analytics.category.error') }}</span>
       <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
     </div>
+    <div v-else-if="readyPresentation.isBlocked" class="analytics-warning" role="alert">
+      {{ $t('analytics.common.unavailable_amounts', { ids: readyPresentation.unavailableTransactionIds.join(', ') }) }}
+    </div>
     <template v-else-if="analyticsStore.categoryState.status === 'empty' || chartSeries.length === 0">
       <div class="analytics-card-state">{{ $t('analytics.category.empty') }}</div>
       <div class="analytics-assumption-note">{{ $t('analytics.category.definition') }}</div>
@@ -227,6 +230,7 @@ const readyPresentation = computed(() =>
     usedMonths: summary.value.usedMonths,
     requestedMonths: summary.value.requestedMonths,
     missingCurrencies: summary.value.missingCurrencies ?? [],
+    unclassified: summary.value.unclassified,
   }),
 )
 const facetItems = computed(() => {

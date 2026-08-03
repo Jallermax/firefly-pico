@@ -136,6 +136,7 @@ export function createAnalyticsStore(id, useDependencies) {
         rates: rates.value,
       }),
     )
+    const categoryUnavailableTransactionIds = computed(() => categoryLedger.value.unclassified?.transactionIds ?? [])
     const categoryRanking = computed(() =>
       rankCategoryIds({
         ledger: categoryLedger.value,
@@ -150,26 +151,33 @@ export function createAnalyticsStore(id, useDependencies) {
         .filter((id) => !rankedIds.has(id))
         .sort((left, right) => currentCategories[right].amount - currentCategories[left].amount || left.localeCompare(right))
     })
-    const categorySummary = computed(() => ({
-      ...summarizeCategoryWindow({
+    const categorySummary = computed(() => {
+      const summary = summarizeCategoryWindow({
         ledger: categoryLedger.value,
         categoryIds: normalizedSelectedCategoryIds.value,
         averageMonths: categoryAverageMonths.value,
         today: getNow(),
-      }),
-      isEstimated: categoryLedger.value.isEstimated,
-      missingCurrencies: categoryLedger.value.missingCurrencies,
-    }))
+      })
+      return {
+        ...summary,
+        ...(categoryUnavailableTransactionIds.value.length ? { series: [] } : {}),
+        isEstimated: categoryLedger.value.isEstimated,
+        missingCurrencies: categoryLedger.value.missingCurrencies,
+        unclassified: categoryLedger.value.unclassified,
+      }
+    })
     const categoryRankingItems = computed(() => {
       const rankedItems = categoryRanking.value.map((id) => ({
         id,
-        amount: categorySummary.value.monthKeys.reduce((total, key) => total + (categoryLedger.value.months?.[key]?.categories?.[id]?.amount ?? 0), 0),
+        amount: categoryUnavailableTransactionIds.value.length
+          ? null
+          : categorySummary.value.monthKeys.reduce((total, key) => total + (categoryLedger.value.months?.[key]?.categories?.[id]?.amount ?? 0), 0),
       }))
       const candidateIds = new Set([...categoryRanking.value, ...currentMonthCategoryIds.value])
       return [
         ...rankedItems,
-        ...currentMonthCategoryIds.value.map((id) => ({ id, amount: 0 })),
-        ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: 0 })),
+        ...currentMonthCategoryIds.value.map((id) => ({ id, amount: categoryUnavailableTransactionIds.value.length ? null : 0 })),
+        ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: categoryUnavailableTransactionIds.value.length ? null : 0 })),
       ]
     })
     const selectedFullFlow = computed(() =>
@@ -271,7 +279,7 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const financialTrend = computed(() => ({
       ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() }),
-      expenses: summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() }),
+      expenses: categoryUnavailableTransactionIds.value.length ? null : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() }),
     }))
 
     async function fetchTransactions({ force = false } = {}) {

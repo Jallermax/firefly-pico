@@ -22,6 +22,7 @@
       "estimated_current_rates": "현재 환율로 추정",
       "fx_current_rates": "환율: 현재 환율",
       "missing_rates": "누락된 환율: {currencies}",
+      "unavailable_amounts": "일부 거래 금액을 사용할 수 없어 관련 계산을 표시하지 않습니다. 거래 ID: {ids}",
       "based_on_months": "요청한 {requested}개월 중 {used}개월 기준",
       "retry": "다시 시도",
       "stale": "새로 고치는 동안 이전의 완전한 결과를 표시합니다",

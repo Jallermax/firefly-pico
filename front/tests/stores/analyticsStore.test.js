@@ -233,6 +233,14 @@ test('provides every layered Money flow label and removes the obsolete card-as-d
   assert.doesNotMatch(english.definition, /card purchases.*new debt/i)
 })
 
+test('provides the unavailable-amount calculation warning in every supported locale', () => {
+  for (const locale of localeNames) {
+    const message = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.common.unavailable_amounts
+    assert.equal(typeof message, 'string', `${locale}: analytics.common.unavailable_amounts`)
+    assert.match(message, /\{ids\}/, `${locale}: analytics.common.unavailable_amounts`)
+  }
+})
+
 test('keeps overlapping balance requests isolated to their captured currency and current state', async () => {
   const usdRequest = deferred()
   const eurRequest = deferred()
@@ -857,6 +865,27 @@ test('derives financial trends from three account requests and the transaction l
   )
   assert.equal(store.financialTrend.expenses.currentActual, 10)
   assert.equal(store.financialTrend.expenses.currentForecast, expectedForecast)
+})
+
+test('withholds partial category and expense calculations while retaining balance metrics', async () => {
+  const valid = currentExpenseTransaction(25)
+  const invalid = (id, amount) => ({
+    id,
+    attributes: { transactions: [{ ...valid.attributes.transactions[0], amount }] },
+  })
+  transactionResult = [valid, invalid('invalid-z', null), invalid('invalid-a', '   ')]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.categorySummary.unclassified, { value: null, transactionIds: ['invalid-a', 'invalid-z'] })
+  assert.deepEqual(store.categorySummary.series, [])
+  assert.equal(
+    store.categoryRankingItems.every(({ amount }) => amount === null),
+    true,
+  )
+  assert.equal(store.financialTrend.expenses, null)
+  assert.equal(store.financialTrend.series.find(({ id }) => id === 'netWorth').currentTotal, 100)
 })
 
 test('exposes ranked category items with completed-window net totals', async () => {

@@ -52,7 +52,7 @@
       </div>
 
       <multi-series-line-chart v-if="chartSeries.length" :series="chartSeries" :value-formatter="formatNumberForDashboard" :aria-label="chartAriaLabel" />
-      <div v-else-if="selectedSourcesSettled" class="analytics-card-state">{{ $t('analytics.balance.empty') }}</div>
+      <div v-else-if="selectedSourcesSettled && !hasUnavailableExpenses" class="analytics-card-state">{{ $t('analytics.balance.empty') }}</div>
 
       <div v-if="summaries.length" class="analytics-metric-summary-grid">
         <div v-for="summary in summaries" :key="summary.id" class="analytics-metric-summary" :class="{ 'analytics-metric-summary-savings-split': isSplitSavingsMetric(summary.id) }">
@@ -77,6 +77,9 @@
       </div>
       <div v-if="expensesSelected && analyticsStore.categoryState.status === 'loading' && analyticsStore.categoryState.isStale" class="analytics-assumption-note">
         {{ $t('analytics.common.stale') }}
+      </div>
+      <div v-if="expensesSelected && hasUnavailableExpenses" class="analytics-warning" role="alert">
+        {{ $t('analytics.common.unavailable_amounts', { ids: unavailableExpenseTransactionIds.join(', ') }) }}
       </div>
       <div v-if="missingCurrencies.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: missingCurrencies.join(', ') }) }}</div>
       <div v-for="warning in validationWarnings" :key="warning.type + warning.sampleDate" class="analytics-warning analytics-grouped-warning">{{ validationWarningLabel(warning) }}</div>
@@ -138,6 +141,8 @@ const selectedMetricIds = computed({
 const selectedAccountMetrics = computed(() => metrics.value.filter((metric) => metric.id !== 'expenses' && selectedMetricIds.value.includes(metric.id)))
 const hasSelectedAccountMetrics = computed(() => selectedAccountMetrics.value.length > 0)
 const expensesSelected = computed(() => selectedMetricIds.value.includes('expenses'))
+const unavailableExpenseTransactionIds = computed(() => analyticsStore.categorySummary.unclassified?.transactionIds ?? [])
+const hasUnavailableExpenses = computed(() => unavailableExpenseTransactionIds.value.length > 0)
 const hasBalanceResult = computed(() => ['ready', 'empty'].includes(analyticsStore.balanceState.status) || analyticsStore.balanceState.isStale)
 const hasExpenseResult = computed(() => ['ready', 'empty'].includes(analyticsStore.categoryState.status) || analyticsStore.categoryState.isStale)
 const sourceState = computed(() =>
@@ -174,7 +179,7 @@ const chartSeries = computed(() =>
     expenses: analyticsStore.financialTrend.expenses,
     currentMonthKey: currentMonthKey.value,
   })
-    .filter((series) => (series.id === 'expenses' ? hasExpenseResult.value : hasBalanceResult.value))
+    .filter((series) => (series.id === 'expenses' ? hasExpenseResult.value && !hasUnavailableExpenses.value : hasBalanceResult.value))
     .map((series) => {
       const isSeriesEstimated = series.id === 'expenses' ? analyticsStore.categorySummary.isEstimated : analyticsStore.balanceSeries.find((item) => item.id === series.id)?.isEstimated
       const source = series.id === 'expenses' ? analyticsStore.financialTrend.expenses : analyticsStore.financialTrend.series.find((item) => item.id === series.id)
@@ -219,7 +224,7 @@ const accountSummaries = computed(() => {
   })
 })
 const expenseSummary = computed(() => {
-  if (!expensesSelected.value || !hasExpenseResult.value) return null
+  if (!expensesSelected.value || !hasExpenseResult.value || hasUnavailableExpenses.value) return null
   const expenses = analyticsStore.financialTrend.expenses
   const metric = metrics.value.find((item) => item.id === 'expenses')
   return {
@@ -255,7 +260,9 @@ const selectedAccountSourceSeries = computed(() =>
   selectedAccountMetrics.value.map((metric) => analyticsStore.balanceSeries.find((series) => series.id === metric.id) ?? { isEstimated: false, missingCurrencies: [], warnings: [] }),
 )
 const isEstimated = computed(
-  () => selectedAccountSourceSeries.value.some((series) => series.isEstimated || series.currentPoint?.isEstimated) || (expensesSelected.value && analyticsStore.categorySummary.isEstimated),
+  () =>
+    selectedAccountSourceSeries.value.some((series) => series.isEstimated || series.currentPoint?.isEstimated) ||
+    (expensesSelected.value && !hasUnavailableExpenses.value && analyticsStore.categorySummary.isEstimated),
 )
 const missingCurrencies = computed(() => [
   ...new Set([...selectedAccountSourceSeries.value.flatMap((series) => series.missingCurrencies), ...(expensesSelected.value ? (analyticsStore.categorySummary.missingCurrencies ?? []) : [])]),

@@ -22,6 +22,7 @@
       "estimated_current_rates": "Estimado com as taxas de câmbio atuais",
       "fx_current_rates": "Câmbio: taxas atuais",
       "missing_rates": "Taxas de câmbio ausentes: {currencies}",
+      "unavailable_amounts": "Alguns valores de transações não estão disponíveis, então os cálculos afetados foram ocultados. IDs das transações: {ids}",
       "based_on_months": "Com base em {used} de {requested} meses",
       "retry": "Tentar novamente",
       "stale": "Exibindo o resultado completo anterior durante a atualização",

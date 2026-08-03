@@ -172,6 +172,22 @@ test('financial forecast crosshair keeps exact values and dashed segments for ev
   )
 })
 
+test('financial trend omits unavailable expenses while retaining selected account metrics', () => {
+  const series = buildFinancialTrendChartSeries({
+    view: 'changes',
+    metrics: [{ id: 'netWorth' }, { id: 'expenses' }],
+    selectedIds: ['netWorth', 'expenses'],
+    accountSeries: [{ id: 'netWorth', changePoints: [{ x: '2026-08', value: 10, kind: 'partial' }], forecastAvailable: false }],
+    expenses: null,
+    currentMonthKey: '2026-08',
+  })
+
+  assert.deepEqual(
+    series.map(({ id }) => id),
+    ['netWorth'],
+  )
+})
+
 test('tooltip and live-region qualifiers share partial forecast and estimated labels', () => {
   assert.equal(typeof ChartUtils.lineChartPointQualifierKeys, 'function')
   assert.equal(typeof ChartUtils.buildLineChartLiveDescription, 'function')
@@ -338,6 +354,15 @@ test('financial trend source states keep account and transaction failures indepe
       selectedSourcesSettled: false,
     },
   )
+})
+
+test('financial trend card warns about unavailable expenses without hiding account results', () => {
+  const component = readFileSync(new URL('../../components/analytics/analytics-balance-trends.vue', import.meta.url), 'utf8')
+
+  assert.match(component, /const hasUnavailableExpenses = computed/)
+  assert.match(component, /series\.id === 'expenses' \? hasExpenseResult\.value && !hasUnavailableExpenses\.value : hasBalanceResult\.value/)
+  assert.match(component, /expensesSelected && hasUnavailableExpenses[\s\S]*analytics\.common\.unavailable_amounts/)
+  assert.match(component, /const expenseSummary = computed\(\(\) => \{[\s\S]*hasUnavailableExpenses\.value[\s\S]*return null/)
 })
 
 test('line geometry assigns six persistent non-color marker treatments to every finite point', () => {
