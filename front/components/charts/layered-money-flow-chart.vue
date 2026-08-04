@@ -1,12 +1,16 @@
 <template>
   <div ref="root" class="analytics-flow" :class="{ 'analytics-flow-mobile': !appStore.isDesktopLayout, 'analytics-flow-animated': profileStore.showAnimations }" @keydown.esc.stop="dismiss('escape')">
     <svg
+      ref="svg"
       class="analytics-flow-svg"
       :viewBox="layout.viewBox"
       :style="{ aspectRatio: `${layout.width} / ${layout.height}` }"
       role="group"
       :aria-label="props.ariaLabel"
-      @pointerdown.self="dismiss('outside')"
+      @pointermove.self="previewPointerRibbon"
+      @pointerleave="deactivate('pointer-leave')"
+      @pointerdown.self="previewPointerRibbon"
+      @click.self="selectPointerRibbon"
     >
       <defs>
         <pattern id="analytics-flow-refund-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
@@ -30,10 +34,6 @@
         :aria-label="linkAriaLabel(ribbon.link)"
         @focus="activateLink(ribbon, 'focus')"
         @blur="deactivate('blur')"
-        @pointerenter="activateLink(ribbon, 'pointer-enter')"
-        @pointerleave="deactivate('pointer-leave')"
-        @pointerdown="activateLink(ribbon, 'pointer-enter')"
-        @click="selectLink(ribbon)"
         @keydown.enter.prevent="selectLink(ribbon)"
         @keydown.space.prevent="selectLink(ribbon)"
         @keydown.left.prevent="focusRelative($event, -1)"
@@ -93,9 +93,9 @@
           rx="0.5"
           pointer-events="none"
         />
-        <text class="analytics-flow-node-label" :x="nodeLabel(node).x" :y="nodeLabel(node).y" :text-anchor="nodeLabel(node).anchor" :opacity="nodeOpacity(node)">{{ nodeLabelText(node.node) }}</text>
+        <text class="analytics-flow-node-label" :x="nodeLabel(node).x" :y="nodeLabel(node).y" :text-anchor="nodeLabel(node).anchor" :opacity="nodeOpacity(node)">{{ node.displayLabel }}</text>
         <text class="analytics-flow-node-amount" :x="nodeLabel(node).x" :y="nodeLabel(node).amountY" :text-anchor="nodeLabel(node).anchor" :opacity="nodeOpacity(node)">
-          {{ formatValue(node.node) }}
+          {{ node.displayValueLabel }}
         </text>
       </g>
     </svg>
@@ -115,7 +115,15 @@ import { onClickOutside, useElementSize } from '@vueuse/core'
 import { useAppStore } from '~/stores/appStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { limitMoneyFlowGraphDetail } from '~/utils/AnalyticsUtils.js'
-import { buildMoneyFlowGraphGeometry, formatMoneyFlowPercent, formatMoneyFlowValue, resolveMoneyFlowGraphMode, resolveMoneyFlowInteraction, resolveMoneyFlowItemDetails } from '~/utils/ChartUtils.js'
+import {
+  buildMoneyFlowGraphGeometry,
+  formatMoneyFlowPercent,
+  formatMoneyFlowValue,
+  resolveMoneyFlowGraphMode,
+  resolveMoneyFlowInteraction,
+  resolveMoneyFlowItemDetails,
+  resolveNearestMoneyFlowRibbon,
+} from '~/utils/ChartUtils.js'
 
 const props = defineProps({
   graph: { type: Object, required: true },
@@ -129,6 +137,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const profileStore = useProfileStore()
 const root = ref(null)
+const svg = ref(null)
 const interaction = ref(resolveMoneyFlowInteraction({ action: { type: 'dismiss' } }))
 const { width: renderedWidth } = useElementSize(root)
 const formatValue = (item) =>
@@ -221,7 +230,7 @@ const itemPattern = (item) => {
 const nodeOpacity = ({ id }) => (!related.value || related.value.nodes.has(id) ? 1 : 0.2)
 const linkOpacity = ({ id }) => (!related.value || related.value.links.has(id) ? 0.72 : 0.12)
 const nodeLabel = (node) => {
-  if (!appStore.isDesktopLayout) return { x: node.x + node.width / 2, y: node.y - 12, amountY: node.y + node.height + 20, anchor: 'middle' }
+  if (layout.value.orientation === 'vertical') return { x: node.x + node.width / 2, y: node.y - 12, amountY: node.y + node.height + 20, anchor: 'middle' }
   const isLeft = node.x < layout.value.width / 2
   return { x: isLeft ? node.x - 10 : node.x + node.width + 10, y: node.y + node.height / 2 - 3, amountY: node.y + node.height / 2 + 15, anchor: isLeft ? 'end' : 'start' }
 }
@@ -231,6 +240,22 @@ const activateNode = ({ id }, type) => dispatchInteraction({ type, target: { typ
 const activateLink = ({ id }, type) => dispatchInteraction({ type, target: { type: 'link', id } })
 const deactivate = (type) => dispatchInteraction({ type })
 const dismiss = (type) => dispatchInteraction({ type })
+const pointerRibbon = (event) => {
+  const bounds = svg.value?.getBoundingClientRect()
+  if (!bounds?.width || !bounds.height) return null
+  const point = { x: ((event.clientX - bounds.left) / bounds.width) * layout.value.width, y: ((event.clientY - bounds.top) / bounds.height) * layout.value.height }
+  return resolveNearestMoneyFlowRibbon({ ribbons: layout.value.ribbons, point, maxHitRadius: 22 })
+}
+const previewPointerRibbon = (event) => {
+  const ribbon = pointerRibbon(event)
+  if (ribbon) activateLink(ribbon, 'pointer-enter')
+  else deactivate('pointer-leave')
+}
+const selectPointerRibbon = (event) => {
+  const ribbon = pointerRibbon(event)
+  if (ribbon) selectLink(ribbon)
+  else dismiss('outside')
+}
 const focusRelative = (event, amount) => {
   const targets = [...root.value.querySelectorAll('[data-flow-target]')]
   const target = { type: event.currentTarget.dataset.flowType, id: event.currentTarget.dataset.flowTarget }

@@ -796,6 +796,46 @@ test('money flow packs node centers far enough apart for non-overlapping 44px ta
   )
 })
 
+test('narrow desktop money flow uses full-detail vertical geometry without any node-target intersection', () => {
+  const intersects = (left, right) => left.x < right.x + right.width && left.x + left.width > right.x && left.y < right.y + right.height && left.y + left.height > right.y
+
+  for (const renderedWidth of [460, 500, 560]) {
+    const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth, mode: 'full' })
+
+    assert.equal(geometry.mode, 'full')
+    assert.equal(geometry.orientation, 'vertical')
+    assert.equal(geometry.nodes.length, layeredGeometryGraph.nodes.length)
+    assert.equal(geometry.ribbons.length, layeredGeometryGraph.links.length)
+    for (let leftIndex = 0; leftIndex < geometry.nodes.length; leftIndex++) {
+      for (let rightIndex = leftIndex + 1; rightIndex < geometry.nodes.length; rightIndex++) {
+        assert.equal(
+          intersects(geometry.nodes[leftIndex].hitBox, geometry.nodes[rightIndex].hitBox),
+          false,
+          `${renderedWidth}px: ${geometry.nodes[leftIndex].id} overlaps ${geometry.nodes[rightIndex].id}`,
+        )
+      }
+    }
+  }
+})
+
+test('nearest money flow centerline wins overlapping pointer corridors independent of DOM order', () => {
+  const ribbons = [
+    {
+      id: 'z-ribbon',
+      corridor: { start: { x: 0, y: 0 }, control1: { x: 40, y: 0 }, control2: { x: 60, y: 4 }, end: { x: 100, y: 4 } },
+    },
+    {
+      id: 'a-ribbon',
+      corridor: { start: { x: 0, y: 12 }, control1: { x: 40, y: 12 }, control2: { x: 60, y: 8 }, end: { x: 100, y: 8 } },
+    },
+  ]
+
+  assert.equal(ChartUtils.resolveNearestMoneyFlowRibbon({ ribbons, point: { x: 50, y: 9 }, maxHitRadius: 22 }).id, 'a-ribbon')
+  assert.equal(ChartUtils.resolveNearestMoneyFlowRibbon({ ribbons: [...ribbons].reverse(), point: { x: 50, y: 9 }, maxHitRadius: 22 }).id, 'a-ribbon')
+  assert.equal(ChartUtils.resolveNearestMoneyFlowRibbon({ ribbons, point: { x: 50, y: 6 }, maxHitRadius: 22 }).id, 'a-ribbon')
+  assert.equal(ChartUtils.resolveNearestMoneyFlowRibbon({ ribbons, point: { x: 50, y: 40 }, maxHitRadius: 22 }), null)
+})
+
 test('mobile mode measures localized labels, formatted values, and retained central labels', () => {
   const localizedNodes = layeredGeometryGraph.nodes.map((node) => ({
     ...node,
@@ -820,8 +860,42 @@ test('mobile mode measures localized labels, formatted values, and retained cent
     renderedWidth: 390,
     mode: 'condensed',
   })
-  assert.equal(centralOverflow.responsive.selected.fits, false)
-  assert.deepEqual(centralOverflow.responsive.selected.overflowingNodeIds, ['available'])
+  assert.equal(centralOverflow.responsive.selected.fits, true)
+  assert.deepEqual(centralOverflow.responsive.selected.overflowingNodeIds, [])
+  assert.equal(centralOverflow.responsive.selected.truncatedNodeIds.includes('available'), true)
+  assert.equal(centralOverflow.nodes.find(({ id }) => id === 'available').displayLabel.endsWith('…'), true)
+})
+
+test('condensed mobile fallback truncates retained CJK and wide labels while keeping content and targets in viewBox', () => {
+  const nodes = [
+    { id: 'income:outer', layer: 0, kind: 'income', label: '非常に長い外部収入カテゴリ名', valueLabel: '123,456.78 USD', value: 100 },
+    { id: 'income', layer: 1, kind: 'income', label: '新しい収入の集計', valueLabel: '123,456.78 USD', value: 100 },
+    { id: 'available', layer: 2, kind: 'available', label: '利用可能な非常に長い中央プール名', valueLabel: '123,456.78 USD', value: 100 },
+    { id: 'savings', layer: 3, kind: 'savings', label: '貯蓄アクセス可能な中央プール', valueLabel: '123,456.78 USD', value: 100 },
+    { id: 'expenses', layer: 4, kind: 'expenses', label: '生活費として分類された支出', valueLabel: '33,333.33 USD', value: 34 },
+    { id: 'savings-deposited', layer: 4, kind: 'savingsDeposited', label: 'アクセス可能な貯蓄への預入', valueLabel: '33,333.33 USD', value: 33 },
+    { id: 'debt-paid', layer: 4, kind: 'debtPaid', label: '負債返済とその他の長い用途', valueLabel: '33,333.34 USD', value: 33 },
+    { id: 'expense:outer', layer: 5, kind: 'expenseCategory', label: '非常に長い外部支出カテゴリ名', valueLabel: '100,000.00 USD', value: 100 },
+  ]
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ nodes, links: [], isDesktop: false, renderedWidth: 390, mode: 'condensed' })
+
+  assert.equal(geometry.orientation, 'vertical')
+  assert.equal(geometry.responsive.selected.fits, true)
+  assert.deepEqual(geometry.responsive.selected.overflowingNodeIds, [])
+  assert.equal(
+    ['expenses', 'savings-deposited', 'debt-paid'].every((id) => geometry.responsive.selected.truncatedNodeIds.includes(id)),
+    true,
+  )
+  assert.equal(
+    geometry.nodes.every(({ hitBox, contentBox }) => hitBox.x >= 0 && hitBox.x + hitBox.width <= geometry.width && contentBox.x >= 0 && contentBox.x + contentBox.width <= geometry.width),
+    true,
+  )
+  assert.equal(
+    geometry.nodes
+      .filter(({ id }) => ['expenses', 'savings-deposited', 'debt-paid'].includes(id))
+      .every(({ displayLabel, node }) => displayLabel.endsWith('…') && node.label.startsWith(displayLabel.slice(0, -1))),
+    true,
+  )
 })
 
 test('crowded 390px flow condenses outer details without discarding their selection metadata', () => {
@@ -877,11 +951,15 @@ test('crowded 390px flow condenses outer details without discarding their select
 
 test('layered flow renderer uses filled ribbons and accessible patterns', () => {
   const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
 
   assert.match(component, /<path[^>]*:d="ribbon\.path" :fill="linkColor\(ribbon\)"/)
   assert.match(component, /id="analytics-flow-refund-pattern"/)
   assert.match(component, /id="analytics-flow-savings-accessible-pattern"/)
   assert.match(component, /id="analytics-flow-savings-restricted-pattern"/)
+  assert.match(component, /@pointermove\.self="previewPointerRibbon"/)
+  assert.match(component, /resolveNearestMoneyFlowRibbon\(\{ ribbons: layout\.value\.ribbons, point, maxHitRadius: 22 \}\)/)
+  assert.match(whiteCss, /\.analytics-flow-ribbon-corridor\s*\{[^}]*pointer-events:\s*none/s)
   assert.doesNotMatch(component, /<details[\s\S]*analytics-flow-values/)
 })
 
@@ -940,11 +1018,17 @@ test('limited Other selection keeps visible endpoint totals and projects exact t
     targets: [{ type: 'link', id: otherLink.id }],
   })
   const details = ChartUtils.resolveMoneyFlowItemDetails({ item: otherLink, nodes: interaction.selection.contextNodes })
-  const selection = ChartUtils.projectMoneyFlowTransactionSelection({ item: limited.nodes.find(({ id }) => id === otherLink.targetId), rows: [otherLink] })
+  const visibleTarget = limited.nodes.find(({ id }) => id === otherLink.targetId)
+  const targetIds = new Set(visibleTarget.details.nodes.map(({ id }) => id))
+  const resolvedRows = graph.links.filter(
+    ({ sourceId, targetId, kind, fundingPool }) => sourceId === otherLink.sourceId && targetIds.has(targetId) && kind === otherLink.kind && fundingPool === otherLink.fundingPool,
+  )
+  const selection = ChartUtils.projectMoneyFlowTransactionSelection({ item: otherLink, rows: resolvedRows, nodes: graph.nodes })
 
   assert.equal(details.sourcePercent, 0.4)
   assert.equal(details.destinationPercent, 1)
-  assert.deepEqual(selection, { transactionIds: ['home', 'refund', 'travel'], queryValue: 'home,refund,travel' })
+  assert.deepEqual(selection, { refundCoverage: { value: 4, transactionIds: ['refund'] }, transactionIds: ['home', 'refund', 'travel'], queryValue: 'home,refund,travel' })
+  assert.equal(`id=${selection.queryValue}`, 'id=home,refund,travel')
 })
 
 test('money flow value and percentage formatting use the selected locale consistently', () => {
@@ -967,6 +1051,8 @@ test('money flow card uses the layered graph, persisted detail control, and one 
   assert.match(component, /resolveMoneyFlowItemDetails/)
   assert.match(component, /selectedItemDetails\.sourcePercent/)
   assert.match(component, /selectedItemDetails\.destinationPercent/)
+  assert.match(component, /projectMoneyFlowTransactionSelection\(\{ item: selectedItem\.value \?\? \{\}, rows: selectedRows\.value, nodes: fullNodes\.value \}\)/)
+  assert.match(component, /selectedTransactionSelection\.value\.refundCoverage/)
   assert.doesNotMatch(component, /analytics-flow-fx|flow\.meta\.displayCurrencyCode/)
 })
 

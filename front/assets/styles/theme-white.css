@@ -2981,7 +2981,7 @@ body {
 .analytics-flow-ribbon-corridor {
     fill: none;
     stroke: transparent;
-    pointer-events: stroke;
+    pointer-events: none;
 }
 
 .analytics-flow-node:focus-visible .analytics-flow-interaction-target,

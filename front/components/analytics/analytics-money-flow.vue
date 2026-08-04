@@ -317,8 +317,8 @@ const selectedRows = computed(() => {
 const selectedNodeDictionary = computed(() => new Map(selectedContextNodes.value.map((node) => [node.id, node])))
 const selectedItemLabel = computed(() => itemLabel(selectedItem.value, selectedNodeDictionary.value))
 const selectedItemDetails = computed(() => resolveMoneyFlowItemDetails({ item: selectedItem.value ?? {}, nodes: selectedContextNodes.value }))
-const selectedRefundCoverage = computed(() => selectedItem.value?.refundCoverage ?? null)
-const selectedTransactionSelection = computed(() => projectMoneyFlowTransactionSelection({ item: selectedItem.value ?? {}, rows: selectedRows.value }))
+const selectedTransactionSelection = computed(() => projectMoneyFlowTransactionSelection({ item: selectedItem.value ?? {}, rows: selectedRows.value, nodes: fullNodes.value }))
+const selectedRefundCoverage = computed(() => selectedTransactionSelection.value.refundCoverage)
 const selectedTransactionIds = computed(() => selectedTransactionSelection.value.transactionIds)
 
 const moveMonth = (amount) => analyticsStore.moveFlowMonth(amount)
