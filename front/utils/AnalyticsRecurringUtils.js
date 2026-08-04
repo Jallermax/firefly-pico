@@ -120,14 +120,23 @@ const sortedEvidence = (entries) => ({
   dates: unique(entries.map(({ date }) => dateKey(date))).sort(),
 })
 
-const dominantIdentity = (entries) => {
-  const identities = entries.map(identityOf)
-  const keys = ['direction', 'sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId', 'payee']
-  const modes = Object.fromEntries(keys.map((key) => [key, mode(identities.map((identity) => identity[key]))]))
-  return {
-    identity: Object.fromEntries(keys.map((key) => [key, modes[key].value])),
-    stability: Math.min(...keys.map((key) => modes[key].ratio)),
+const identityVariantsFor = (entries) => {
+  const variants = new Map()
+  for (const entry of entries) {
+    const identity = identityOf(entry)
+    const signature = signatureOf(identity)
+    const variant = variants.get(signature) ?? { signature, identity, entries: [] }
+    variant.entries.push(entry)
+    variants.set(signature, variant)
   }
+  return [...variants.values()]
+    .map(({ signature, identity, entries: variantEntries }) => ({ signature, identity, count: variantEntries.length, evidence: sortedEvidence(variantEntries) }))
+    .sort((left, right) => right.count - left.count || left.signature.localeCompare(right.signature))
+}
+
+const dominantIdentity = (entries) => {
+  const variants = identityVariantsFor(entries)
+  return { identity: variants[0]?.identity ?? identityOf({}), stability: entries.length ? (variants[0]?.count ?? 0) / entries.length : 0, variants }
 }
 
 const groupKeyFor = (entry) => {
@@ -189,7 +198,7 @@ const monthlyScore = ({ entries, twice = false, completedThrough }) => {
   }
 }
 
-const reasonsFor = ({ entries, score, identityStability, relativeAmountMad }) => {
+const reasonsFor = ({ entries, score, identityStability, relativeAmountMad, amountMedian }) => {
   const reasons = []
   if (score.distinctCycles < THRESHOLDS.occurrences) reasons.push({ code: 'occurrenceCount', actual: score.distinctCycles, minimum: THRESHOLDS.occurrences })
   if (score.coverage < THRESHOLDS.coverage) reasons.push({ code: 'cycleCoverage', actual: round(score.coverage), minimum: THRESHOLDS.coverage })
@@ -198,6 +207,7 @@ const reasonsFor = ({ entries, score, identityStability, relativeAmountMad }) =>
   if (['monthly', 'twiceMonthly'].includes(score.cadence.type) && score.dateMadDays > THRESHOLDS.dateMadDays)
     reasons.push({ code: 'dateDispersion', actual: round(score.dateMadDays), maximum: THRESHOLDS.dateMadDays })
   if (relativeAmountMad > THRESHOLDS.relativeAmountMad) reasons.push({ code: 'amountDispersion', actual: round(relativeAmountMad), maximum: THRESHOLDS.relativeAmountMad })
+  if (amountMedian === 0) reasons.push({ code: 'zeroMagnitude', actual: 0, minimumExclusive: 0 })
   if (entries.length < THRESHOLDS.occurrences && !reasons.some(({ code }) => code === 'occurrenceCount'))
     reasons.push({ code: 'occurrenceCount', actual: entries.length, minimum: THRESHOLDS.occurrences })
   return reasons
@@ -235,20 +245,25 @@ const cadenceScores = ({ entries, completedThrough }) => [
   monthlyScore({ entries, twice: true, completedThrough }),
 ]
 
-const candidateFrom = ({ entries, score, identity, confidence, amountMedian, amountMin, amountMax }) => {
+const candidateFrom = ({ entries, score, identity, identityVariants, confidence, amountMedian, amountMin, amountMax }) => {
   const signature = signatureOf(identity)
   const id = `inferred:${stableHash(`${signature}|${cadenceKey(score.cadence)}`)}`
   return {
     id,
     signature,
     identity,
+    identityVariants,
     direction: identity.direction,
     cadence: score.cadence,
     expectedAmount: { value: amountMedian, min: amountMin, max: amountMax },
     source: { type: 'inferred', id, authoritative: false },
     evidence: sortedEvidence(entries),
     confidence,
-    matching: { dateWindowDays: ['monthly', 'twiceMonthly'].includes(score.cadence.type) ? 4 : 2, amountTolerance: THRESHOLDS.relativeAmountMad },
+    matching: {
+      dateWindowDays: ['monthly', 'twiceMonthly'].includes(score.cadence.type) ? 4 : 2,
+      amountTolerance: THRESHOLDS.relativeAmountMad,
+      amountEnvelope: { min: amountMedian * (1 - THRESHOLDS.relativeAmountMad), max: amountMedian * (1 + THRESHOLDS.relativeAmountMad) },
+    },
     expectedDates: [],
   }
 }
@@ -259,8 +274,8 @@ export function detectRecurringCandidates({ entries = [], startDate, endDate }) 
   if (!start || !end) return { candidates: [], audit: { accepted: [], rejected: [] } }
   const completedThrough = completedEnd(end)
   const eligibleEntries = entries
-    .filter((entry) => dateKey(entry?.date) && entry.date >= start && entry.date <= completedThrough && Number.isFinite(entry?.value) && !entry?.refund?.isRefund)
-    .map((entry) => ({ ...entry, date: dateKey(entry.date) }))
+    .map((entry) => ({ ...entry, date: dateKey(entry?.date) }))
+    .filter((entry) => entry.date && entry.date >= start && entry.date <= completedThrough && Number.isFinite(entry?.value) && !entry?.refund?.isRefund)
     .sort((left, right) => left.date.localeCompare(right.date) || String(left.id ?? '').localeCompare(String(right.id ?? '')))
   const groups = new Map()
   for (const entry of eligibleEntries) groups.set(groupKeyFor(entry), [...(groups.get(groupKeyFor(entry)) ?? []), entry])
@@ -268,13 +283,13 @@ export function detectRecurringCandidates({ entries = [], startDate, endDate }) 
   const candidates = []
   const rejected = []
   for (const [groupId, groupEntries] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    const { identity, stability } = dominantIdentity(groupEntries)
+    const { identity, stability, variants } = dominantIdentity(groupEntries)
     const amounts = groupEntries.map(({ value }) => Math.abs(value))
     const amountMedian = median(amounts)
     const amountMad = medianAbsoluteDeviation(amounts)
     const relativeAmountMad = amountMedian === 0 ? (amountMad === 0 ? 0 : Infinity) : amountMad / Math.abs(amountMedian)
     const attempts = cadenceScores({ entries: groupEntries, completedThrough }).map((score) => {
-      const reasons = reasonsFor({ entries: groupEntries, score, identityStability: stability, relativeAmountMad })
+      const reasons = reasonsFor({ entries: groupEntries, score, identityStability: stability, relativeAmountMad, amountMedian })
       return { score, reasons, confidence: confidenceFor({ entries: groupEntries, score, identityStability: stability, relativeAmountMad, reasons }) }
     })
     attempts.sort(
@@ -290,6 +305,7 @@ export function detectRecurringCandidates({ entries = [], startDate, endDate }) 
           entries: groupEntries,
           score: accepted.score,
           identity,
+          identityVariants: variants,
           confidence: accepted.confidence,
           amountMedian,
           amountMin: Math.min(...amounts),
@@ -301,7 +317,7 @@ export function detectRecurringCandidates({ entries = [], startDate, endDate }) 
     const best = attempts.sort(
       (left, right) => left.reasons.length - right.reasons.length || right.confidence.score - left.confidence.score || left.score.cadence.type.localeCompare(right.score.cadence.type),
     )[0]
-    rejected.push({ groupId, identity, cadence: best.score.cadence, evidence: sortedEvidence(groupEntries), confidence: best.confidence, reasons: best.reasons })
+    rejected.push({ groupId, identity, identityVariants: variants, cadence: best.score.cadence, evidence: sortedEvidence(groupEntries), confidence: best.confidence, reasons: best.reasons })
   }
 
   candidates.sort((left, right) => left.id.localeCompare(right.id))
@@ -309,17 +325,17 @@ export function detectRecurringCandidates({ entries = [], startDate, endDate }) 
   return { candidates, audit: { accepted: candidates.map(({ id }) => id), rejected } }
 }
 
-const cadenceFromDefinition = ({ attributes, dates, sourceType }) => {
-  const repetition = attributes.repetitions?.[0] ?? {}
-  const type = codeOf(attributes.repetitionType) ?? repetition.type ?? attributes.repeat_freq
+const cadenceFromDefinition = ({ attributes, repetition = {}, dates, sourceType }) => {
+  const type = repetition.type ?? codeOf(attributes.repetitionType) ?? attributes.repeat_freq
   const normalizedType = normalizeText(type).replace(/ /g, '')
-  const skip = Number(attributes.repetitionSkip ?? repetition.skip ?? attributes.skip ?? 0)
+  const skip = Number(repetition.skip ?? attributes.repetitionSkip ?? attributes.skip ?? 0)
+  const definitionStart = dateKey(attributes.first_date ?? attributes.firstDate ?? attributes.date)
   if (normalizedType === 'weekly') {
-    const weekday = Number(codeOf(attributes.repetitionWeekday) ?? repetition.moment) || (dates[0] ? dateParts(dates[0]).date.getDay() || 7 : null)
-    return { type: skip === 1 ? 'biweekly' : 'weekly', intervalWeeks: skip + 1, weekday, anchorDate: dates[0] ?? dateKey(attributes.first_date ?? attributes.date) }
+    const weekday = Number(repetition.moment ?? codeOf(attributes.repetitionWeekday)) || (dates[0] || definitionStart ? dateParts(dates[0] ?? definitionStart).date.getDay() || 7 : null)
+    return { type: skip === 1 ? 'biweekly' : 'weekly', intervalWeeks: skip + 1, weekday, anchorDate: dates[0] ?? definitionStart }
   }
   if (['monthly', 'month'].includes(normalizedType)) {
-    const day = Number(attributes.repetitionDay ?? repetition.moment) || (dates[0] ? dateParts(dates[0]).day : null)
+    const day = Number(repetition.moment ?? attributes.repetitionDay) || (dates[0] || definitionStart ? dateParts(dates[0] ?? definitionStart).day : null)
     return day ? { type: 'monthly', days: [day] } : null
   }
   if (sourceType === 'subscription' && dates.length > 1) {
@@ -337,12 +353,10 @@ const cadenceFromDefinition = ({ attributes, dates, sourceType }) => {
   return null
 }
 
-const datesFromDefinition = (attributes) =>
-  unique(
-    [...(attributes.occurrences ?? []), ...(attributes.repetitions?.flatMap(({ occurrences = [] }) => occurrences) ?? []), ...(attributes.pay_dates ?? []), attributes.next_expected_match].map(
-      dateKey,
-    ),
-  ).sort()
+const datesFromDefinition = ({ attributes, repetition = null, sourceType }) => {
+  const values = repetition ? (repetition.occurrences ?? []) : sourceType === 'subscription' ? [...(attributes.pay_dates ?? []), attributes.next_expected_match] : (attributes.occurrences ?? [])
+  return unique(values.map(dateKey)).sort()
+}
 
 const datesForCadence = ({ cadence, startDate, endDate }) => {
   if (!cadence) return []
@@ -378,18 +392,62 @@ const expectedAmount = ({ value, min = value, max = value }) => {
   }
 }
 
-const definedCandidate = ({ item, sourceType, startDate, endDate }) => {
+const definitionBounds = (attributes) => ({
+  start: dateKey(attributes.first_date ?? attributes.firstDate ?? attributes.date),
+  end: dateKey(attributes.repeat_until ?? attributes.repeatUntil ?? attributes.end_date ?? attributes.endDate),
+})
+
+const definitionSchedules = ({ attributes, sourceType }) => {
+  const repetitions = sourceType === 'recurringTransaction' ? (attributes.repetitions ?? []) : []
+  let schedules = repetitions.length
+    ? repetitions.map((repetition) => {
+        const dates = datesFromDefinition({ attributes, repetition, sourceType })
+        return { cadence: cadenceFromDefinition({ attributes, repetition, dates, sourceType }), dates }
+      })
+    : (() => {
+        const dates = datesFromDefinition({ attributes, sourceType })
+        return [{ cadence: cadenceFromDefinition({ attributes, dates, sourceType }), dates }]
+      })()
+  schedules = schedules.filter(({ cadence, dates }) => cadence || dates.length)
+
+  if (schedules.length === 2 && schedules.every(({ cadence }) => cadence?.type === 'monthly')) {
+    const ordered = [...schedules].sort((left, right) => left.cadence.days[0] - right.cadence.days[0])
+    const middleDay = ordered[0].cadence.days[0]
+    const monthEndDay = ordered[1].cadence.days[0]
+    if (middleDay <= 20 && monthEndDay > 20) {
+      const observedOffsets = ordered[1].dates.map((date) => {
+        const { year, month, day } = dateParts(date)
+        return daysInMonth(year, month) - day
+      })
+      const monthEndOffset = Math.round(median(observedOffsets) ?? Math.max(0, 31 - monthEndDay))
+      schedules = [
+        {
+          cadence: { type: 'twiceMonthly', days: [middleDay], fromMonthEnd: [monthEndOffset] },
+          dates: unique([...ordered[0].dates, ...ordered[1].dates]).sort(),
+        },
+      ]
+    }
+  }
+
+  return schedules.sort(
+    (left, right) => cadenceKey(left.cadence ?? { type: 'dates' }).localeCompare(cadenceKey(right.cadence ?? { type: 'dates' })) || left.dates.join('|').localeCompare(right.dates.join('|')),
+  )
+}
+
+const definedCandidate = ({ item, sourceType, startDate, endDate, schedule, includeStreamId }) => {
   const attributes = attributesOf(item)
   if (attributes.active === false) return null
   const transaction = attributes.transactions?.[0] ?? {}
-  const directDates = datesFromDefinition(attributes)
-  const cadence = cadenceFromDefinition({ attributes, dates: directDates, sourceType })
+  const directDates = schedule.dates
+  const cadence = schedule.cadence
   if (!cadence && directDates.length === 0) return null
-  const allDates = directDates.length
-    ? directDates
-    : datesForCadence({ cadence, startDate: dateKey(attributes.first_date ?? attributes.date) ?? startDate, endDate: dateKey(attributes.repeat_until ?? attributes.end_date) ?? endDate })
-  const expectedDates = allDates.filter((date) => date >= startDate && date <= endDate)
-  if (expectedDates.length === 0 && !cadence) return null
+  const bounds = definitionBounds(attributes)
+  const effectiveStart = [startDate, bounds.start].filter(Boolean).sort().at(-1)
+  const effectiveEnd = [endDate, bounds.end].filter(Boolean).sort()[0]
+  if (!effectiveStart || !effectiveEnd || effectiveStart > effectiveEnd) return null
+  const boundedDirectDates = directDates.filter((date) => (!bounds.start || date >= bounds.start) && (!bounds.end || date <= bounds.end) && date >= effectiveStart && date <= effectiveEnd)
+  const expectedDates = boundedDirectDates.length ? boundedDirectDates : datesForCadence({ cadence, startDate: effectiveStart, endDate: effectiveEnd })
+  if (expectedDates.length === 0) return null
   const direction =
     sourceType === 'subscription' ? 'expense' : normalizeText(codeOf(attributes.type)) === 'deposit' ? 'income' : normalizeText(codeOf(attributes.type)) === 'transfer' ? 'transfer' : 'expense'
   const transformedSource = attributes.accountSource
@@ -409,17 +467,21 @@ const definedCandidate = ({ item, sourceType, startDate, endDate }) => {
       ? expectedAmount({ value: attributes.pc_amount_avg ?? attributes.amount_avg, min: attributes.pc_amount_min ?? attributes.amount_min, max: attributes.pc_amount_max ?? attributes.amount_max })
       : expectedAmount({ value: transaction.amount ?? attributes.amount })
   const paidTransactionIds = unique((attributes.paid_dates ?? []).map(({ transaction_group_id }) => idOf(transaction_group_id))).sort()
+  const streamId = includeStreamId ? `:${stableHash(`${cadenceKey(cadence ?? { type: 'dates' })}|${expectedDates.join('|')}`)}` : ''
+  const amountEnvelope = Number.isFinite(amount.min) && Number.isFinite(amount.max) ? { min: Math.min(amount.min, amount.max), max: Math.max(amount.min, amount.max) } : null
   return {
-    id: `defined:${sourceType}:${sourceId}`,
+    id: `defined:${sourceType}:${sourceId}${streamId}`,
     signature: signatureOf(identity),
     identity,
+    identityVariants: [],
     direction,
     cadence,
     expectedAmount: amount,
     source: { type: sourceType, id: sourceId, authoritative: true },
     evidence: { entryIds: [], transactionIds: paidTransactionIds, dates: unique((attributes.paid_dates ?? []).map(({ date }) => dateKey(date))).sort() },
     confidence: { score: 1, factors: { authoritative: true }, reasons: ['Authoritative Firefly schedule'] },
-    matching: { dateWindowDays: ['monthly', 'twiceMonthly'].includes(cadence?.type) ? 4 : 2, amountTolerance: THRESHOLDS.relativeAmountMad },
+    matching: { dateWindowDays: ['monthly', 'twiceMonthly'].includes(cadence?.type) ? 4 : 2, amountTolerance: THRESHOLDS.relativeAmountMad, amountEnvelope },
+    bounds,
     expectedDates,
   }
 }
@@ -428,22 +490,53 @@ export function buildDefinedOccurrences({ recurringTransactions = [], subscripti
   const start = dateKey(startDate)
   const end = dateKey(endDate)
   if (!start || !end) return []
-  return [
-    ...recurringTransactions.map((item) => definedCandidate({ item, sourceType: 'recurringTransaction', startDate: start, endDate: end })),
-    ...subscriptions.map((item) => definedCandidate({ item, sourceType: 'subscription', startDate: start, endDate: end })),
-  ]
+  const candidatesFor = (item, sourceType) => {
+    const attributes = attributesOf(item)
+    if (attributes.active === false) return []
+    const schedules = definitionSchedules({ attributes, sourceType })
+    return schedules.map((schedule) => definedCandidate({ item, sourceType, startDate: start, endDate: end, schedule, includeStreamId: schedules.length > 1 })).filter(Boolean)
+  }
+  return [...recurringTransactions.flatMap((item) => candidatesFor(item, 'recurringTransaction')), ...subscriptions.flatMap((item) => candidatesFor(item, 'subscription'))]
     .filter(Boolean)
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
-const sameCadence = (left, right) => left?.type === right?.type
 const compatibleIdentity = (left, right) => {
   if (left.direction !== right.direction) return false
-  for (const key of ['sourceAccountId', 'destinationAccountId', 'categoryId']) if (left[key] && right[key] && left[key] !== right[key]) return false
-  if (left.payee && right.payee && left.payee !== right.payee) return false
+  for (const key of ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId', 'payee']) if (left[key] && right[key] && left[key] !== right[key]) return false
   const leftExternal = left.direction === 'income' ? left.sourceAccountId : left.destinationAccountId
   const rightExternal = right.direction === 'income' ? right.sourceAccountId : right.destinationAccountId
   return Boolean((left.payee && right.payee && left.payee === right.payee) || (leftExternal && rightExternal && leftExternal === rightExternal))
+}
+
+const cadencePhaseCompatible = (left, right, windowDays) => {
+  if (!left || !right || left.type !== right.type) return false
+  if (left.type === 'monthly') return left.days.length === right.days.length && left.days.every((day, index) => Math.abs(day - right.days[index]) <= windowDays)
+  if (left.type === 'twiceMonthly') {
+    return (
+      left.days.length === right.days.length &&
+      left.fromMonthEnd.length === right.fromMonthEnd.length &&
+      left.days.every((day, index) => Math.abs(day - right.days[index]) <= windowDays) &&
+      left.fromMonthEnd.every((offset, index) => Math.abs(offset - right.fromMonthEnd[index]) <= windowDays)
+    )
+  }
+  if (['weekly', 'biweekly'].includes(left.type)) {
+    if (left.intervalWeeks !== right.intervalWeeks) return false
+    const cycleDays = left.intervalWeeks * 7
+    if (left.anchorDate && right.anchorDate) {
+      const phase = Math.abs(daysBetween(left.anchorDate, right.anchorDate)) % cycleDays
+      return Math.min(phase, cycleDays - phase) <= windowDays
+    }
+    return Math.abs((left.weekday ?? 0) - (right.weekday ?? 0)) <= windowDays
+  }
+  return cadenceKey(left) === cadenceKey(right)
+}
+
+const amountEnvelopesOverlap = (left, right) => {
+  const leftEnvelope = left.matching?.amountEnvelope
+  const rightEnvelope = right.matching?.amountEnvelope
+  if (!leftEnvelope || !rightEnvelope) return true
+  return leftEnvelope.min <= rightEnvelope.max && rightEnvelope.min <= leftEnvelope.max
 }
 
 export function mergeRecurringCandidates({ defined = [], inferred = [] }) {
@@ -451,7 +544,11 @@ export function mergeRecurringCandidates({ defined = [], inferred = [] }) {
   const result = defined.map((candidate) => structuredClone(candidate)).sort((left, right) => left.id.localeCompare(right.id))
   for (const candidate of [...inferredCandidates].sort((left, right) => right.confidence.score - left.confidence.score || left.id.localeCompare(right.id))) {
     const match = result.find(
-      (definedCandidate) => definedCandidate.source.authoritative && sameCadence(definedCandidate.cadence, candidate.cadence) && compatibleIdentity(definedCandidate.identity, candidate.identity),
+      (definedCandidate) =>
+        definedCandidate.source.authoritative &&
+        compatibleIdentity(definedCandidate.identity, candidate.identity) &&
+        cadencePhaseCompatible(definedCandidate.cadence, candidate.cadence, Math.min(definedCandidate.matching?.dateWindowDays ?? 4, candidate.matching?.dateWindowDays ?? 4)) &&
+        amountEnvelopesOverlap(definedCandidate, candidate),
     )
     if (!match) {
       result.push(structuredClone(candidate))
@@ -464,6 +561,7 @@ export function mergeRecurringCandidates({ defined = [], inferred = [] }) {
     }
     match.identity = Object.fromEntries(Object.keys(match.identity).map((key) => [key, match.identity[key] ?? candidate.identity[key]]))
     match.signature = signatureOf(match.identity)
+    match.identityVariants = structuredClone(candidate.identityVariants ?? [])
     match.inference = { id: candidate.id, confidence: candidate.confidence }
   }
   return result.sort((left, right) => Number(right.source.authoritative) - Number(left.source.authoritative) || right.confidence.score - left.confidence.score || left.id.localeCompare(right.id))
@@ -473,20 +571,23 @@ const currentExpectedDates = (candidate, today) => {
   const start = currentMonthStart(today)
   const { year, month } = dateParts(today)
   const end = `${year}-${String(month).padStart(2, '0')}-${daysInMonth(year, month)}`
-  const definedDates = (candidate.expectedDates ?? []).filter((date) => date >= start && date <= end)
-  return definedDates.length ? definedDates : datesForCadence({ cadence: candidate.cadence, startDate: start, endDate: end })
+  const boundedStart = [start, candidate.bounds?.start].filter(Boolean).sort().at(-1)
+  const boundedEnd = [end, candidate.bounds?.end].filter(Boolean).sort()[0]
+  if (!boundedStart || !boundedEnd || boundedStart > boundedEnd) return []
+  const definedDates = (candidate.expectedDates ?? []).filter((date) => date >= boundedStart && date <= boundedEnd)
+  return definedDates.length ? definedDates : datesForCadence({ cadence: candidate.cadence, startDate: boundedStart, endDate: boundedEnd })
 }
 
 const entryMatches = (candidate, entry) => {
   const identity = identityOf(entry)
-  if (!compatibleIdentity(candidate.identity, identity)) return false
+  if (candidate.identityVariants?.length) {
+    if (!candidate.identityVariants.some((variant) => signatureOf(identity) === variant.signature)) return false
+  } else if (!compatibleIdentity(candidate.identity, identity)) return false
   const expected = candidate.expectedAmount?.value
   if (!Number.isFinite(expected) || !Number.isFinite(entry.value)) return true
-  const tolerance = Math.max(
-    expected * (candidate.matching?.amountTolerance ?? THRESHOLDS.relativeAmountMad),
-    Math.abs((candidate.expectedAmount.max ?? expected) - (candidate.expectedAmount.min ?? expected)) / 2,
-  )
-  return Math.abs(Math.abs(entry.value) - expected) <= tolerance
+  const amount = Math.abs(entry.value)
+  const envelope = candidate.matching?.amountEnvelope ?? { min: expected * (1 - THRESHOLDS.relativeAmountMad), max: expected * (1 + THRESHOLDS.relativeAmountMad) }
+  return amount >= envelope.min && amount <= envelope.max
 }
 
 export function matchRecurringOccurrences({ candidates = [], actualEntries = [], today }) {

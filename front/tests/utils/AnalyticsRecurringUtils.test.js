@@ -318,3 +318,327 @@ test('returns identical candidates and audit for shuffled ledger input without m
   assert.deepEqual(shuffledResult, orderedResult)
   assert.deepEqual(entries, original)
 })
+
+test('does not merge equal-cadence identities when monthly phase or robust amount envelopes do not overlap', () => {
+  const defined = buildDefinedOccurrences({
+    recurringTransactions: [
+      {
+        id: 'defined-service',
+        attributes: {
+          active: true,
+          type: 'withdrawal',
+          repetitions: [{ type: 'monthly', moment: '1', occurrences: ['2026-06-01'] }],
+          transactions: [{ amount: '100', description: 'Same service', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+        },
+      },
+    ],
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  })
+  const wrongPhase = detectRecurringCandidates({
+    entries: entriesForDates(['2026-01-20', '2026-02-20', '2026-03-20', '2026-04-20', '2026-05-20'], {
+      value: 100,
+      destinationId: 'service',
+      categoryId: 'service',
+      description: 'Same service',
+      idPrefix: 'wrong-phase',
+    }),
+    startDate: '2026-01-01',
+    endDate: '2026-06-10',
+  }).candidates
+  const wrongAmount = detectRecurringCandidates({
+    entries: entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01'], {
+      value: 500,
+      destinationId: 'service',
+      categoryId: 'service',
+      description: 'Same service',
+      idPrefix: 'wrong-amount',
+    }),
+    startDate: '2026-01-01',
+    endDate: '2026-06-10',
+  }).candidates
+  const wrongPhaseAndAmount = detectRecurringCandidates({
+    entries: entriesForDates(['2026-01-20', '2026-02-20', '2026-03-20', '2026-04-20', '2026-05-20'], {
+      value: 500,
+      destinationId: 'service',
+      categoryId: 'service',
+      description: 'Same service',
+      idPrefix: 'wrong-both',
+    }),
+    startDate: '2026-01-01',
+    endDate: '2026-06-10',
+  }).candidates
+
+  assert.equal(mergeRecurringCandidates({ defined, inferred: wrongPhase }).length, 2)
+  assert.equal(mergeRecurringCandidates({ defined, inferred: wrongAmount }).length, 2)
+  assert.equal(mergeRecurringCandidates({ defined, inferred: wrongPhaseAndAmount }).length, 2)
+  assert.equal(mergeRecurringCandidates({ defined, inferred: [...wrongPhase, ...wrongAmount] }).length, 3)
+})
+
+test('combines two compatible monthly definition repetitions into one authoritative twice-monthly stream', () => {
+  const result = buildDefinedOccurrences({
+    recurringTransactions: [
+      {
+        id: 'recurring-salary',
+        attributes: {
+          active: true,
+          type: 'deposit',
+          repetitions: [
+            { type: 'monthly', moment: '15', occurrences: ['2026-08-14', '2026-09-15'] },
+            { type: 'monthly', moment: '31', occurrences: ['2026-08-31', '2026-09-30'] },
+          ],
+          transactions: [{ amount: '3000', description: 'Payroll', source_id: 'employer', destination_id: 'checking', category_id: 'salary' }],
+        },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-09-30',
+  })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].source.id, 'recurring-salary')
+  assert.deepEqual(result[0].cadence, { type: 'twiceMonthly', days: [15], fromMonthEnd: [0] })
+  assert.deepEqual(result[0].expectedDates, ['2026-08-14', '2026-08-31', '2026-09-15', '2026-09-30'])
+
+  const inferred = detectRecurringCandidates({
+    entries: entriesForDates(['2026-01-15', '2026-01-31', '2026-02-15', '2026-02-28', '2026-03-15', '2026-03-31', '2026-04-15', '2026-04-30'], {
+      direction: 'income',
+      value: 3000,
+      sourceId: 'employer',
+      categoryId: 'salary',
+      description: 'Payroll',
+      idPrefix: 'defined-overlap-salary',
+    }),
+    startDate: '2026-01-01',
+    endDate: '2026-05-10',
+  }).candidates
+  const merged = mergeRecurringCandidates({ defined: result, inferred })
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].source.authoritative, true)
+  assert.equal(merged[0].inference.id, inferred[0].id)
+})
+
+test('preserves incompatible authoritative repetitions as deterministic independent streams', () => {
+  const recurringTransactions = [
+    {
+      id: 'recurring-mixed',
+      attributes: {
+        active: true,
+        type: 'withdrawal',
+        repetitionType: { fireflyCode: 'monthly' },
+        repetitionDay: '1',
+        repetitions: [
+          { type: 'monthly', moment: '1', occurrences: ['2026-08-01', '2026-09-01'] },
+          { type: 'weekly', moment: '5', occurrences: ['2026-08-07', '2026-08-14'] },
+        ],
+        transactions: [{ amount: '25', description: 'Mixed schedule', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+      },
+    },
+  ]
+
+  const result = buildDefinedOccurrences({ recurringTransactions, startDate: '2026-08-01', endDate: '2026-09-30' })
+
+  assert.equal(result.length, 2)
+  assert.deepEqual(result.map(({ cadence }) => cadence.type).sort(), ['monthly', 'weekly'])
+  assert.equal(new Set(result.map(({ id }) => id)).size, 2)
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [...recurringTransactions].reverse(), startDate: '2026-08-01', endDate: '2026-09-30' }), result)
+})
+
+test('honors recurrence and subscription bounds during normalization and later occurrence matching', () => {
+  const expiredRecurrence = {
+    id: 'expired-recurrence',
+    attributes: {
+      active: true,
+      type: 'withdrawal',
+      first_date: '2026-08-01',
+      repeat_until: '2026-08-31',
+      repetitions: [{ type: 'monthly', moment: '1' }],
+      transactions: [{ amount: '100', description: 'Expired', source_id: 'checking', destination_id: 'expired', category_id: 'service' }],
+    },
+  }
+  const expiredSubscription = {
+    id: 'expired-subscription',
+    attributes: { active: true, name: 'Expired bill', date: '2026-08-01', end_date: '2026-08-31', repeat_freq: 'monthly', amount_avg: '50' },
+  }
+
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [expiredRecurrence], subscriptions: [expiredSubscription], startDate: '2026-09-01', endDate: '2026-09-30' }), [])
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [expiredRecurrence], subscriptions: [expiredSubscription], startDate: '2026-07-01', endDate: '2026-07-31' }), [])
+
+  const august = buildDefinedOccurrences({ recurringTransactions: [expiredRecurrence], startDate: '2026-08-01', endDate: '2026-08-31' })
+  const matched = matchRecurringOccurrences({ candidates: august, actualEntries: [], today: '2026-09-01' })
+  assert.equal(matched.candidates[0].occurrences.length, 0)
+  assert.deepEqual(matched.remaining, [])
+})
+
+test('uses a capped robust inferred amount envelope when matching current occurrences', () => {
+  const history = entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01'], {
+    destinationId: 'outlier-service',
+    categoryId: 'service',
+    description: 'Outlier service',
+    idPrefix: 'outlier',
+  }).map((item, index) => ({ ...item, value: [100, 100, 100, 100, 1000][index] }))
+  const candidate = detectRecurringCandidates({ entries: history, startDate: '2026-01-01', endDate: '2026-06-10' }).candidates[0]
+  const current = entry({ id: 'outlier-current', date: '2026-06-01', value: 500, destinationId: 'outlier-service', categoryId: 'service', description: 'Outlier service' })
+
+  const result = matchRecurringOccurrences({ candidates: [candidate], actualEntries: [current], today: '2026-06-01' })
+
+  assert.equal(candidate.expectedAmount.value, 100)
+  assert.equal(result.fulfilled.length, 0)
+  assert.equal(result.remaining.length, 1)
+})
+
+test('scores the complete observed identity tuple and rejects synthetic marginal stability', () => {
+  const entries = entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01'], {
+    destinationId: 'joint-service',
+    categoryId: 'stable',
+    description: 'Stable payee',
+    idPrefix: 'joint',
+  })
+  entries[3] = { ...entries[3], sourceAccount: { id: 'other-checking', attributes: { name: 'other-checking' } } }
+  entries[4] = { ...entries[4], categoryId: 'other', description: 'Other payee' }
+
+  const result = detectRecurringCandidates({ entries, startDate: '2026-01-01', endDate: '2026-06-10' })
+
+  assert.equal(result.candidates.length, 0)
+  assert.ok(result.audit.rejected[0].reasons.some(({ code, actual, minimum }) => code === 'identityStability' && actual === 0.6 && minimum === 0.8))
+  assert.deepEqual(
+    result.audit.rejected[0].identityVariants.map(({ count }) => count),
+    [3, 1, 1],
+  )
+})
+
+test('matches an observed minority identity variant but never an unseen identity', () => {
+  const history = entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01'], {
+    destinationId: 'variant-service',
+    categoryId: 'stable',
+    description: 'Stable payee',
+    idPrefix: 'variant',
+  })
+  history[4] = {
+    ...history[4],
+    sourceAccount: { id: 'secondary-checking', attributes: { name: 'secondary-checking' } },
+    categoryId: 'alternate',
+    description: 'Alternate payee',
+  }
+  const candidate = detectRecurringCandidates({ entries: history, startDate: '2026-01-01', endDate: '2026-06-10' }).candidates[0]
+  const observedVariant = entry({
+    id: 'observed-variant',
+    date: '2026-06-01',
+    value: 100,
+    sourceId: 'secondary-checking',
+    destinationId: 'variant-service',
+    categoryId: 'alternate',
+    description: 'Alternate payee',
+  })
+  const unseenVariant = entry({
+    id: 'unseen-variant',
+    date: '2026-06-01',
+    value: 100,
+    sourceId: 'third-checking',
+    destinationId: 'variant-service',
+    categoryId: 'unseen',
+    description: 'Unseen payee',
+  })
+
+  assert.deepEqual(
+    candidate.identityVariants.map(({ count }) => count),
+    [4, 1],
+  )
+  assert.equal(matchRecurringOccurrences({ candidates: [candidate], actualEntries: [observedVariant], today: '2026-06-01' }).fulfilled.length, 1)
+  assert.equal(matchRecurringOccurrences({ candidates: [candidate], actualEntries: [unseenVariant], today: '2026-06-01' }).fulfilled.length, 0)
+})
+
+test('normalizes local Date ledger values before completed-cycle filtering and remains deterministic when shuffled', () => {
+  const entries = entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01'], {
+    destinationId: 'date-object-service',
+    categoryId: 'service',
+    description: 'Date object service',
+    idPrefix: 'date-object',
+  }).map((item, index) => ({ ...item, date: new Date(2026, index, 1, 0, 5) }))
+  const ordered = detectRecurringCandidates({ entries, startDate: new Date(2026, 0, 1), endDate: new Date(2026, 5, 10) })
+  const shuffled = detectRecurringCandidates({ entries: [entries[4], entries[1], entries[3], entries[0], entries[2]], startDate: new Date(2026, 0, 1), endDate: new Date(2026, 5, 10) })
+
+  assert.equal(ordered.candidates.length, 1)
+  assert.deepEqual(shuffled, ordered)
+  assert.deepEqual(ordered.candidates[0].evidence.dates, ['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01'])
+})
+
+test('rejects zero-magnitude histories explicitly while accepting signed negative magnitudes', () => {
+  const zero = entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01'], { value: 0, destinationId: 'zero-service', idPrefix: 'zero' })
+  const negative = entriesForDates(['2026-01-02', '2026-02-02', '2026-03-02'], { value: -100, destinationId: 'negative-service', idPrefix: 'negative' })
+
+  const result = detectRecurringCandidates({ entries: [...zero, ...negative], startDate: '2026-01-01', endDate: '2026-04-10' })
+
+  assert.equal(result.candidates.length, 1)
+  assert.equal(result.candidates[0].identity.destinationAccountId, 'negative-service')
+  assert.deepEqual(result.candidates[0].expectedAmount, { value: 100, min: 100, max: 100 })
+  const zeroAudit = result.audit.rejected.find(({ identity }) => identity.destinationAccountId === 'zero-service')
+  assert.ok(zeroAudit.reasons.some(({ code }) => code === 'zeroMagnitude'))
+})
+
+test('normalizes transformed Pico recurrences and omits inactive or unusable definitions', () => {
+  const transformed = {
+    id: 'pico-transformed',
+    attributes: {
+      active: true,
+      type: { fireflyCode: 'withdrawal' },
+      amount: '-250',
+      description: 'Pico schedule',
+      repetitionType: { fireflyCode: 'monthly' },
+      repetitionDay: '5',
+      occurrences: [new Date(2026, 7, 5, 0, 5)],
+      accountSource: { id: 'checking' },
+      accountDestination: { id: 'pico-service' },
+      category: { id: 'service' },
+    },
+  }
+  const inactive = { ...transformed, id: 'inactive', attributes: { ...transformed.attributes, active: false } }
+  const unusable = { id: 'unusable', attributes: { active: true, type: 'withdrawal', transactions: [{ amount: '10' }] } }
+
+  const result = buildDefinedOccurrences({ recurringTransactions: [unusable, inactive, transformed], startDate: '2026-08-01', endDate: '2026-08-31' })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].source.id, 'pico-transformed')
+  assert.deepEqual(result[0].expectedDates, ['2026-08-05'])
+  assert.deepEqual(result[0].expectedAmount, { value: 250, min: 250, max: 250 })
+  assert.equal(result[0].identity.sourceAccountId, 'checking')
+  assert.equal(result[0].identity.destinationAccountId, 'pico-service')
+})
+
+test('merge and occurrence matching are deterministic for shuffled candidates and actual entries', () => {
+  const rentHistory = entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01'], {
+    destinationId: 'rent-service',
+    categoryId: 'housing',
+    description: 'Rent',
+    idPrefix: 'rent-deterministic',
+  })
+  const gymHistory = entriesForDates(['2026-01-02', '2026-02-02', '2026-03-02', '2026-04-02', '2026-05-02'], {
+    destinationId: 'gym-service',
+    categoryId: 'health',
+    description: 'Gym',
+    idPrefix: 'gym-deterministic',
+  })
+  const inferred = detectRecurringCandidates({ entries: [...rentHistory, ...gymHistory], startDate: '2026-01-01', endDate: '2026-06-10' }).candidates
+  const defined = buildDefinedOccurrences({
+    subscriptions: [{ id: 'rent-subscription', attributes: { active: true, name: 'Rent', repeat_freq: 'monthly', amount_avg: '100', pay_dates: ['2026-06-01'] } }],
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  })
+  const orderedMerge = mergeRecurringCandidates({ defined, inferred })
+  const shuffledMerge = mergeRecurringCandidates({ defined: [...defined].reverse(), inferred: [...inferred].reverse() })
+  const actual = [
+    entry({ id: 'gym-current', date: '2026-06-02', destinationId: 'gym-service', categoryId: 'health', description: 'Gym' }),
+    entry({ id: 'rent-current', date: '2026-06-01', destinationId: 'rent-service', categoryId: 'housing', description: 'Rent' }),
+  ]
+
+  assert.deepEqual(shuffledMerge, orderedMerge)
+  assert.deepEqual(
+    matchRecurringOccurrences({ candidates: [...orderedMerge].reverse(), actualEntries: [...actual].reverse(), today: '2026-06-02' }),
+    matchRecurringOccurrences({ candidates: orderedMerge, actualEntries: actual, today: '2026-06-02' }),
+  )
+  assert.ok(
+    matchRecurringOccurrences({ candidates: orderedMerge, actualEntries: actual, today: '2026-06-02' })
+      .candidates.flatMap(({ occurrences }) => occurrences)
+      .every((occurrence) => !('transactionId' in occurrence)),
+  )
+})
