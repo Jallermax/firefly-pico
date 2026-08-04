@@ -4,7 +4,7 @@ import test from 'node:test'
 import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 
-const account = ({ id, type = 'asset', role = 'defaultAsset', includeNetWorth = true, balance = '0', currencyCode = 'USD', direction = null }) => ({
+const account = ({ id, type = 'asset', role = 'defaultAsset', includeNetWorth = true, balance = '0', balanceDate = '2026-04-15T12:00:00-04:00', currencyCode = 'USD', direction = null }) => ({
   id,
   attributes: {
     active: true,
@@ -12,6 +12,7 @@ const account = ({ id, type = 'asset', role = 'defaultAsset', includeNetWorth = 
     account_role: role ? { fireflyCode: role } : null,
     include_net_worth: includeNetWorth,
     current_balance: balance,
+    current_balance_date: balanceDate,
     currency_code: currencyCode,
     liability_direction: direction ? { fireflyCode: direction } : null,
   },
@@ -43,7 +44,6 @@ const ledger = buildAnalyticsLedger({
   primaryCurrencyCode: 'USD',
   rates: { USD: 1 },
   transactions: [
-    transaction('coverage-transfer', split({ amount: 5, date: '2025-12-15', source: checking, destination: creditCard })),
     transaction('january-expense', split({ amount: 100, date: '2026-01-15', source: checking, destination: expense })),
     transaction('january-income', split({ amount: 200, date: '2026-01-20', source: revenue, destination: checking })),
     transaction('february-transfer', split({ amount: 30, date: '2026-02-05', source: checking, destination: creditCard })),
@@ -58,6 +58,7 @@ const baseArgs = {
   entries: ledger.entries,
   monthKeys: ['2025-12', '2026-01', '2026-02', '2026-03'],
   asOfDate: '2026-04-15',
+  coverage: { startMonth: '2025-12', endDate: '2026-04-15' },
   displayCurrencyCode: 'USD',
   primaryCurrencyCode: 'USD',
   rates: { USD: 1 },
@@ -137,7 +138,37 @@ test('emits completed gross-expense zeros and exact transaction evidence', () =>
   assert.deepEqual(result.currentPoint, { x: '2026-04-15', value: 0, transactionIds: [] })
 })
 
-test('keeps months before ledger coverage and missing account or FX values unavailable', () => {
+test('counts only Available, Savings, and Liability funded gross expenses', () => {
+  const secondExpense = account({ id: 'second-expense', type: 'expense', role: null, includeNetWorth: false })
+  const unknown = { id: 'unknown-source' }
+  const expenseLedger = buildAnalyticsLedger({
+    accounts: [...accounts, secondExpense],
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+    transactions: [
+      transaction('savings-accessible-funded', split({ amount: 11, date: '2026-02-01', source: accessibleSavings, destination: expense })),
+      transaction('savings-restricted-funded', split({ amount: 12, date: '2026-02-02', source: restrictedSavings, destination: expense })),
+      transaction('liability-funded', split({ amount: 13, date: '2026-02-03', source: loan, destination: expense })),
+      transaction('revenue-not-expense', split({ amount: 20, date: '2026-02-04', source: revenue, destination: expense })),
+      transaction('expense-not-expense', split({ amount: 21, date: '2026-02-05', source: secondExpense, destination: expense })),
+      transaction('unknown-not-expense', split({ amount: 22, date: '2026-02-06', source: unknown, destination: expense })),
+    ],
+  })
+
+  const result = reconstructBalanceSeries({ ...baseArgs, entries: expenseLedger.entries, metric: 'expenses', monthKeys: ['2026-02'] })
+
+  assert.deepEqual(result.points, [
+    {
+      x: '2026-02-28',
+      value: 36,
+      transactionIds: ['liability-funded', 'savings-accessible-funded', 'savings-restricted-funded'],
+    },
+  ])
+  assert.deepEqual(result.fx.transactionIds, [])
+})
+
+test('uses only explicit fetch coverage and keeps missing account or FX values unavailable', () => {
   const missingBalanceAccounts = [{ ...checking, attributes: { ...checking.attributes, current_balance: null } }, revenue, expense]
   const missingBalance = reconstructBalanceSeries({ ...baseArgs, accounts: missingBalanceAccounts, metric: 'netWorth' })
   assert.deepEqual(
@@ -147,10 +178,24 @@ test('keeps months before ledger coverage and missing account or FX values unava
   assert.equal(missingBalance.currentPoint, null)
   assert.equal(missingBalance.reconciliation.status, 'unavailable')
 
+  const absentCoverage = reconstructBalanceSeries({ ...baseArgs, coverage: undefined, metric: 'expenses' })
+  assert.deepEqual(
+    absentCoverage.points.map(({ value }) => value),
+    [null, null, null, null],
+  )
+  assert.deepEqual(absentCoverage.coverage, { startMonth: null, endDate: null, completeMonths: [], unavailableMonths: ['2025-12', '2026-01', '2026-02', '2026-03'] })
+
+  const coveredEmpty = reconstructBalanceSeries({ ...baseArgs, entries: [], metric: 'expenses', monthKeys: ['2025-12', '2026-01'] })
+  assert.deepEqual(coveredEmpty.points, [
+    { x: '2025-12-31', value: 0, transactionIds: [] },
+    { x: '2026-01-31', value: 0, transactionIds: [] },
+  ])
+
   const januaryOnly = reconstructBalanceSeries({
     ...baseArgs,
     accounts: [checking, creditCard, revenue, expense],
     entries: ledger.entries.filter(({ monthKey }) => monthKey >= '2026-01'),
+    coverage: { startMonth: '2026-01', endDate: '2026-02-28' },
     metric: 'expenses',
     monthKeys: ['2025-12', '2026-01', '2026-02'],
   })
@@ -159,14 +204,20 @@ test('keeps months before ledger coverage and missing account or FX values unava
     { x: '2026-01-31', value: 100, transactionIds: ['january-expense'] },
     { x: '2026-02-28', value: 0, transactionIds: [] },
   ])
-  assert.deepEqual(januaryOnly.coverage, { startMonth: '2026-01', endDate: '2026-04-15', completeMonths: ['2026-01', '2026-02'], unavailableMonths: ['2025-12'] })
+  assert.deepEqual(januaryOnly.coverage, { startMonth: '2026-01', endDate: '2026-02-28', completeMonths: ['2026-01', '2026-02'], unavailableMonths: ['2025-12'] })
+
+  const truncatedBalance = reconstructBalanceSeries({ ...baseArgs, coverage: { startMonth: '2025-12', endDate: '2026-03-31' }, metric: 'netWorth' })
+  assert.deepEqual(
+    truncatedBalance.points.map(({ value }) => value),
+    [null, null, null, null],
+  )
 
   const missingFxEntry = {
     ...ledger.entries.find(({ transactionId }) => transactionId === 'january-expense'),
     value: null,
     conversion: { mode: 'unavailable', sourceCurrency: 'EUR', missingCurrency: 'EUR' },
   }
-  const missingFx = reconstructBalanceSeries({ ...baseArgs, entries: [ledger.entries[0], missingFxEntry], metric: 'expenses', monthKeys: ['2025-12', '2026-01'] })
+  const missingFx = reconstructBalanceSeries({ ...baseArgs, entries: [missingFxEntry], metric: 'expenses', monthKeys: ['2025-12', '2026-01'] })
   assert.deepEqual(
     missingFx.points.map(({ value }) => value),
     [0, null],
@@ -174,7 +225,7 @@ test('keeps months before ledger coverage and missing account or FX values unava
   assert.deepEqual(missingFx.fx, { isEstimated: false, missingCurrencies: ['EUR'], transactionIds: ['january-expense'] })
 })
 
-test('converts fresh anchors with current rates and uses one minor unit for reconciliation', () => {
+test('converts fresh anchors and reconciles only post-marker movements through the same as-of date', () => {
   const euroChecking = account({ id: 'euro-checking', balance: '90', currencyCode: 'EUR' })
   const converted = reconstructBalanceSeries({
     ...baseArgs,
@@ -187,31 +238,46 @@ test('converts fresh anchors with current rates and uses one minor unit for reco
   assert.deepEqual(converted.currentPoint, { x: '2026-04-15', value: 100, transactionIds: [], isEstimated: true })
   assert.deepEqual(converted.fx, { isEstimated: true, missingCurrencies: [], transactionIds: [] })
 
-  const futureEntry = buildAnalyticsLedger({
-    accounts: [checking, expense],
-    transactions: [transaction('future-expense', split({ amount: 0.02, date: '2026-04-16', source: checking, destination: expense }))],
+  const staleChecking = account({ id: 'stale-checking', balance: '870', balanceDate: '2026-04-10T23:59:59-04:00' })
+  const reconciliationEntries = buildAnalyticsLedger({
+    accounts: [staleChecking, expense],
+    transactions: [
+      transaction('same-snapshot-expense', split({ amount: 20, date: '2026-04-12', source: staleChecking, destination: expense })),
+      transaction('post-as-of-expense', split({ amount: 30, date: '2026-04-16', source: staleChecking, destination: expense })),
+    ],
     displayCurrencyCode: 'USD',
     primaryCurrencyCode: 'USD',
     rates: { USD: 1 },
   }).entries
-  const mismatch = reconstructBalanceSeries({ ...baseArgs, accounts: [checking, expense], entries: [ledger.entries[0], ...futureEntry], metric: 'netWorth', monthKeys: ['2026-03'] })
-  assert.equal(mismatch.points[0].value, 870)
+  const mismatch = reconstructBalanceSeries({ ...baseArgs, accounts: [staleChecking, expense], entries: reconciliationEntries, metric: 'netWorth', monthKeys: ['2026-03'] })
   assert.deepEqual(mismatch.reconciliation, {
     status: 'mismatch',
     anchorValue: 870,
-    reconstructedValue: 870.02,
-    delta: 0.02,
-    accounts: [{ id: 'checking', anchorValue: 870, reconstructedValue: 870.02, delta: 0.02, transactionIds: ['future-expense'] }],
+    reconstructedValue: 850,
+    delta: -20,
+    accounts: [{ id: 'stale-checking', anchorValue: 870, reconstructedValue: 850, delta: -20, transactionIds: ['same-snapshot-expense'] }],
   })
 
+  const toleranceEntries = [{ ...reconciliationEntries[0], value: 0.01 }, reconciliationEntries[1]]
   const withinTolerance = reconstructBalanceSeries({
     ...baseArgs,
-    accounts: [checking, expense],
-    entries: [ledger.entries[0], { ...futureEntry[0], value: 0.01 }],
+    accounts: [staleChecking, expense],
+    entries: toleranceEntries,
     metric: 'netWorth',
     monthKeys: ['2026-03'],
   })
   assert.equal(withinTolerance.reconciliation.status, 'ok')
+
+  const noMarker = account({ id: 'no-marker', balance: '50', balanceDate: null })
+  const noMarkerEntry = buildAnalyticsLedger({
+    accounts: [noMarker, expense],
+    transactions: [transaction('unprovable-expense', split({ amount: 10, date: '2026-04-12', source: noMarker, destination: expense }))],
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+  }).entries
+  const noMarkerResult = reconstructBalanceSeries({ ...baseArgs, accounts: [noMarker, expense], entries: noMarkerEntry, metric: 'netWorth', monthKeys: [] })
+  assert.deepEqual(noMarkerResult.reconciliation, { status: 'ok', anchorValue: 50, reconstructedValue: 50, delta: 0, accounts: [] })
 })
 
 test('normalizes liability signs per account without rounding away sub-minor-unit balances', () => {

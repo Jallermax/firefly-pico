@@ -59,13 +59,15 @@ const aggregateAccountPoints = ({ metric, accountBreakdown, monthKeys, coverage 
   })
 
 const relevantEntries = (entries, accountIds, metric) => {
-  if (metric === 'expenses') return entries.filter(({ destinationKind }) => destinationKind === 'expense')
+  if (metric === 'expenses') return entries.filter(isQualifyingExpenseEntry)
   return entries.filter((entry) => accountIds.has(idOf(entry?.sourceAccount?.id)) || accountIds.has(idOf(entry?.destinationAccount?.id)))
 }
 
+const isQualifyingExpenseEntry = ({ sourceKind, destinationKind }) => destinationKind === 'expense' && ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(sourceKind)
+
 const expensePoint = ({ entries, monthKey, covered }) => {
   const x = monthEnd(monthKey)
-  const qualifying = entries.filter((entry) => entry.monthKey === monthKey && entry.destinationKind === 'expense')
+  const qualifying = entries.filter((entry) => entry.monthKey === monthKey && isQualifyingExpenseEntry(entry))
   const transactionIds = unique(qualifying.map(({ transactionId }) => transactionId))
   if (!covered || qualifying.some(({ value }) => !Number.isFinite(value))) return { x, value: null, transactionIds }
   const value = cleanNumber(qualifying.reduce((total, { value }) => total + Math.abs(value), 0))
@@ -82,14 +84,26 @@ const reconcile = ({ metric, accountBreakdown, asOfDate, entries, currencyDecima
   if (metric === 'expenses') return { status: 'unavailable', anchorValue: null, reconstructedValue: null, delta: null, accounts: [] }
 
   const reconstructedAccounts = accountBreakdown.map((account) => {
-    const point = pointForAccount({ account, anchorValue: account.anchorValue, entries, pointDate: asOfDate, covered: true })
-    const delta = Number.isFinite(point.value) && Number.isFinite(account.anchorValue) ? cleanNumber(point.value - account.anchorValue) : null
+    const marker = dateKey(account.currentBalanceDate)
+    const movements =
+      marker && marker <= asOfDate
+        ? entries
+            .map((entry) => movementFor(entry, account.id))
+            .filter(Boolean)
+            .filter(({ entry }) => entry.date > marker && entry.date <= asOfDate)
+        : []
+    const transactionIds = unique(movements.map(({ entry }) => entry.transactionId))
+    const reconstructedValue =
+      Number.isFinite(account.anchorValue) && movements.every(({ delta }) => Number.isFinite(delta))
+        ? cleanNumber(account.anchorValue + movements.reduce((total, { delta }) => total + delta, 0))
+        : null
+    const delta = Number.isFinite(reconstructedValue) && Number.isFinite(account.anchorValue) ? cleanNumber(reconstructedValue - account.anchorValue) : null
     return {
       id: account.id,
       anchorValue: account.anchorValue,
-      reconstructedValue: point.value,
+      reconstructedValue,
       delta,
-      transactionIds: point.transactionIds,
+      transactionIds,
     }
   })
   const anchorValue = aggregateAccounts({ metric, accounts: accountBreakdown, field: 'anchorValue' })
@@ -110,17 +124,34 @@ const reconcile = ({ metric, accountBreakdown, asOfDate, entries, currencyDecima
   }
 }
 
-export function reconstructBalanceSeries({ accounts = [], entries = [], metric, monthKeys = [], asOfDate, displayCurrencyCode, primaryCurrencyCode, rates, currencyDecimalPlaces = 2 }) {
+export function reconstructBalanceSeries({
+  accounts = [],
+  entries = [],
+  metric,
+  monthKeys = [],
+  asOfDate,
+  coverage: requestedCoverage,
+  displayCurrencyCode,
+  primaryCurrencyCode,
+  rates,
+  currencyDecimalPlaces = 2,
+}) {
   const normalizedAsOfDate = dateKey(asOfDate)
   const normalizedEntries = entries.map((entry) => ({ ...entry, date: dateKey(entry?.date), monthKey: entry?.monthKey ?? dateKey(entry?.date)?.slice(0, 7) })).filter(({ date }) => date)
-  const startMonth =
-    normalizedEntries
-      .map(({ monthKey }) => monthKey)
-      .filter(Boolean)
-      .sort()[0] ?? null
+  const startMonth = String(requestedCoverage?.startMonth ?? '').match(/^\d{4}-\d{2}$/)?.[0] ?? null
+  const coverageEndDate = dateKey(requestedCoverage?.endDate)
   const asOfMonth = normalizedAsOfDate?.slice(0, 7) ?? null
-  const completeMonths = monthKeys.filter((monthKey) => startMonth && monthKey >= startMonth && asOfMonth && monthKey < asOfMonth)
-  const coverage = { startMonth, endDate: normalizedAsOfDate, completeMonths, unavailableMonths: monthKeys.filter((monthKey) => !completeMonths.includes(monthKey)) }
+  const completeMonths = monthKeys.filter(
+    (monthKey) =>
+      startMonth &&
+      monthKey >= startMonth &&
+      asOfMonth &&
+      monthKey < asOfMonth &&
+      coverageEndDate &&
+      monthEnd(monthKey) <= coverageEndDate &&
+      (metric === 'expenses' || coverageEndDate >= normalizedAsOfDate),
+  )
+  const coverage = { startMonth, endDate: coverageEndDate, completeMonths, unavailableMonths: monthKeys.filter((monthKey) => !completeMonths.includes(monthKey)) }
   const selectedAccounts = metric === 'expenses' ? [] : eligibleAccounts(accounts, metric)
   const accountIds = new Set(selectedAccounts.map(({ id }) => idOf(id)).filter(Boolean))
   const metricEntries = relevantEntries(normalizedEntries, accountIds, metric)
@@ -149,6 +180,7 @@ export function reconstructBalanceSeries({ accounts = [], entries = [], metric, 
       id: idOf(account.id),
       kind: getAnalyticsAccountKind(account),
       anchorValue,
+      currentBalanceDate: account?.attributes?.current_balance_date,
       points,
       currentPoint: Number.isFinite(anchorValue) ? { x: normalizedAsOfDate, value: anchorValue, transactionIds: [], ...(converted.isEstimated ? { isEstimated: true } : {}) } : null,
       isEstimated: converted.isEstimated,
@@ -163,7 +195,7 @@ export function reconstructBalanceSeries({ accounts = [], entries = [], metric, 
   const currentMonthEntries = normalizedEntries.filter(({ date }) => asOfMonth && date <= normalizedAsOfDate && date.startsWith(asOfMonth))
   const currentPoint =
     metric === 'expenses'
-      ? startMonth && asOfMonth && asOfMonth >= startMonth
+      ? startMonth && asOfMonth && asOfMonth >= startMonth && coverageEndDate && coverageEndDate >= normalizedAsOfDate
         ? { ...expensePoint({ entries: currentMonthEntries, monthKey: asOfMonth, covered: true }), x: normalizedAsOfDate }
         : null
       : (() => {
