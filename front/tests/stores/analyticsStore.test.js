@@ -20,10 +20,15 @@ const currencyStore = reactive({ defaultCurrency: usd, exchangeRates: { rates: {
 const appStore = { syncEverythingIfOld: async () => {} }
 const accountRequests = []
 const transactionRequests = []
+const snapshotRequests = []
 const storageOverrides = new Map()
 let accountResponse = async () => ({ status: 200, data: [] })
 let transactionResult = []
 let transactionResponse = async () => ({ ok: true, data: transactionResult })
+let freshAccountResult = async () => ({ ok: true, data: structuredClone(accountStore.accountList) })
+let transactionLinkResult = async () => ({ ok: true, data: [] })
+let subscriptionResult = async () => ({ ok: true, data: [] })
+let recurringTransactionResult = async () => ({ ok: true, data: [] })
 let analyticsStore = null
 let now = new Date()
 
@@ -64,6 +69,11 @@ const moneyFlowPresentationKeys = [
 ]
 
 class AccountRepository {
+  async getAllWithMergeResult(options) {
+    snapshotRequests.push({ input: 'accounts', options })
+    return freshAccountResult(options)
+  }
+
   async getChartOverview(options) {
     accountRequests.push(options)
     return accountResponse(options)
@@ -82,6 +92,27 @@ class TransactionRepository {
   async getAllWithMergeResult(options) {
     transactionRequests.push(options)
     return transactionResponse(options)
+  }
+}
+
+class TransactionLinkRepository {
+  async getAll() {
+    snapshotRequests.push({ input: 'transaction-links' })
+    return transactionLinkResult()
+  }
+}
+
+class SubscriptionRepository {
+  async getAll(startDate, endDate) {
+    snapshotRequests.push({ input: 'subscriptions', startDate, endDate })
+    return subscriptionResult({ startDate, endDate })
+  }
+}
+
+class RecurringTransactionRepository {
+  async getAllWithMergeResult(options) {
+    snapshotRequests.push({ input: 'recurrences', options })
+    return recurringTransactionResult(options)
   }
 }
 
@@ -111,6 +142,11 @@ const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   accountStore,
   currencyStore,
   useStoredValue: (key, initialValue) => ref(structuredClone(storageOverrides.get(key) ?? initialValue)),
+  accountRepository: new AccountRepository(),
+  transactionRepository: new TransactionRepository(),
+  transactionLinkRepository: new TransactionLinkRepository(),
+  subscriptionRepository: new SubscriptionRepository(),
+  recurringTransactionRepository: new RecurringTransactionRepository(),
   createAccountRepository: () => new AccountRepository(),
   createTransactionRepository: () => new TransactionRepository(),
   transformTransactions: (transactions) => transactions,
@@ -201,10 +237,15 @@ beforeEach(() => {
   currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.9 } }
   accountRequests.length = 0
   transactionRequests.length = 0
+  snapshotRequests.length = 0
   storageOverrides.clear()
   accountResponse = async () => chartResponse(100)
   transactionResult = []
   transactionResponse = async () => ({ ok: true, data: transactionResult })
+  freshAccountResult = async () => ({ ok: true, data: [...accountStore.accountList] })
+  transactionLinkResult = async () => ({ ok: true, data: [] })
+  subscriptionResult = async () => ({ ok: true, data: [] })
+  recurringTransactionResult = async () => ({ ok: true, data: [] })
 })
 
 afterEach(() => analyticsStore?.$dispose())
@@ -1024,4 +1065,72 @@ test('keeps over-limit persisted selection intact until the UI reports and norma
     store.categorySummary.series.map(({ id }) => id),
     persistedIds.slice(0, 6),
   )
+})
+
+test('uses fresh analytics accounts without replacing the global account store', async () => {
+  const staleAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '900' } }
+  const freshAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '125' } }
+  accountStore.accountList = [staleAccount]
+  freshAccountResult = async () => ({ ok: true, data: [freshAccount] })
+  accountResponse = async () => chartResponse(125)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint.value, 125)
+  assert.equal(accountStore.accountList[0].attributes.current_balance, '900')
+  assert.equal(snapshotRequests.filter(({ input }) => input === 'accounts').length, 1)
+})
+
+test('keeps transaction analytics available when the fresh account input fails', async () => {
+  freshAccountResult = async () => ({ ok: false, data: [] })
+  transactionResult = [currentExpenseTransaction(25)]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.balanceState.status, 'error')
+  assert.equal(store.categoryState.status, 'ready')
+  assert.equal(store.financialTrend.expenses.currentActual, 25)
+})
+
+test('refresh reloads every analytics snapshot input', async () => {
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+  await store.refresh()
+
+  for (const input of ['accounts', 'transaction-links', 'subscriptions', 'recurrences']) {
+    assert.equal(snapshotRequests.filter(({ input: requestedInput }) => requestedInput === input).length, 2, input)
+  }
+  assert.equal(transactionRequests.length, 2)
+})
+
+test('publishes only one generation when an older snapshot resolves after refresh', async () => {
+  const olderAccounts = deferred()
+  const newerAccounts = deferred()
+  const olderTransactions = deferred()
+  const newerTransactions = deferred()
+  const accountResults = [olderAccounts, newerAccounts]
+  const transactionResults = [olderTransactions, newerTransactions]
+  freshAccountResult = () => accountResults.shift().promise
+  transactionResponse = () => transactionResults.shift().promise
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const initialLoad = store.init()
+  await waitFor(() => snapshotRequests.filter(({ input }) => input === 'accounts').length === 1)
+  const refreshedLoad = store.refresh()
+  await waitFor(() => snapshotRequests.filter(({ input }) => input === 'accounts').length === 2)
+
+  newerAccounts.resolve({ ok: true, data: [{ ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '250' } }] })
+  newerTransactions.resolve({ ok: true, data: [currentExpenseTransaction(25)] })
+  await refreshedLoad
+
+  olderAccounts.resolve({ ok: true, data: [{ ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '100' } }] })
+  olderTransactions.resolve({ ok: true, data: [currentExpenseTransaction(10)] })
+  await initialLoad
+
+  assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint.value, 250)
+  assert.equal(store.categorySummary.series[0].currentActual, 25)
 })

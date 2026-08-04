@@ -30,13 +30,14 @@ const emptyBalanceSeries = (id) => ({ id, points: [], isEstimated: false, missin
 export function createAnalyticsStore(id, useDependencies) {
   return defineStore(id, () => {
     const {
-      appStore,
       dashboardStore,
-      accountStore,
       currencyStore,
       useStoredValue,
-      createAccountRepository,
-      createTransactionRepository,
+      accountRepository,
+      transactionRepository,
+      transactionLinkRepository,
+      subscriptionRepository,
+      recurringTransactionRepository,
       transformTransactions,
       getAccountBalance,
       getAccountCurrencyCode,
@@ -111,7 +112,12 @@ export function createAnalyticsStore(id, useDependencies) {
     const categoryState = reactive({ status: 'idle', error: null, isStale: false })
     const flowState = reactive({ status: 'idle', error: null, isStale: false })
     const balanceCache = ref({})
+    const accounts = ref([])
     const transactions = ref([])
+    const transactionLinks = ref([])
+    const subscriptions = ref([])
+    const recurringTransactions = ref([])
+    const snapshotRates = ref({ ...currencyStore.exchangeRates?.rates })
     const categorySelectionInitialized = ref(false)
     const balanceRequests = new Map()
     let balanceRequestSequence = 0
@@ -119,6 +125,9 @@ export function createAnalyticsStore(id, useDependencies) {
     let transactionRequestSequence = 0
     let activeTransactionRequestToken = null
     let transactionRequest = null
+    let snapshotGeneration = 0
+    let activeSnapshotGeneration = 0
+    let snapshotRequest = null
 
     const displayCurrencyCode = computed(() => dashboardStore.dashboardCurrencyCode)
     const primaryCurrencyCode = computed(() => getCurrencyCode(currencyStore.defaultCurrency))
@@ -126,8 +135,8 @@ export function createAnalyticsStore(id, useDependencies) {
       const decimalPlaces = getCurrencyDecimalPlaces(dashboardStore.dashboardCurrency)
       return decimalPlaces === null || decimalPlaces === undefined ? 2 : Number(decimalPlaces)
     })
-    const rates = computed(() => currencyStore.exchangeRates?.rates ?? {})
-    const accountGroups = computed(() => getAnalyticsAccountGroups(accountStore.accountList))
+    const rates = computed(() => snapshotRates.value)
+    const accountGroups = computed(() => getAnalyticsAccountGroups(accounts.value))
     const categoryLedger = computed(() =>
       buildCategoryLedger({
         transactions: transactions.value,
@@ -282,7 +291,7 @@ export function createAnalyticsStore(id, useDependencies) {
       expenses: categoryUnavailableTransactionIds.value.length ? null : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() }),
     }))
 
-    async function fetchTransactions({ force = false } = {}) {
+    async function fetchTransactions({ force = false, generation = null } = {}) {
       const isReady = ['ready', 'empty'].includes(categoryState.status) && ['ready', 'empty'].includes(flowState.status)
       if (isReady && !force) return
       if (!force && transactionRequest) return transactionRequest.promise
@@ -297,10 +306,10 @@ export function createAnalyticsStore(id, useDependencies) {
         const today = getNow()
         const query = [`date_after:${DateUtils.dateToString(startOfMonth(subMonths(today, 24)))}`, `date_before:${DateUtils.dateToString(today)}`, ...getExcludedTransactionFilters()]
         const filters = [{ field: 'query', value: query.join(' ') }]
-        const repository = createTransactionRepository()
+        const repository = transactionRepository
         const getAll = (options) => repository.searchTransaction({ ...options, showLoading: false, showErrorToast: false })
         const result = await repository.getAllWithMergeResult({ filters, getAll, pageSize: 200 })
-        const ownsCurrentState = () => activeTransactionRequestToken === requestToken
+        const ownsCurrentState = () => activeTransactionRequestToken === requestToken && (generation === null || activeSnapshotGeneration === generation)
 
         if (!result.ok) {
           if (ownsCurrentState()) {
@@ -332,7 +341,7 @@ export function createAnalyticsStore(id, useDependencies) {
       }
     }
 
-    async function fetchBalances({ force = false } = {}) {
+    async function fetchBalances({ force = false, generation = null } = {}) {
       const snapshot = getBalanceSnapshot()
       const cached = balanceCache.value[snapshot.cacheKey]
       if (cached && !force) {
@@ -353,7 +362,7 @@ export function createAnalyticsStore(id, useDependencies) {
       Object.assign(balanceState, { status: 'loading', error: null, isStale: hasExistingData })
 
       const request = (async () => {
-        const repository = createAccountRepository()
+        const repository = accountRepository
         const responses = await Promise.all(
           BALANCE_GROUPS.map(async (metric) => {
             const accountIds = snapshot.groups[metric].map(({ id }) => id)
@@ -362,7 +371,7 @@ export function createAnalyticsStore(id, useDependencies) {
             return { metric, response }
           }),
         )
-        const ownsCurrentState = () => activeBalanceRequestToken === requestToken && balanceCacheKey.value === snapshot.cacheKey
+        const ownsCurrentState = () => activeBalanceRequestToken === requestToken && balanceCacheKey.value === snapshot.cacheKey && (generation === null || activeSnapshotGeneration === generation)
 
         if (responses.some(({ response }) => response && !isResponseSuccess(response))) {
           if (ownsCurrentState()) Object.assign(balanceState, { status: 'error', error: new Error('Analytics balance request failed'), isStale: hasExistingData })
@@ -446,14 +455,59 @@ export function createAnalyticsStore(id, useDependencies) {
       }
     }
 
+    async function loadSnapshot({ force = false } = {}) {
+      if (!force && snapshotRequest) return snapshotRequest
+
+      const generation = ++snapshotGeneration
+      activeSnapshotGeneration = generation
+      const today = getNow()
+      const startDate = DateUtils.dateToString(startOfMonth(subMonths(today, 24)))
+      const endDate = DateUtils.dateToString(today)
+      const ownsCurrentSnapshot = () => activeSnapshotGeneration === generation
+
+      const request = (async () => {
+        const [accountResult, transactionLinkResult, subscriptionResult, recurringTransactionResult, rateResult] = await Promise.all([
+          accountRepository.getAllWithMergeResult({ pageSize: 200 }),
+          transactionLinkRepository.getAll(),
+          subscriptionRepository.getAll(startDate, endDate),
+          recurringTransactionRepository.getAllWithMergeResult({ pageSize: 200 }),
+          (async () => {
+            await currencyStore.fetchExchangeRate?.()
+            return { ...currencyStore.exchangeRates?.rates }
+          })(),
+          fetchTransactions({ force, generation }),
+        ])
+        if (!ownsCurrentSnapshot()) return
+
+        snapshotRates.value = rateResult
+        transactionLinks.value = transactionLinkResult?.ok ? transactionLinkResult.data : []
+        subscriptions.value = subscriptionResult?.ok ? subscriptionResult.data : []
+        recurringTransactions.value = recurringTransactionResult?.ok ? recurringTransactionResult.data : []
+
+        if (!accountResult?.ok) {
+          accounts.value = []
+          Object.assign(balanceState, { status: 'error', error: new Error('Analytics account request failed'), isStale: false })
+          return
+        }
+
+        accounts.value = accountResult.data
+        await fetchBalances({ force, generation })
+      })()
+      snapshotRequest = { generation, promise: request }
+      try {
+        return await request
+      } finally {
+        if (snapshotRequest?.generation === generation) snapshotRequest = null
+      }
+    }
+
     async function init() {
-      await appStore.syncEverythingIfOld()
       if (!dashboardStore.dashboardCurrency?.id) dashboardStore.dashboardCurrency = currencyStore.defaultCurrency
-      await Promise.all([fetchBalances(), fetchTransactions()])
+      await loadSnapshot()
     }
 
     async function refresh() {
-      await Promise.allSettled([fetchBalances({ force: true }), fetchTransactions({ force: true })])
+      await loadSnapshot({ force: true })
     }
 
     async function retryBalance() {
@@ -461,11 +515,11 @@ export function createAnalyticsStore(id, useDependencies) {
     }
 
     async function retryCategory() {
-      await fetchTransactions({ force: true })
+      await loadSnapshot({ force: true })
     }
 
     async function retryFlow() {
-      await fetchTransactions({ force: true })
+      await loadSnapshot({ force: true })
     }
 
     watch(balancePeriod, () => fetchBalances())
@@ -486,6 +540,11 @@ export function createAnalyticsStore(id, useDependencies) {
       balanceState,
       categoryState,
       flowState,
+      accounts,
+      transactions,
+      transactionLinks,
+      subscriptions,
+      recurringTransactions,
       balanceSeries,
       balanceWarnings,
       financialTrend,
