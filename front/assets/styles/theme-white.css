@@ -2978,8 +2978,14 @@ body {
     pointer-events: all;
 }
 
+.analytics-flow-ribbon-corridor {
+    fill: none;
+    stroke: transparent;
+    pointer-events: stroke;
+}
+
 .analytics-flow-node:focus-visible .analytics-flow-interaction-target,
-.analytics-flow-ribbon:focus-visible .analytics-flow-interaction-target {
+.analytics-flow-ribbon:focus-visible .analytics-flow-ribbon-shape {
     stroke: var(--primary-action);
     stroke-width: 2;
 }

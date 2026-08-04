@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../utils/ChartUtils.js'
 import * as ChartUtils from '../../utils/ChartUtils.js'
-import { buildFinancialTrendChartSeries } from '../../utils/AnalyticsUtils.js'
+import { buildFinancialTrendChartSeries, limitMoneyFlowGraphDetail } from '../../utils/AnalyticsUtils.js'
 
 test('line geometry shares one x scale and keeps zero in range when needed', () => {
   const geometry = buildLineChartGeometry({
@@ -754,7 +754,7 @@ test('full mobile flow preserves baseline spacing and separate 44px interaction 
     true,
   )
   assert.equal(
-    geometry.ribbons.every(({ hitBox }) => hitBox.width >= 44 && hitBox.height >= 44),
+    geometry.ribbons.every(({ corridor }) => corridor.hitWidth >= 44 && corridor.path.startsWith('M ')),
     true,
   )
   assert.equal(geometry.width, 390)
@@ -762,6 +762,66 @@ test('full mobile flow preserves baseline spacing and separate 44px interaction 
     geometry.nodes.every(({ hitBox }) => hitBox.x >= 0 && hitBox.x + hitBox.width <= geometry.width),
     true,
   )
+})
+
+test('money flow ribbon hit corridors follow visible centerlines instead of broad bounds', () => {
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth: 1200, mode: 'full' })
+
+  for (const ribbon of geometry.ribbons) {
+    assert.equal(ribbon.hitBox, undefined)
+    assert.equal(ribbon.corridor.hitWidth, Math.max(44, ribbon.width))
+    assert.match(ribbon.corridor.path, /^M [-\d.]+ [-\d.]+ C [-\d.]+ [-\d.]+, [-\d.]+ [-\d.]+, [-\d.]+ [-\d.]+$/)
+  }
+})
+
+test('money flow packs node centers far enough apart for non-overlapping 44px targets', () => {
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({
+    nodes: [
+      ...Array.from({ length: 8 }, (_, index) => ({ id: `node:${index}`, layer: 0, kind: 'income', value: 0.01, transactionIds: [] })),
+      { id: 'dominant', layer: 1, kind: 'available', value: 1000, transactionIds: [] },
+    ],
+    links: [],
+    isDesktop: true,
+    renderedWidth: 900,
+    mode: 'full',
+  })
+  const centers = geometry.nodes
+    .filter(({ layer }) => layer === 0)
+    .map(({ hitBox }) => hitBox.y + hitBox.height / 2)
+    .sort((left, right) => left - right)
+
+  assert.equal(
+    centers.slice(1).every((center, index) => center - centers[index] >= 44),
+    true,
+  )
+})
+
+test('mobile mode measures localized labels, formatted values, and retained central labels', () => {
+  const localizedNodes = layeredGeometryGraph.nodes.map((node) => ({
+    ...node,
+    label: node.layer === 0 ? `Localized outer category ${node.id}` : node.id,
+    valueLabel: node.layer === 0 ? '123.456,78 EUR' : '12,00 EUR',
+  }))
+
+  assert.equal(ChartUtils.resolveMoneyFlowGraphMode({ nodes: localizedNodes, isDesktop: false, renderedWidth: 390 }), 'condensed')
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ nodes: localizedNodes, links: layeredGeometryGraph.links, isDesktop: false, renderedWidth: 390, mode: 'condensed' })
+
+  assert.equal(geometry.responsive.full.fits, false)
+  assert.equal(geometry.responsive.selected.fits, true)
+  assert.equal(
+    geometry.responsive.selected.layers.every(({ nodes }) => nodes.every(({ labelWidth, valueWidth, targetWidth }) => labelWidth > 0 && valueWidth > 0 && targetWidth >= 44)),
+    true,
+  )
+
+  const centralOverflow = ChartUtils.buildMoneyFlowGraphGeometry({
+    nodes: localizedNodes.map((node) => (node.id === 'available' ? { ...node, label: 'A localized central pool label that cannot share this mobile line with any peer' } : node)),
+    links: layeredGeometryGraph.links,
+    isDesktop: false,
+    renderedWidth: 390,
+    mode: 'condensed',
+  })
+  assert.equal(centralOverflow.responsive.selected.fits, false)
+  assert.deepEqual(centralOverflow.responsive.selected.overflowingNodeIds, ['available'])
 })
 
 test('crowded 390px flow condenses outer details without discarding their selection metadata', () => {
@@ -815,36 +875,82 @@ test('crowded 390px flow condenses outer details without discarding their select
   )
 })
 
-test('layered flow renderer uses accessible patterns and emits exact selected graph objects', () => {
+test('layered flow renderer uses filled ribbons and accessible patterns', () => {
   const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
 
   assert.match(component, /<path[^>]*:d="ribbon\.path" :fill="linkColor\(ribbon\)"/)
-  assert.doesNotMatch(component, /stroke-linecap|strokeWidth/)
   assert.match(component, /id="analytics-flow-refund-pattern"/)
   assert.match(component, /id="analytics-flow-savings-accessible-pattern"/)
   assert.match(component, /id="analytics-flow-savings-restricted-pattern"/)
-  assert.match(component, /defineEmits\(\['select-node', 'select-link', 'mode-change'\]\)/)
-  assert.match(component, /emit\('select-node', node\)/)
-  assert.match(component, /emit\('select-link', link\)/)
-  assert.match(component, /emit\('mode-change', value\)/)
-  assert.match(component, /linkAriaLabel[\s\S]*analytics\.flow\.source[\s\S]*analytics\.flow\.destination/)
   assert.doesNotMatch(component, /<details[\s\S]*analytics-flow-values/)
 })
 
-test('money flow hover, focus, tap, outside-dismiss, and keyboard behavior share pinned details', () => {
-  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
-  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+test('money flow interaction controller previews, pins, traverses, and dismisses real targets', () => {
+  const targets = [
+    { type: 'link', id: 'income-available' },
+    { type: 'node', id: 'available' },
+    { type: 'node', id: 'expenses' },
+  ]
+  let state = ChartUtils.resolveMoneyFlowInteraction({ action: { type: 'pointer-enter', target: targets[0] }, targets })
+  assert.deepEqual(state.active, targets[0])
 
-  assert.match(component, /resolveMoneyFlowItemDetails/)
-  assert.match(component, /const pinned = ref\(null\)/)
-  assert.match(component, /onClickOutside\(root, clearPinned\)/)
-  assert.match(component, /@keydown\.esc\.stop="clearPinned"/)
-  assert.match(component, /@keydown\.(?:left|up)\.prevent="focusRelative\(\$event, -1\)"/)
-  assert.match(component, /@keydown\.(?:right|down)\.prevent="focusRelative\(\$event, 1\)"/)
-  assert.match(component, /class="analytics-flow-hover-details"/)
-  assert.match(component, /profileStore\.showAnimations/)
-  assert.doesNotMatch(whiteCss, /(?:^|\n)\.analytics-flow-ribbon-shape\s*\{[^}]*transition:/s)
-  assert.match(whiteCss, /\.analytics-flow-animated \.analytics-flow-ribbon-shape\s*\{[^}]*transition:/s)
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'select', target: targets[0], contextNodes: layeredGeometryGraph.nodes }, targets })
+  assert.deepEqual(state.pinned, targets[0])
+  assert.deepEqual(state.selection, { ...targets[0], contextNodes: layeredGeometryGraph.nodes })
+
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'pointer-leave', target: targets[0] }, targets })
+  assert.deepEqual(state.active, targets[0])
+
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'focus', target: targets[1] }, targets })
+  assert.deepEqual(state.active, targets[1])
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'blur', target: targets[1] }, targets })
+  assert.deepEqual(state.active, targets[0])
+
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'move', target: targets[0], amount: -1 }, targets })
+  assert.deepEqual(state.focusTarget, targets[2])
+
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'outside' }, targets })
+  assert.equal(state.active, null)
+  assert.equal(state.pinned, null)
+  assert.equal(state.preview, null)
+
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'select', target: targets[1] }, targets })
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'escape' }, targets })
+  assert.equal(state.active, null)
+})
+
+test('limited Other selection keeps visible endpoint totals and projects exact transaction query input', () => {
+  const graph = {
+    nodes: [
+      { id: 'expenses', layer: 4, kind: 'expenses', value: 100, transactionIds: ['food', 'home', 'travel'] },
+      { id: 'expense:food', layer: 5, kind: 'expenseCategory', refId: 'food', value: 60, transactionIds: ['food'] },
+      { id: 'expense:home', layer: 5, kind: 'expenseCategory', refId: 'home', value: 30, transactionIds: ['home'] },
+      { id: 'expense:travel', layer: 5, kind: 'expenseCategory', refId: 'travel', value: 10, transactionIds: ['travel'], refundCoverage: { value: 4, transactionIds: ['refund'] } },
+    ],
+    links: [
+      { id: 'food-link', sourceId: 'expenses', targetId: 'expense:food', kind: 'expense', fundingPool: 'available', value: 60, transactionIds: ['food'] },
+      { id: 'home-link', sourceId: 'expenses', targetId: 'expense:home', kind: 'expense', fundingPool: 'available', value: 30, transactionIds: ['home'] },
+      { id: 'travel-link', sourceId: 'expenses', targetId: 'expense:travel', kind: 'expense', fundingPool: 'available', value: 10, transactionIds: ['travel'] },
+    ],
+  }
+  const limited = limitMoneyFlowGraphDetail({ graph, detailLevel: 1 })
+  const otherLink = limited.links.find(({ targetId }) => targetId.startsWith('other:'))
+  const interaction = ChartUtils.resolveMoneyFlowInteraction({
+    action: { type: 'select', target: { type: 'link', id: otherLink.id }, contextNodes: limited.nodes },
+    targets: [{ type: 'link', id: otherLink.id }],
+  })
+  const details = ChartUtils.resolveMoneyFlowItemDetails({ item: otherLink, nodes: interaction.selection.contextNodes })
+  const selection = ChartUtils.projectMoneyFlowTransactionSelection({ item: limited.nodes.find(({ id }) => id === otherLink.targetId), rows: [otherLink] })
+
+  assert.equal(details.sourcePercent, 0.4)
+  assert.equal(details.destinationPercent, 1)
+  assert.deepEqual(selection, { transactionIds: ['home', 'refund', 'travel'], queryValue: 'home,refund,travel' })
+})
+
+test('money flow value and percentage formatting use the selected locale consistently', () => {
+  assert.equal(ChartUtils.formatMoneyFlowValue({ value: 1234.5, language: 'de-DE', currencyCode: 'EUR', showAccountAmounts: true, showDecimal: true }), '1.234,50 EUR')
+  assert.equal(ChartUtils.formatMoneyFlowPercent({ value: 0.125, language: 'de-DE' }), '12,5 %')
+  assert.equal(ChartUtils.formatMoneyFlowValue({ value: 1234.5, language: 'de-DE', currencyCode: 'EUR', showAccountAmounts: false, showDecimal: true }), '****** EUR')
 })
 
 test('money flow card uses the layered graph, persisted detail control, and one exact-details popup', () => {
@@ -861,8 +967,6 @@ test('money flow card uses the layered graph, persisted detail control, and one 
   assert.match(component, /resolveMoneyFlowItemDetails/)
   assert.match(component, /selectedItemDetails\.sourcePercent/)
   assert.match(component, /selectedItemDetails\.destinationPercent/)
-  assert.match(component, /TransactionFilterUtils\.filters\.id\.toUrl/)
-  assert.match(component, /selectedItem\.value\?\.refundCoverage\?\.transactionIds/)
   assert.doesNotMatch(component, /analytics-flow-fx|flow\.meta\.displayCurrencyCode/)
 })
 

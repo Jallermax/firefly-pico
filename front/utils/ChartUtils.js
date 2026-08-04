@@ -145,6 +145,7 @@ const MONEY_FLOW_GRAPH_GAP = 28
 const MONEY_FLOW_GRAPH_HIT_SIZE = 44
 const MONEY_FLOW_GRAPH_NODE_THICKNESS = 12
 const MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER = 192
+const MONEY_FLOW_GRAPH_LABEL_GAP = 8
 
 const moneyFlowGraphWidth = (renderedWidth, isDesktop) => (Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : isDesktop ? 1000 : 360)
 const moneyFlowGraphLayerGroups = (nodes) => {
@@ -156,15 +157,44 @@ const moneyFlowGraphLayerGroups = (nodes) => {
 const moneyFlowGraphOuterCategory = ({ layer, kind }, firstLayer, lastLayer) =>
   (layer === firstLayer && ['income', 'refund', 'otherIncome', 'otherRefund'].includes(kind)) || (layer === lastLayer && ['expenseCategory', 'otherExpenseCategory'].includes(kind))
 
+const moneyFlowGraphVisibleNodes = (nodes, mode) => {
+  if (mode !== 'condensed') return nodes
+  const layers = [...new Set(nodes.map(({ layer }) => layer))].sort((left, right) => left - right)
+  return nodes.filter((node) => !moneyFlowGraphOuterCategory(node, layers[0], layers.at(-1)))
+}
+
+const moneyFlowGraphTextWidth = (value, fontSize) => (String(value ?? '').length ? String(value).length * fontSize * 0.62 + 8 : 0)
+
+export function resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth, mode = 'full' }) {
+  const width = moneyFlowGraphWidth(renderedWidth, isDesktop)
+  const visibleNodes = moneyFlowGraphVisibleNodes(nodes, mode)
+  const layers = moneyFlowGraphLayerGroups(visibleNodes).map(({ layer, nodes: entries }) => {
+    const measuredNodes = entries.map((node) => {
+      const labelWidth = moneyFlowGraphTextWidth(node.label ?? node.refId ?? node.id, 13)
+      const valueWidth = moneyFlowGraphTextWidth(node.valueLabel ?? node.value, 12)
+      return { id: node.id, labelWidth, valueWidth, targetWidth: Math.max(MONEY_FLOW_GRAPH_HIT_SIZE, labelWidth, valueWidth) }
+    })
+    return {
+      layer,
+      requiredWidth: MONEY_FLOW_GRAPH_PADDING * 2 + measuredNodes.reduce((total, node) => total + node.targetWidth, 0) + Math.max(0, measuredNodes.length - 1) * MONEY_FLOW_GRAPH_LABEL_GAP,
+      nodes: measuredNodes,
+    }
+  })
+  const requiredWidth = Math.max(0, ...layers.map((layer) => layer.requiredWidth))
+  return {
+    mode,
+    fits: isDesktop || requiredWidth <= width,
+    renderedWidth: width,
+    requiredWidth,
+    overflowingNodeIds: isDesktop ? [] : layers.flatMap(({ nodes: entries }) => entries.filter(({ targetWidth }) => targetWidth + MONEY_FLOW_GRAPH_PADDING * 2 > width).map(({ id }) => id)),
+    layers,
+  }
+}
+
 export function resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth }) {
   if (isDesktop) return 'full'
-  const width = moneyFlowGraphWidth(renderedWidth, false)
+  if (resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth, mode: 'full' }).fits) return 'full'
   const groups = moneyFlowGraphLayerGroups(nodes)
-  const requiredWidth = Math.max(
-    0,
-    ...groups.map(({ nodes: entries }) => entries.length * MONEY_FLOW_GRAPH_HIT_SIZE + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP + MONEY_FLOW_GRAPH_PADDING * 2),
-  )
-  if (requiredWidth <= width) return 'full'
   const firstLayer = groups[0]?.layer
   const lastLayer = groups.at(-1)?.layer
   return nodes.some((node) => moneyFlowGraphOuterCategory(node, firstLayer, lastLayer)) ? 'condensed' : 'full'
@@ -185,9 +215,11 @@ const moneyFlowGraphRibbonPath = ({ source, target, sourceOffset, targetOffset, 
     const targetStart = target.y + targetOffset
     const targetEnd = targetStart + width
     const middleX = (sourceX + targetX) / 2
+    const sourceCenter = sourceStart + width / 2
+    const targetCenter = targetStart + width / 2
     return {
       path: `M ${sourceX} ${sourceStart} C ${middleX} ${sourceStart}, ${middleX} ${targetStart}, ${targetX} ${targetStart} L ${targetX} ${targetEnd} C ${middleX} ${targetEnd}, ${middleX} ${sourceEnd}, ${sourceX} ${sourceEnd} Z`,
-      bounds: { x: Math.min(sourceX, targetX), y: Math.min(sourceStart, targetStart), width: Math.abs(targetX - sourceX), height: Math.max(sourceEnd, targetEnd) - Math.min(sourceStart, targetStart) },
+      corridor: { path: `M ${sourceX} ${sourceCenter} C ${middleX} ${sourceCenter}, ${middleX} ${targetCenter}, ${targetX} ${targetCenter}`, hitWidth: Math.max(MONEY_FLOW_GRAPH_HIT_SIZE, width) },
     }
   }
 
@@ -198,15 +230,19 @@ const moneyFlowGraphRibbonPath = ({ source, target, sourceOffset, targetOffset, 
   const targetStart = target.x + targetOffset
   const targetEnd = targetStart + width
   const middleY = (sourceY + targetY) / 2
+  const sourceCenter = sourceStart + width / 2
+  const targetCenter = targetStart + width / 2
   return {
     path: `M ${sourceStart} ${sourceY} C ${sourceStart} ${middleY}, ${targetStart} ${middleY}, ${targetStart} ${targetY} L ${targetEnd} ${targetY} C ${targetEnd} ${middleY}, ${sourceEnd} ${middleY}, ${sourceEnd} ${sourceY} Z`,
-    bounds: { x: Math.min(sourceStart, targetStart), y: Math.min(sourceY, targetY), width: Math.max(sourceEnd, targetEnd) - Math.min(sourceStart, targetStart), height: Math.abs(targetY - sourceY) },
+    corridor: { path: `M ${sourceCenter} ${sourceY} C ${sourceCenter} ${middleY}, ${targetCenter} ${middleY}, ${targetCenter} ${targetY}`, hitWidth: Math.max(MONEY_FLOW_GRAPH_HIT_SIZE, width) },
   }
 }
 
 export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedWidth, mode }) {
   const width = moneyFlowGraphWidth(renderedWidth, isDesktop)
   const resolvedMode = mode ?? resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth: width })
+  const fullFit = resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: width, mode: 'full' })
+  const selectedFit = resolvedMode === 'full' ? fullFit : resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: width, mode: resolvedMode })
   const layers = [...new Set(nodes.map(({ layer }) => layer))].sort((left, right) => left - right)
   const firstLayer = layers[0]
   const lastLayer = layers.at(-1)
@@ -224,15 +260,27 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
     incoming.set(link.targetId, incoming.get(link.targetId) + Math.abs(link.value))
   }
   const spanValues = new Map(visibleNodes.map((node) => [node.id, Math.max(Math.abs(Number(node.value) || 0), incoming.get(node.id), outgoing.get(node.id))]))
-  const maximumGapExtent = Math.max(0, ...layerGroups.map(({ nodes: entries }) => Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP))
-  const crossExtent = isDesktop ? 280 + maximumGapExtent : Math.max(1, width - MONEY_FLOW_GRAPH_PADDING * 2)
+  const targetWidths = new Map(selectedFit.layers.flatMap(({ nodes: entries }) => entries.map(({ id, targetWidth }) => [id, targetWidth])))
+  const crossExtent = isDesktop ? 280 : Math.max(1, width - MONEY_FLOW_GRAPH_PADDING * 2)
   const scaleCandidates = layerGroups.flatMap(({ nodes: entries }) => {
     const total = entries.reduce((sum, node) => sum + spanValues.get(node.id), 0)
-    const available = crossExtent - Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP
-    return total > 0 ? [Math.max(0, available) / total] : []
+    return total > 0 ? [crossExtent / total] : []
   })
-  const scale = scaleCandidates.length ? Math.min(...scaleCandidates) : 1
-  const layerCrossExtents = layerGroups.map(({ nodes: entries }) => entries.reduce((sum, node) => sum + spanValues.get(node.id) * scale, 0) + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP)
+  const maximumScale = scaleCandidates.length ? Math.min(...scaleCandidates) : 1
+  const nodeFootprint = (node, candidateScale) => Math.max(spanValues.get(node.id) * candidateScale, isDesktop ? MONEY_FLOW_GRAPH_HIT_SIZE : (targetWidths.get(node.id) ?? MONEY_FLOW_GRAPH_HIT_SIZE))
+  const groupExtent = (entries, candidateScale) => entries.reduce((sum, node) => sum + nodeFootprint(node, candidateScale), 0) + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_LABEL_GAP
+  let scale = maximumScale
+  if (!isDesktop && layerGroups.some(({ nodes: entries }) => groupExtent(entries, scale) > crossExtent)) {
+    let lower = 0
+    let upper = maximumScale
+    for (let index = 0; index < 40; index++) {
+      const candidate = (lower + upper) / 2
+      if (layerGroups.every(({ nodes: entries }) => groupExtent(entries, candidate) <= crossExtent)) lower = candidate
+      else upper = candidate
+    }
+    scale = lower
+  }
+  const layerCrossExtents = layerGroups.map(({ nodes: entries }) => groupExtent(entries, scale))
   const height = isDesktop ? Math.max(360, Math.max(0, ...layerCrossExtents) + MONEY_FLOW_GRAPH_PADDING * 2) : Math.max(280, layerGroups.length * 104 + MONEY_FLOW_GRAPH_PADDING * 2)
   const directionExtent = isDesktop ? width : height
   const layerStart = isDesktop ? MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER + MONEY_FLOW_GRAPH_NODE_THICKNESS / 2 : 44
@@ -241,13 +289,15 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
   const graphNodes = []
 
   layerGroups.forEach(({ nodes: entries }, layerIndex) => {
-    const totalExtent = entries.reduce((sum, node) => sum + spanValues.get(node.id) * scale, 0) + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP
+    const totalExtent = groupExtent(entries, scale)
     let cursor = ((isDesktop ? height : width) - totalExtent) / 2
     for (const node of entries) {
       const span = spanValues.get(node.id) * scale
+      const footprint = nodeFootprint(node, scale)
+      const crossStart = cursor + (footprint - span) / 2
       const geometry = isDesktop
-        ? { x: layerPosition(layerIndex) - MONEY_FLOW_GRAPH_NODE_THICKNESS / 2, y: cursor, width: MONEY_FLOW_GRAPH_NODE_THICKNESS, height: span }
-        : { x: cursor, y: layerPosition(layerIndex) - MONEY_FLOW_GRAPH_NODE_THICKNESS / 2, width: span, height: MONEY_FLOW_GRAPH_NODE_THICKNESS }
+        ? { x: layerPosition(layerIndex) - MONEY_FLOW_GRAPH_NODE_THICKNESS / 2, y: crossStart, width: MONEY_FLOW_GRAPH_NODE_THICKNESS, height: span }
+        : { x: crossStart, y: layerPosition(layerIndex) - MONEY_FLOW_GRAPH_NODE_THICKNESS / 2, width: span, height: MONEY_FLOW_GRAPH_NODE_THICKNESS }
       graphNodes.push({
         ...node,
         node,
@@ -257,7 +307,7 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
         outgoingWidth: outgoing.get(node.id) * scale,
         hitBox: moneyFlowGraphHitBox(geometry),
       })
-      cursor += span + MONEY_FLOW_GRAPH_GAP
+      cursor += footprint + MONEY_FLOW_GRAPH_LABEL_GAP
     }
   })
 
@@ -287,9 +337,9 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
       const ribbonWidth = Math.abs(link.value) * scale
       const sourceOffset = sourceOffsets.get(link)
       const targetOffset = targetOffsets.get(link)
-      const { path, bounds } = moneyFlowGraphRibbonPath({ source, target, sourceOffset, targetOffset, width: ribbonWidth, isDesktop })
+      const { path, corridor } = moneyFlowGraphRibbonPath({ source, target, sourceOffset, targetOffset, width: ribbonWidth, isDesktop })
       const transferSpan = isDesktop ? target.x - (source.x + source.width) : target.y - (source.y + source.height)
-      return { ...link, link, width: ribbonWidth, sourceWidth: ribbonWidth, targetWidth: ribbonWidth, transferSpan, path, source, target, hitBox: moneyFlowGraphHitBox(bounds) }
+      return { ...link, link, width: ribbonWidth, sourceWidth: ribbonWidth, targetWidth: ribbonWidth, transferSpan, path, corridor, source, target }
     })
 
   const baselines = layerGroups.flatMap(({ nodes: entries }) => {
@@ -308,6 +358,7 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
     viewBox: `0 0 ${width} ${height}`,
     scale,
     baselineSpacing,
+    responsive: { full: fullFit, selected: selectedFit },
     nodes: graphNodes,
     ribbons,
     pools: graphNodes.filter(({ kind }) => ['available', 'savings'].includes(kind)),
@@ -329,6 +380,56 @@ export function resolveMoneyFlowItemDetails({ item, nodes }) {
     bridge: item.details?.availableToSavings && item.details?.savingsToAvailable ? item.details : null,
     transactionIds: [...new Set([...(item.transactionIds ?? []), ...(refundCoverage?.transactionIds ?? [])])].sort(),
   }
+}
+
+export function resolveMoneyFlowInteraction({ state = {}, action, targets = [] }) {
+  let preview = state.preview ?? null
+  let pinned = state.pinned ?? null
+  let selection = null
+  let focusTarget = null
+
+  if (['activate', 'pointer-enter', 'focus'].includes(action.type)) preview = action.target
+  if (['deactivate', 'pointer-leave', 'blur'].includes(action.type)) preview = null
+  if (action.type === 'select') {
+    pinned = action.target
+    selection = { ...action.target, contextNodes: action.contextNodes ?? [] }
+  }
+  if (['dismiss', 'outside', 'escape'].includes(action.type)) {
+    preview = null
+    pinned = null
+  }
+  if (action.type === 'move' && targets.length) {
+    const currentIndex = targets.findIndex(({ type, id }) => type === action.target?.type && id === action.target?.id)
+    const startIndex = currentIndex < 0 ? 0 : currentIndex
+    focusTarget = targets[(startIndex + action.amount + targets.length) % targets.length]
+  }
+
+  return { preview, pinned, active: preview ?? pinned, selection, focusTarget }
+}
+
+export function projectMoneyFlowTransactionSelection({ item = {}, rows = [] }) {
+  const evidence = [item, ...rows]
+  const transactionIds = [
+    ...new Set(
+      evidence.flatMap((entry) => [
+        ...(entry.transactionIds ?? []),
+        ...(entry.refundCoverage?.transactionIds ?? []),
+        ...(entry.details?.availableToSavings?.transactionIds ?? []),
+        ...(entry.details?.savingsToAvailable?.transactionIds ?? []),
+      ]),
+    ),
+  ].sort()
+  return { transactionIds, queryValue: transactionIds.join(',') }
+}
+
+export function formatMoneyFlowValue({ value, language, currencyCode, showAccountAmounts = true, showDecimal = true }) {
+  if (!Number.isFinite(value)) return ''
+  const formatted = showAccountAmounts ? new Intl.NumberFormat(language, { minimumFractionDigits: showDecimal ? 2 : 0, maximumFractionDigits: showDecimal ? 2 : 0 }).format(value) : '******'
+  return [formatted, currencyCode].filter(Boolean).join(' ')
+}
+
+export function formatMoneyFlowPercent({ value, language }) {
+  return new Intl.NumberFormat(language, { style: 'percent', maximumFractionDigits: 1 }).format(value)
 }
 
 export function resolveMoneyFlowSemanticColor(item) {

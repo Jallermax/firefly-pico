@@ -1,6 +1,13 @@
 <template>
-  <div ref="root" class="analytics-flow" :class="{ 'analytics-flow-mobile': !appStore.isDesktopLayout, 'analytics-flow-animated': profileStore.showAnimations }" @keydown.esc.stop="clearPinned">
-    <svg class="analytics-flow-svg" :viewBox="layout.viewBox" :style="{ aspectRatio: `${layout.width} / ${layout.height}` }" role="group" :aria-label="props.ariaLabel" @pointerdown.self="clearPinned">
+  <div ref="root" class="analytics-flow" :class="{ 'analytics-flow-mobile': !appStore.isDesktopLayout, 'analytics-flow-animated': profileStore.showAnimations }" @keydown.esc.stop="dismiss('escape')">
+    <svg
+      class="analytics-flow-svg"
+      :viewBox="layout.viewBox"
+      :style="{ aspectRatio: `${layout.width} / ${layout.height}` }"
+      role="group"
+      :aria-label="props.ariaLabel"
+      @pointerdown.self="dismiss('outside')"
+    >
       <defs>
         <pattern id="analytics-flow-refund-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
           <path class="analytics-flow-pattern-line" d="M -2 2 L 2 -2 M 0 8 L 8 0 M 6 10 L 10 6" />
@@ -16,15 +23,16 @@
         v-for="ribbon in layout.ribbons"
         :key="ribbon.id"
         class="analytics-flow-ribbon"
-        data-flow-target
+        :data-flow-target="ribbon.id"
+        data-flow-type="link"
         role="button"
         tabindex="0"
         :aria-label="linkAriaLabel(ribbon.link)"
-        @focus="activateLink(ribbon)"
-        @blur="clearPreview"
-        @pointerenter="activateLink(ribbon)"
-        @pointerleave="clearPreview"
-        @pointerdown="activateLink(ribbon)"
+        @focus="activateLink(ribbon, 'focus')"
+        @blur="deactivate('blur')"
+        @pointerenter="activateLink(ribbon, 'pointer-enter')"
+        @pointerleave="deactivate('pointer-leave')"
+        @pointerdown="activateLink(ribbon, 'pointer-enter')"
         @click="selectLink(ribbon)"
         @keydown.enter.prevent="selectLink(ribbon)"
         @keydown.space.prevent="selectLink(ribbon)"
@@ -34,7 +42,7 @@
         @keydown.down.prevent="focusRelative($event, 1)"
       >
         <title>{{ linkAriaLabel(ribbon.link) }}</title>
-        <rect class="analytics-flow-interaction-target" :x="ribbon.hitBox.x" :y="ribbon.hitBox.y" :width="ribbon.hitBox.width" :height="ribbon.hitBox.height" fill="transparent" />
+        <path class="analytics-flow-interaction-target analytics-flow-ribbon-corridor" :d="ribbon.corridor.path" :stroke-width="ribbon.corridor.hitWidth" vector-effect="non-scaling-stroke" />
         <path class="analytics-flow-ribbon-shape" :d="ribbon.path" :fill="linkColor(ribbon)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
         <path v-if="itemPattern(ribbon.link)" class="analytics-flow-ribbon-pattern" :d="ribbon.path" :fill="itemPattern(ribbon.link)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
       </g>
@@ -43,15 +51,16 @@
         v-for="node in layout.nodes"
         :key="node.id"
         class="analytics-flow-node"
-        data-flow-target
+        :data-flow-target="node.id"
+        data-flow-type="node"
         role="button"
         tabindex="0"
         :aria-label="nodeAriaLabel(node.node)"
-        @focus="activateNode(node)"
-        @blur="clearPreview"
-        @pointerenter="activateNode(node)"
-        @pointerleave="clearPreview"
-        @pointerdown="activateNode(node)"
+        @focus="activateNode(node, 'focus')"
+        @blur="deactivate('blur')"
+        @pointerenter="activateNode(node, 'pointer-enter')"
+        @pointerleave="deactivate('pointer-leave')"
+        @pointerdown="activateNode(node, 'pointer-enter')"
         @click="selectNode(node)"
         @keydown.enter.prevent="selectNode(node)"
         @keydown.space.prevent="selectNode(node)"
@@ -106,12 +115,13 @@ import { onClickOutside, useElementSize } from '@vueuse/core'
 import { useAppStore } from '~/stores/appStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { limitMoneyFlowGraphDetail } from '~/utils/AnalyticsUtils.js'
-import { buildMoneyFlowGraphGeometry, resolveMoneyFlowGraphMode, resolveMoneyFlowItemDetails } from '~/utils/ChartUtils.js'
+import { buildMoneyFlowGraphGeometry, formatMoneyFlowPercent, formatMoneyFlowValue, resolveMoneyFlowGraphMode, resolveMoneyFlowInteraction, resolveMoneyFlowItemDetails } from '~/utils/ChartUtils.js'
 
 const props = defineProps({
   graph: { type: Object, required: true },
   ariaLabel: { type: String, required: true },
   detailLevel: { type: [Number, String], default: 5 },
+  currencyCode: { type: String, default: '' },
 })
 
 const emit = defineEmits(['select-node', 'select-link', 'mode-change'])
@@ -119,34 +129,47 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const profileStore = useProfileStore()
 const root = ref(null)
-const preview = ref(null)
-const pinned = ref(null)
+const interaction = ref(resolveMoneyFlowInteraction({ action: { type: 'dismiss' } }))
 const { width: renderedWidth } = useElementSize(root)
+const formatValue = (item) =>
+  formatMoneyFlowValue({
+    value: Number(item.value),
+    language: profileStore.language,
+    currencyCode: props.currencyCode || props.graph.meta?.displayCurrencyCode,
+    showAccountAmounts: profileStore.dashboard.showAccountAmounts,
+    showDecimal: profileStore.dashboard.showDecimal,
+  })
 
 const limitedGraph = computed(() => limitMoneyFlowGraphDetail({ graph: props.graph, detailLevel: props.detailLevel }))
-const mode = computed(() => resolveMoneyFlowGraphMode({ nodes: limitedGraph.value.nodes, isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
+const displayedGraph = computed(() => ({
+  ...limitedGraph.value,
+  nodes: limitedGraph.value.nodes.map((node) => ({ ...node, label: String(node.kind).startsWith('other') ? t('analytics.flow.other') : node.label, valueLabel: formatValue(node) })),
+  links: limitedGraph.value.links.map((link) => ({ ...link, valueLabel: formatValue(link) })),
+}))
+const mode = computed(() => resolveMoneyFlowGraphMode({ nodes: displayedGraph.value.nodes, isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
 watch(mode, (value) => emit('mode-change', value), { immediate: true })
 const layout = computed(() =>
   buildMoneyFlowGraphGeometry({
-    nodes: limitedGraph.value.nodes,
-    links: limitedGraph.value.links,
+    nodes: displayedGraph.value.nodes,
+    links: displayedGraph.value.links,
     isDesktop: appStore.isDesktopLayout,
     renderedWidth: renderedWidth.value,
     mode: mode.value,
   }),
 )
-const nodeDictionary = computed(() => new Map(limitedGraph.value.nodes.map((node) => [node.id, node])))
-const linkDictionary = computed(() => new Map(limitedGraph.value.links.map((link) => [link.id, link])))
-const active = computed(() => preview.value ?? pinned.value)
+const nodeDictionary = computed(() => new Map(displayedGraph.value.nodes.map((node) => [node.id, node])))
+const linkDictionary = computed(() => new Map(displayedGraph.value.links.map((link) => [link.id, link])))
+const interactionTargets = computed(() => [...layout.value.ribbons.map(({ id }) => ({ type: 'link', id })), ...layout.value.nodes.map(({ id }) => ({ type: 'node', id }))])
+const active = computed(() => interaction.value.active)
 const activeItem = computed(() => (active.value?.type === 'link' ? linkDictionary.value.get(active.value.id) : nodeDictionary.value.get(active.value?.id)) ?? null)
-const activeDetails = computed(() => resolveMoneyFlowItemDetails({ item: activeItem.value ?? {}, nodes: limitedGraph.value.nodes }))
+const activeDetails = computed(() => resolveMoneyFlowItemDetails({ item: activeItem.value ?? {}, nodes: displayedGraph.value.nodes }))
 const related = computed(() => {
   if (!active.value) return null
   if (active.value.type === 'link') {
-    const link = limitedGraph.value.links.find(({ id }) => id === active.value.id)
+    const link = displayedGraph.value.links.find(({ id }) => id === active.value.id)
     return link ? { nodes: new Set([link.sourceId, link.targetId]), links: new Set([link.id]) } : null
   }
-  const links = limitedGraph.value.links.filter(({ sourceId, targetId }) => sourceId === active.value.id || targetId === active.value.id)
+  const links = displayedGraph.value.links.filter(({ sourceId, targetId }) => sourceId === active.value.id || targetId === active.value.id)
   return { nodes: new Set([active.value.id, ...links.flatMap(({ sourceId, targetId }) => [sourceId, targetId])]), links: new Set(links.map(({ id }) => id)) }
 })
 
@@ -164,17 +187,9 @@ const semanticLabels = {
   refund: 'analytics.flow.refund_category',
 }
 const nodeLabelText = (node) => node.label ?? (semanticLabels[node.kind] ? t(semanticLabels[node.kind]) : (node.refId ?? node.id))
-const formatValue = (item) => {
-  if (item.valueLabel) return item.valueLabel
-  const value = Number(item.value)
-  const currencyCode = props.graph.meta?.displayCurrencyCode
-  return Number.isFinite(value)
-    ? new Intl.NumberFormat(undefined, currencyCode ? { style: 'currency', currency: currencyCode, maximumFractionDigits: 2 } : { maximumFractionDigits: 2 }).format(value)
-    : ''
-}
-const formatPercent = (value) => new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 }).format(value)
+const formatPercent = (value) => formatMoneyFlowPercent({ value, language: profileStore.language })
 const itemDetailsLabel = (item) => {
-  const details = resolveMoneyFlowItemDetails({ item, nodes: limitedGraph.value.nodes })
+  const details = resolveMoneyFlowItemDetails({ item, nodes: displayedGraph.value.nodes })
   return [
     formatValue(item),
     details.sourcePercent === null ? null : `${t('analytics.flow.source')}: ${formatPercent(details.sourcePercent)}`,
@@ -211,25 +226,25 @@ const nodeLabel = (node) => {
   return { x: isLeft ? node.x - 10 : node.x + node.width + 10, y: node.y + node.height / 2 - 3, amountY: node.y + node.height / 2 + 15, anchor: isLeft ? 'end' : 'start' }
 }
 
-const activateNode = ({ id }) => (preview.value = { type: 'node', id })
-const activateLink = ({ id }) => (preview.value = { type: 'link', id })
-const clearPreview = () => (preview.value = null)
-const clearPinned = () => {
-  preview.value = null
-  pinned.value = null
-}
+const dispatchInteraction = (action) => (interaction.value = resolveMoneyFlowInteraction({ state: interaction.value, action, targets: interactionTargets.value }))
+const activateNode = ({ id }, type) => dispatchInteraction({ type, target: { type: 'node', id } })
+const activateLink = ({ id }, type) => dispatchInteraction({ type, target: { type: 'link', id } })
+const deactivate = (type) => dispatchInteraction({ type })
+const dismiss = (type) => dispatchInteraction({ type })
 const focusRelative = (event, amount) => {
   const targets = [...root.value.querySelectorAll('[data-flow-target]')]
-  const index = targets.indexOf(event.currentTarget)
-  targets[(index + amount + targets.length) % targets.length]?.focus()
+  const target = { type: event.currentTarget.dataset.flowType, id: event.currentTarget.dataset.flowTarget }
+  const result = dispatchInteraction({ type: 'move', target, amount })
+  const focusIndex = interactionTargets.value.findIndex(({ type, id }) => type === result.focusTarget?.type && id === result.focusTarget?.id)
+  targets[focusIndex]?.focus()
 }
 const selectNode = ({ node }) => {
-  pinned.value = { type: 'node', id: node.id }
-  emit('select-node', node)
+  const result = dispatchInteraction({ type: 'select', target: { type: 'node', id: node.id }, contextNodes: displayedGraph.value.nodes })
+  emit('select-node', node, result.selection.contextNodes)
 }
 const selectLink = ({ link }) => {
-  pinned.value = { type: 'link', id: link.id }
-  emit('select-link', link)
+  const result = dispatchInteraction({ type: 'select', target: { type: 'link', id: link.id }, contextNodes: displayedGraph.value.nodes })
+  emit('select-link', link, result.selection.contextNodes)
 }
-onClickOutside(root, clearPinned)
+onClickOutside(root, () => dismiss('outside'))
 </script>

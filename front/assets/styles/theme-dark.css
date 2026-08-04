@@ -587,7 +587,7 @@
 }
 
 .van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-interaction-target,
-.van-theme-dark .analytics-flow-ribbon:focus-visible .analytics-flow-interaction-target {
+.van-theme-dark .analytics-flow-ribbon:focus-visible .analytics-flow-ribbon-shape {
     stroke: #64b5f6;
 }
 

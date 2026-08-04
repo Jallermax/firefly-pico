@@ -55,6 +55,7 @@
         v-if="presentation.showGraph"
         :graph="chartGraph"
         :detail-level="analyticsStore.graphDetail"
+        :currency-code="analyticsStore.displayCurrencyCode"
         :aria-label="$t('analytics.flow.chart_label', { month: selectedMonthLabel, currency: analyticsStore.displayCurrencyCode })"
         @select-node="openDetails"
         @select-link="openDetails"
@@ -146,8 +147,14 @@ import { useAccountStore } from '~/stores/accountStore.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
-import { resolveMoneyFlowItemDetails, resolveMoneyFlowPresentation, resolveMoneyFlowSemanticColor } from '~/utils/ChartUtils.js'
-import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
+import {
+  formatMoneyFlowPercent,
+  formatMoneyFlowValue,
+  projectMoneyFlowTransactionSelection,
+  resolveMoneyFlowItemDetails,
+  resolveMoneyFlowPresentation,
+  resolveMoneyFlowSemanticColor,
+} from '~/utils/ChartUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
 const analyticsStore = useAnalyticsStore()
@@ -157,6 +164,7 @@ const profileStore = useProfileStore()
 const { t } = useI18n()
 const detailsVisible = ref(false)
 const selectedItem = ref(null)
+const selectedContextNodes = ref([])
 const chartMode = ref('full')
 
 const emptyFlow = {
@@ -196,8 +204,17 @@ const isBlockingLoading = computed(() => analyticsStore.flowState.status === 'lo
 const isBlockingError = computed(() => analyticsStore.flowState.status === 'error' && !hasRetainedData.value)
 const stateLabel = computed(() => t(`analytics.flow.state.${presentation.value.reason}`))
 const stateDescription = computed(() => t(`analytics.flow.state.${presentation.value.reason}_description`))
-const formatCurrency = (value) => (Number.isFinite(value) ? [formatNumberForDashboard(value), analyticsStore.displayCurrencyCode].filter(Boolean).join(' ') : '—')
-const formatPercent = (value) => new Intl.NumberFormat(profileStore.language, { style: 'percent', maximumFractionDigits: 1 }).format(value)
+const formatCurrency = (value) =>
+  Number.isFinite(value)
+    ? formatMoneyFlowValue({
+        value,
+        language: profileStore.language,
+        currencyCode: analyticsStore.displayCurrencyCode,
+        showAccountAmounts: profileStore.dashboard.showAccountAmounts,
+        showDecimal: profileStore.dashboard.showDecimal,
+      })
+    : '—'
+const formatPercent = (value) => formatMoneyFlowPercent({ value, language: profileStore.language })
 const categoryLabel = (id) => (['uncategorized', 'uncategorized-income'].includes(id) ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[id]) || id)
 const accountLabel = (id) => Account.getDisplayName(accountStore.accountDictionary[id]) || id
 
@@ -230,8 +247,8 @@ const nodeLabel = (node) => {
 }
 const chartGraph = computed(() => ({
   ...flow.value,
-  nodes: flow.value.nodes.map((node) => ({ ...node, label: nodeLabel(node), valueLabel: formatCurrency(node.value), color: resolveMoneyFlowSemanticColor(node) })),
-  links: flow.value.links.map((link) => ({ ...link, valueLabel: formatCurrency(link.value), color: resolveMoneyFlowSemanticColor(link) })),
+  nodes: flow.value.nodes.map((node) => ({ ...node, label: nodeLabel(node), color: resolveMoneyFlowSemanticColor(node) })),
+  links: flow.value.links.map((link) => ({ ...link, color: resolveMoneyFlowSemanticColor(link) })),
 }))
 
 const auditLabel = (id) => t(`analytics.flow.audit.${id.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`)
@@ -255,11 +272,11 @@ const liabilityReallocations = computed(() =>
 const fullNodes = computed(() => flow.value.details?.nodes ?? flow.value.nodes)
 const fullLinks = computed(() => flow.value.details?.links ?? flow.value.links)
 const fullNodeDictionary = computed(() => new Map(fullNodes.value.map((node) => [node.id, node])))
-const itemLabel = (item) => {
+const itemLabel = (item, dictionary = fullNodeDictionary.value) => {
   if (!item) return ''
   if (item.label) return item.label
   if (!item.sourceId) return nodeLabel(item)
-  return t('analytics.flow.exact_path', { source: nodeLabel(fullNodeDictionary.value.get(item.sourceId)), destination: nodeLabel(fullNodeDictionary.value.get(item.targetId)) })
+  return t('analytics.flow.exact_path', { source: nodeLabel(dictionary.get(item.sourceId)), destination: nodeLabel(dictionary.get(item.targetId)) })
 }
 const nodeDetailRows = (item) => {
   if (item.details?.nodes?.length) return item.details.nodes
@@ -282,8 +299,8 @@ const linkDetailRows = (item) => {
       },
     ].filter(({ value }) => value > 0)
   }
-  const visibleSource = flow.value.nodes.find(({ id }) => id === item.sourceId)
-  const visibleTarget = flow.value.nodes.find(({ id }) => id === item.targetId)
+  const visibleSource = selectedContextNodes.value.find(({ id }) => id === item.sourceId)
+  const visibleTarget = selectedContextNodes.value.find(({ id }) => id === item.targetId)
   const sourceIds = new Set(visibleSource?.details?.nodes?.map(({ id }) => id) ?? [item.sourceId])
   const targetIds = new Set(visibleTarget?.details?.nodes?.map(({ id }) => id) ?? [item.targetId])
   const rows = fullLinks.value.filter(
@@ -294,22 +311,24 @@ const linkDetailRows = (item) => {
 const selectedRows = computed(() => {
   if (!selectedItem.value) return []
   const items = selectedItem.value.sourceId && selectedItem.value.targetId ? linkDetailRows(selectedItem.value) : nodeDetailRows(selectedItem.value)
-  return items.map((item) => ({ id: item.id, label: itemLabel(item), value: item.value, transactionIds: [...new Set(item.transactionIds ?? [])].sort() }))
+  const selectedNodeDictionary = new Map(selectedContextNodes.value.map((node) => [node.id, node]))
+  return items.map((item) => ({ id: item.id, label: itemLabel(item, selectedNodeDictionary), value: item.value, transactionIds: [...new Set(item.transactionIds ?? [])].sort() }))
 })
-const selectedItemLabel = computed(() => itemLabel(selectedItem.value))
-const selectedItemDetails = computed(() => resolveMoneyFlowItemDetails({ item: selectedItem.value ?? {}, nodes: flow.value.nodes }))
+const selectedNodeDictionary = computed(() => new Map(selectedContextNodes.value.map((node) => [node.id, node])))
+const selectedItemLabel = computed(() => itemLabel(selectedItem.value, selectedNodeDictionary.value))
+const selectedItemDetails = computed(() => resolveMoneyFlowItemDetails({ item: selectedItem.value ?? {}, nodes: selectedContextNodes.value }))
 const selectedRefundCoverage = computed(() => selectedItem.value?.refundCoverage ?? null)
-const selectedTransactionIds = computed(() =>
-  [...new Set([...selectedRows.value.flatMap(({ transactionIds }) => transactionIds), ...(selectedItem.value?.refundCoverage?.transactionIds ?? [])])].sort(),
-)
+const selectedTransactionSelection = computed(() => projectMoneyFlowTransactionSelection({ item: selectedItem.value ?? {}, rows: selectedRows.value }))
+const selectedTransactionIds = computed(() => selectedTransactionSelection.value.transactionIds)
 
 const moveMonth = (amount) => analyticsStore.moveFlowMonth(amount)
-const openDetails = (item) => {
+const openDetails = (item, contextNodes = flow.value.nodes) => {
   selectedItem.value = item
+  selectedContextNodes.value = contextNodes
   detailsVisible.value = true
 }
 const openTransactions = async () => {
-  const query = TransactionFilterUtils.filters.id.toUrl(selectedTransactionIds.value.join(','))
+  const query = TransactionFilterUtils.filters.id.toUrl(selectedTransactionSelection.value.queryValue)
   detailsVisible.value = false
   await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + query)
 }
