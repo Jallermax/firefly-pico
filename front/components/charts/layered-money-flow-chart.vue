@@ -1,104 +1,106 @@
 <template>
   <div ref="root" class="analytics-flow" :class="{ 'analytics-flow-mobile': !appStore.isDesktopLayout, 'analytics-flow-animated': profileStore.showAnimations }" @keydown.esc.stop="dismiss('escape')">
-    <svg
-      ref="svg"
-      class="analytics-flow-svg"
-      :viewBox="layout.viewBox"
-      :style="{ aspectRatio: `${layout.width} / ${layout.height}` }"
-      role="group"
-      :aria-label="props.ariaLabel"
-      @pointermove.self="previewPointerRibbon"
-      @pointerleave="deactivate('pointer-leave')"
-      @pointerdown.self="previewPointerRibbon"
-      @click.self="selectPointerRibbon"
-    >
-      <defs>
-        <pattern id="analytics-flow-refund-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
-          <path class="analytics-flow-pattern-line" d="M -2 2 L 2 -2 M 0 8 L 8 0 M 6 10 L 10 6" />
-        </pattern>
-        <pattern id="analytics-flow-savings-accessible-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
-          <circle class="analytics-flow-pattern-dot" cx="4" cy="4" r="1.5" />
-        </pattern>
-        <pattern id="analytics-flow-savings-restricted-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
-          <path class="analytics-flow-pattern-line" d="M 0 0 L 8 8 M 8 0 L 0 8" />
-        </pattern>
-      </defs>
-      <g
-        v-for="ribbon in layout.ribbons"
-        :key="ribbon.id"
-        class="analytics-flow-ribbon"
-        :data-flow-target="ribbon.id"
-        data-flow-type="link"
-        role="button"
-        tabindex="0"
-        :aria-label="linkAriaLabel(ribbon.link)"
-        @focus="activateLink(ribbon, 'focus')"
-        @blur="deactivate('blur')"
-        @keydown.enter.prevent="selectLink(ribbon)"
-        @keydown.space.prevent="selectLink(ribbon)"
-        @keydown.left.prevent="focusRelative($event, -1)"
-        @keydown.up.prevent="focusRelative($event, -1)"
-        @keydown.right.prevent="focusRelative($event, 1)"
-        @keydown.down.prevent="focusRelative($event, 1)"
-      >
-        <title>{{ linkAriaLabel(ribbon.link) }}</title>
-        <path class="analytics-flow-interaction-target analytics-flow-ribbon-corridor" :d="ribbon.corridor.path" :stroke-width="ribbon.corridor.hitWidth" vector-effect="non-scaling-stroke" />
-        <path class="analytics-flow-ribbon-shape" :d="ribbon.path" :fill="linkColor(ribbon)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
-        <path v-if="itemPattern(ribbon.link)" class="analytics-flow-ribbon-pattern" :d="ribbon.path" :fill="itemPattern(ribbon.link)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
-      </g>
-
-      <g
-        v-for="node in layout.nodes"
-        :key="node.id"
-        class="analytics-flow-node"
-        :data-flow-target="node.id"
-        data-flow-type="node"
-        role="button"
-        tabindex="0"
-        :aria-label="nodeAriaLabel(node.node)"
-        @focus="activateNode(node, 'focus')"
-        @blur="deactivate('blur')"
-        @pointerenter="activateNode(node, 'pointer-enter')"
+    <div class="analytics-flow-viewport">
+      <svg
+        ref="svg"
+        class="analytics-flow-svg"
+        :viewBox="layout.viewBox"
+        :style="{ aspectRatio: `${layout.width} / ${layout.height}`, width: `${layout.width}px` }"
+        role="group"
+        :aria-label="props.ariaLabel"
+        @pointermove.self="previewPointerRibbon"
         @pointerleave="deactivate('pointer-leave')"
-        @pointerdown="activateNode(node, 'pointer-enter')"
-        @click="selectNode(node)"
-        @keydown.enter.prevent="selectNode(node)"
-        @keydown.space.prevent="selectNode(node)"
-        @keydown.left.prevent="focusRelative($event, -1)"
-        @keydown.up.prevent="focusRelative($event, -1)"
-        @keydown.right.prevent="focusRelative($event, 1)"
-        @keydown.down.prevent="focusRelative($event, 1)"
+        @pointerdown.self="previewPointerRibbon"
+        @click.self="selectPointerRibbon"
       >
-        <title>{{ nodeAriaLabel(node.node) }}</title>
-        <rect class="analytics-flow-interaction-target" :x="node.hitBox.x" :y="node.hitBox.y" :width="node.hitBox.width" :height="node.hitBox.height" fill="transparent" />
-        <rect
-          :class="{ 'analytics-flow-pool-bar': isPool(node) }"
-          :x="node.x"
-          :y="node.y"
-          :width="node.width"
-          :height="node.height"
-          :fill="nodeColor(node)"
-          :opacity="nodeOpacity(node)"
-          rx="0.5"
-          pointer-events="none"
-        />
-        <rect
-          v-if="itemPattern(node.node)"
-          :x="node.x"
-          :y="node.y"
-          :width="node.width"
-          :height="node.height"
-          :fill="itemPattern(node.node)"
-          :opacity="nodeOpacity(node)"
-          rx="0.5"
-          pointer-events="none"
-        />
-        <text class="analytics-flow-node-label" :x="nodeLabel(node).x" :y="nodeLabel(node).y" :text-anchor="nodeLabel(node).anchor" :opacity="nodeOpacity(node)">{{ node.displayLabel }}</text>
-        <text class="analytics-flow-node-amount" :x="nodeLabel(node).x" :y="nodeLabel(node).amountY" :text-anchor="nodeLabel(node).anchor" :opacity="nodeOpacity(node)">
-          {{ node.displayValueLabel }}
-        </text>
-      </g>
-    </svg>
+        <defs>
+          <pattern id="analytics-flow-refund-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
+            <path class="analytics-flow-pattern-line" d="M -2 2 L 2 -2 M 0 8 L 8 0 M 6 10 L 10 6" />
+          </pattern>
+          <pattern id="analytics-flow-savings-accessible-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
+            <circle class="analytics-flow-pattern-dot" cx="4" cy="4" r="1.5" />
+          </pattern>
+          <pattern id="analytics-flow-savings-restricted-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
+            <path class="analytics-flow-pattern-line" d="M 0 0 L 8 8 M 8 0 L 0 8" />
+          </pattern>
+        </defs>
+        <g
+          v-for="ribbon in layout.ribbons"
+          :key="ribbon.id"
+          class="analytics-flow-ribbon"
+          :data-flow-target="ribbon.id"
+          data-flow-type="link"
+          role="button"
+          tabindex="0"
+          :aria-label="linkAriaLabel(ribbon.link)"
+          @focus="activateLink(ribbon, 'focus')"
+          @blur="deactivate('blur')"
+          @keydown.enter.prevent="selectLink(ribbon)"
+          @keydown.space.prevent="selectLink(ribbon)"
+          @keydown.left.prevent="focusRelative($event, -1)"
+          @keydown.up.prevent="focusRelative($event, -1)"
+          @keydown.right.prevent="focusRelative($event, 1)"
+          @keydown.down.prevent="focusRelative($event, 1)"
+        >
+          <title>{{ linkAriaLabel(ribbon.link) }}</title>
+          <path class="analytics-flow-interaction-target analytics-flow-ribbon-corridor" :d="ribbon.corridor.path" :stroke-width="ribbon.corridor.hitWidth" vector-effect="non-scaling-stroke" />
+          <path class="analytics-flow-ribbon-shape" :d="ribbon.path" :fill="linkColor(ribbon)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
+          <path v-if="itemPattern(ribbon.link)" class="analytics-flow-ribbon-pattern" :d="ribbon.path" :fill="itemPattern(ribbon.link)" :opacity="linkOpacity(ribbon)" pointer-events="none" />
+        </g>
+
+        <g
+          v-for="node in layout.nodes"
+          :key="node.id"
+          class="analytics-flow-node"
+          :data-flow-target="node.id"
+          data-flow-type="node"
+          role="button"
+          tabindex="0"
+          :aria-label="nodeAriaLabel(node.node)"
+          @focus="activateNode(node, 'focus')"
+          @blur="deactivate('blur')"
+          @pointerenter="activateNode(node, 'pointer-enter')"
+          @pointerleave="deactivate('pointer-leave')"
+          @pointerdown="activateNode(node, 'pointer-enter')"
+          @click="selectNode(node)"
+          @keydown.enter.prevent="selectNode(node)"
+          @keydown.space.prevent="selectNode(node)"
+          @keydown.left.prevent="focusRelative($event, -1)"
+          @keydown.up.prevent="focusRelative($event, -1)"
+          @keydown.right.prevent="focusRelative($event, 1)"
+          @keydown.down.prevent="focusRelative($event, 1)"
+        >
+          <title>{{ nodeAriaLabel(node.node) }}</title>
+          <rect class="analytics-flow-interaction-target" :x="node.hitBox.x" :y="node.hitBox.y" :width="node.hitBox.width" :height="node.hitBox.height" fill="transparent" />
+          <rect
+            :class="{ 'analytics-flow-pool-bar': isPool(node) }"
+            :x="node.x"
+            :y="node.y"
+            :width="node.width"
+            :height="node.height"
+            :fill="nodeColor(node)"
+            :opacity="nodeOpacity(node)"
+            rx="0.5"
+            pointer-events="none"
+          />
+          <rect
+            v-if="itemPattern(node.node)"
+            :x="node.x"
+            :y="node.y"
+            :width="node.width"
+            :height="node.height"
+            :fill="itemPattern(node.node)"
+            :opacity="nodeOpacity(node)"
+            rx="0.5"
+            pointer-events="none"
+          />
+          <text class="analytics-flow-node-label" :x="nodeLabel(node).x" :y="nodeLabel(node).y" :text-anchor="nodeLabel(node).anchor" :opacity="nodeOpacity(node)">{{ node.displayLabel }}</text>
+          <text class="analytics-flow-node-amount" :x="nodeLabel(node).x" :y="nodeLabel(node).amountY" :text-anchor="nodeLabel(node).anchor" :opacity="nodeOpacity(node)">
+            {{ node.displayValueLabel }}
+          </text>
+        </g>
+      </svg>
+    </div>
     <div v-if="activeItem" class="analytics-flow-hover-details" role="status" aria-live="polite">
       <strong>{{ activeItemLabel }}</strong>
       <span>{{ formatValue(activeItem) }}</span>
@@ -244,7 +246,7 @@ const pointerRibbon = (event) => {
   const bounds = svg.value?.getBoundingClientRect()
   if (!bounds?.width || !bounds.height) return null
   const point = { x: ((event.clientX - bounds.left) / bounds.width) * layout.value.width, y: ((event.clientY - bounds.top) / bounds.height) * layout.value.height }
-  return resolveNearestMoneyFlowRibbon({ ribbons: layout.value.ribbons, point, maxHitRadius: 22 })
+  return resolveNearestMoneyFlowRibbon({ ribbons: layout.value.ribbons, point })
 }
 const previewPointerRibbon = (event) => {
   const ribbon = pointerRibbon(event)

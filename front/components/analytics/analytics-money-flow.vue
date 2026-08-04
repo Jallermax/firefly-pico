@@ -308,16 +308,20 @@ const linkDetailRows = (item) => {
   )
   return rows.length ? rows : [item]
 }
-const selectedRows = computed(() => {
+const selectedItems = computed(() => {
   if (!selectedItem.value) return []
-  const items = selectedItem.value.sourceId && selectedItem.value.targetId ? linkDetailRows(selectedItem.value) : nodeDetailRows(selectedItem.value)
+  return selectedItem.value.sourceId && selectedItem.value.targetId ? linkDetailRows(selectedItem.value) : nodeDetailRows(selectedItem.value)
+})
+const selectedRows = computed(() => {
   const selectedNodeDictionary = new Map(selectedContextNodes.value.map((node) => [node.id, node]))
-  return items.map((item) => ({ id: item.id, label: itemLabel(item, selectedNodeDictionary), value: item.value, transactionIds: [...new Set(item.transactionIds ?? [])].sort() }))
+  return selectedItems.value.map((item) => ({ id: item.id, label: itemLabel(item, selectedNodeDictionary), value: item.value, transactionIds: [...new Set(item.transactionIds ?? [])].sort() }))
 })
 const selectedNodeDictionary = computed(() => new Map(selectedContextNodes.value.map((node) => [node.id, node])))
 const selectedItemLabel = computed(() => itemLabel(selectedItem.value, selectedNodeDictionary.value))
 const selectedItemDetails = computed(() => resolveMoneyFlowItemDetails({ item: selectedItem.value ?? {}, nodes: selectedContextNodes.value }))
-const selectedTransactionSelection = computed(() => projectMoneyFlowTransactionSelection({ item: selectedItem.value ?? {}, rows: selectedRows.value, nodes: fullNodes.value }))
+const selectedTransactionSelection = computed(() =>
+  projectMoneyFlowTransactionSelection({ item: selectedItem.value ?? {}, rows: selectedItems.value, nodes: fullNodes.value, toUrl: TransactionFilterUtils.filters.id.toUrl }),
+)
 const selectedRefundCoverage = computed(() => selectedTransactionSelection.value.refundCoverage)
 const selectedTransactionIds = computed(() => selectedTransactionSelection.value.transactionIds)
 
@@ -328,8 +332,7 @@ const openDetails = (item, contextNodes = flow.value.nodes) => {
   detailsVisible.value = true
 }
 const openTransactions = async () => {
-  const query = TransactionFilterUtils.filters.id.toUrl(selectedTransactionSelection.value.queryValue)
   detailsVisible.value = false
-  await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + query)
+  await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + selectedTransactionSelection.value.query)
 }
 </script>

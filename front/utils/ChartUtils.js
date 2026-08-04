@@ -228,12 +228,12 @@ export function resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth, mode
     }
   })
   const requiredWidth = Math.max(0, ...layers.map((layer) => layer.requiredWidth))
-  const overflowingNodeIds = isDesktop
-    ? []
-    : [...new Set(layers.flatMap((layer) => layer.nodes.filter(({ targetWidth }) => targetWidth + MONEY_FLOW_GRAPH_PADDING * 2 > width || layer.requiredWidth > width).map(({ id }) => id)))]
+  const overflowingNodeIds = [
+    ...new Set(layers.flatMap((layer) => layer.nodes.filter(({ targetWidth }) => targetWidth + MONEY_FLOW_GRAPH_PADDING * 2 > width || layer.requiredWidth > width).map(({ id }) => id))),
+  ]
   return {
     mode,
-    fits: isDesktop || requiredWidth <= width,
+    fits: requiredWidth <= width,
     renderedWidth: width,
     requiredWidth,
     overflowingNodeIds,
@@ -332,29 +332,36 @@ const moneyFlowPointSegmentDistance = (point, start, end) => {
   return Math.hypot(point.x - (start.x + amount * deltaX), point.y - (start.y + amount * deltaY))
 }
 
-export function resolveNearestMoneyFlowRibbon({ ribbons, point, maxHitRadius = MONEY_FLOW_GRAPH_POINTER_HIT_RADIUS }) {
-  const candidates = ribbons.map((ribbon) => {
-    let distance = Infinity
-    let previous = ribbon.corridor.start
-    for (let index = 1; index <= 32; index++) {
-      const current = moneyFlowCubicPoint(ribbon.corridor, index / 32)
-      distance = Math.min(distance, moneyFlowPointSegmentDistance(point, previous, current))
-      previous = current
-    }
-    return { ribbon, distance }
-  })
+export function resolveNearestMoneyFlowRibbon({ ribbons, point }) {
+  const candidates = ribbons
+    .map((ribbon) => {
+      let distance = Infinity
+      let previous = ribbon.corridor.start
+      for (let index = 1; index <= 32; index++) {
+        const current = moneyFlowCubicPoint(ribbon.corridor, index / 32)
+        distance = Math.min(distance, moneyFlowPointSegmentDistance(point, previous, current))
+        previous = current
+      }
+      return { ribbon, distance, hitRadius: Math.max(MONEY_FLOW_GRAPH_POINTER_HIT_RADIUS, Math.abs(Number(ribbon.width) || 0) / 2) }
+    })
+    .filter(({ distance, hitRadius }) => distance <= hitRadius)
   candidates.sort((left, right) => left.distance - right.distance || left.ribbon.id.localeCompare(right.ribbon.id))
-  return candidates[0]?.distance <= maxHitRadius ? candidates[0].ribbon : null
+  return candidates[0]?.ribbon ?? null
 }
 
 export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedWidth, mode }) {
-  const width = moneyFlowGraphWidth(renderedWidth, isDesktop)
-  const resolvedMode = mode ?? resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth: width })
-  const fullFit = resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: width, mode: 'full' })
+  const viewportWidth = moneyFlowGraphWidth(renderedWidth, isDesktop)
+  const resolvedMode = mode ?? resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth: viewportWidth })
+  const fullFit = resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: viewportWidth, mode: 'full' })
   const layers = [...new Set(nodes.map(({ layer }) => layer))].sort((left, right) => left - right)
-  const orientation = resolveMoneyFlowGraphOrientation({ isDesktop, width, layerCount: layers.length })
+  const orientation = resolveMoneyFlowGraphOrientation({ isDesktop, width: viewportWidth, layerCount: layers.length })
   const isHorizontal = orientation === 'horizontal'
-  const selectedFit = resolvedMode === 'full' ? fullFit : resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: width, mode: resolvedMode, allowTruncation: !isDesktop })
+  const naturalSelectedFit = resolvedMode === 'full' ? fullFit : resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: viewportWidth, mode: resolvedMode })
+  let selectedFit =
+    !isDesktop && !naturalSelectedFit.fits ? resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: viewportWidth, mode: resolvedMode, allowTruncation: true }) : naturalSelectedFit
+  const width = isDesktop && !isHorizontal ? Math.max(viewportWidth, selectedFit.requiredWidth) : viewportWidth
+  if (isHorizontal) selectedFit = { ...selectedFit, fits: true, overflowingNodeIds: [] }
+  else if (isDesktop && width > viewportWidth) selectedFit = resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: width, mode: resolvedMode })
   const firstLayer = layers[0]
   const lastLayer = layers.at(-1)
   const hiddenNodes = resolvedMode === 'condensed' ? nodes.filter((node) => moneyFlowGraphOuterCategory(node, firstLayer, lastLayer)) : []
@@ -478,6 +485,7 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
   return {
     mode: resolvedMode,
     orientation,
+    viewportWidth,
     width,
     height,
     viewBox: `0 0 ${width} ${height}`,
@@ -532,7 +540,7 @@ export function resolveMoneyFlowInteraction({ state = {}, action, targets = [] }
   return { preview, pinned, active: preview ?? pinned, selection, focusTarget }
 }
 
-export function projectMoneyFlowTransactionSelection({ item = {}, rows = [], nodes = [] }) {
+export function projectMoneyFlowTransactionSelection({ item = {}, rows = [], nodes = [], toUrl }) {
   const evidence = [item, ...rows]
   const nodeDictionary = new Map(nodes.map((node) => [node.id, node]))
   const refundEvidence = [...evidence.flatMap((entry) => [entry.refundCoverage, nodeDictionary.get(entry.sourceId)?.refundCoverage, nodeDictionary.get(entry.targetId)?.refundCoverage])].filter(
@@ -556,7 +564,9 @@ export function projectMoneyFlowTransactionSelection({ item = {}, rows = [], nod
     ),
     ...(refundCoverage?.transactionIds ?? []),
   ].sort()
-  return { refundCoverage, transactionIds: [...new Set(transactionIds)], queryValue: [...new Set(transactionIds)].join(',') }
+  const uniqueTransactionIds = [...new Set(transactionIds)]
+  const queryValue = uniqueTransactionIds.join(',')
+  return { refundCoverage, transactionIds: uniqueTransactionIds, queryValue, ...(toUrl ? { query: toUrl(queryValue) } : {}) }
 }
 
 export function formatMoneyFlowValue({ value, language, currencyCode, showAccountAmounts = true, showDecimal = true }) {
