@@ -571,6 +571,21 @@
     fill: var(--van-text-color);
 }
 
+.van-theme-dark .analytics-flow-pattern-line {
+    stroke: #111;
+}
+
+.van-theme-dark .analytics-flow-pattern-dot {
+    fill: #111;
+}
+
+.van-theme-dark .analytics-flow-hover-details {
+    border-color: #666;
+    color: var(--van-text-color-2);
+    background: #2a2a2a;
+    box-shadow: rgba(0, 0, 0, 0.35) 0 3px 8px;
+}
+
 .van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-interaction-target,
 .van-theme-dark .analytics-flow-ribbon:focus-visible .analytics-flow-interaction-target {
     stroke: #64b5f6;

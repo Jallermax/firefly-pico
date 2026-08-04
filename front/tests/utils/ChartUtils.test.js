@@ -494,21 +494,53 @@ test('mobile money flow typography remains readable inside an inset card', () =>
 const layeredGeometryGraph = {
   nodes: [
     { id: 'income:salary', layer: 0, kind: 'income', refId: 'salary', value: 100, transactionIds: ['income'] },
+    { id: 'refund:food', layer: 0, kind: 'refund', refId: 'food', value: 20, transactionIds: ['refund'] },
     { id: 'income', layer: 1, kind: 'income', value: 100, transactionIds: ['income'] },
-    { id: 'available', layer: 2, kind: 'available', value: 60, transactionIds: ['expense-available', 'income'] },
-    { id: 'savings', layer: 2, kind: 'savings', value: 40, transactionIds: ['expense-savings', 'income'] },
-    { id: 'expenses', layer: 3, kind: 'expenses', value: 100, transactionIds: ['expense-available', 'expense-savings'] },
-    { id: 'expense:food', layer: 4, kind: 'expenseCategory', refId: 'food', value: 60, transactionIds: ['expense-available'] },
-    { id: 'expense:home', layer: 4, kind: 'expenseCategory', refId: 'home', value: 40, transactionIds: ['expense-savings'] },
+    { id: 'refundIncome', layer: 1, kind: 'refund', value: 20, transactionIds: ['refund'] },
+    { id: 'available', layer: 2, kind: 'available', value: 120, transactionIds: ['expense-available', 'income', 'refund'] },
+    { id: 'savingsAccessible', layer: 3, kind: 'savings', savingsGroup: 'accessible', value: 40, transactionIds: ['deposit'] },
+    { id: 'expenses', layer: 4, kind: 'expenses', value: 80, transactionIds: ['expense-available', 'expense-savings'] },
+    { id: 'savingsDeposited:accessible', layer: 4, kind: 'savingsDeposited', savingsGroup: 'accessible', value: 40, transactionIds: ['deposit'] },
+    { id: 'expense:food', layer: 5, kind: 'expenseCategory', refId: 'food', value: 60, transactionIds: ['expense-available'], refundCoverage: { value: 20, transactionIds: ['refund'] } },
+    { id: 'expense:home', layer: 5, kind: 'expenseCategory', refId: 'home', value: 20, transactionIds: ['expense-savings'] },
+    { id: 'savingsDeposit:hysa', layer: 5, kind: 'savingsDeposit', savingsGroup: 'accessible', refId: 'hysa', value: 40, transactionIds: ['deposit'] },
   ],
   links: [
     { id: 'salary-income', sourceId: 'income:salary', targetId: 'income', kind: 'income', value: 100, transactionIds: ['income'] },
-    { id: 'income-available', sourceId: 'income', targetId: 'available', kind: 'income', fundingPool: 'available', value: 60, transactionIds: ['income'] },
-    { id: 'income-savings', sourceId: 'income', targetId: 'savings', kind: 'income', fundingPool: 'savings', value: 40, transactionIds: ['income'] },
-    { id: 'available-expenses', sourceId: 'available', targetId: 'expenses', kind: 'expense', fundingPool: 'available', value: 60, transactionIds: ['expense-available'] },
-    { id: 'savings-expenses', sourceId: 'savings', targetId: 'expenses', kind: 'expense', fundingPool: 'savings', value: 40, transactionIds: ['expense-savings'] },
+    { id: 'refund-food-income', sourceId: 'refund:food', targetId: 'refundIncome', kind: 'refund', value: 20, transactionIds: ['refund'] },
+    { id: 'income-available', sourceId: 'income', targetId: 'available', kind: 'income', fundingPool: 'available', value: 100, transactionIds: ['income'] },
+    { id: 'refund-available', sourceId: 'refundIncome', targetId: 'available', kind: 'refund', fundingPool: 'available', value: 20, transactionIds: ['refund'] },
+    {
+      id: 'available-savings',
+      sourceId: 'available',
+      targetId: 'savingsAccessible',
+      kind: 'bridge',
+      fundingPool: 'available',
+      value: 40,
+      transactionIds: ['deposit'],
+      details: { availableToSavings: { value: 50, transactionIds: ['deposit'] }, savingsToAvailable: { value: 10, transactionIds: ['withdraw'] }, net: 40 },
+    },
+    { id: 'available-expenses', sourceId: 'available', targetId: 'expenses', kind: 'expense', fundingPool: 'available', value: 80, transactionIds: ['expense-available'] },
+    {
+      id: 'savings-deposited',
+      sourceId: 'savingsAccessible',
+      targetId: 'savingsDeposited:accessible',
+      kind: 'savingsDeposit',
+      fundingPool: 'savingsAccessible',
+      value: 40,
+      transactionIds: ['deposit'],
+    },
     { id: 'expenses-food', sourceId: 'expenses', targetId: 'expense:food', kind: 'expense', fundingPool: 'available', value: 60, transactionIds: ['expense-available'] },
-    { id: 'expenses-home', sourceId: 'expenses', targetId: 'expense:home', kind: 'expense', fundingPool: 'savings', value: 40, transactionIds: ['expense-savings'] },
+    { id: 'expenses-home', sourceId: 'expenses', targetId: 'expense:home', kind: 'expense', fundingPool: 'available', value: 20, transactionIds: ['expense-savings'] },
+    {
+      id: 'deposited-hysa',
+      sourceId: 'savingsDeposited:accessible',
+      targetId: 'savingsDeposit:hysa',
+      kind: 'savingsDeposit',
+      fundingPool: 'savingsAccessible',
+      value: 40,
+      transactionIds: ['deposit'],
+    },
   ],
 }
 
@@ -535,7 +567,7 @@ test('packed ribbons close at square node edges and never overfill a pool', () =
   )
 })
 
-test('alternating origins order endpoints by topology and pack ribbons toward their counterparts', () => {
+test('money flow layout preserves stable aggregation order while packing ribbons toward counterparts', () => {
   const geometry = ChartUtils.buildMoneyFlowGraphGeometry({
     nodes: [
       { id: 'available', layer: 0, kind: 'available', value: 10, transactionIds: [] },
@@ -565,7 +597,7 @@ test('alternating origins order endpoints by topology and pack ribbons toward th
   }
 
   assert.deepEqual(layerOrder(0), ['available', 'savings'])
-  assert.deepEqual(layerOrder(1), ['destination:z', 'destination:a'])
+  assert.deepEqual(layerOrder(1), ['destination:a', 'destination:z'])
   for (const sourceId of layerOrder(0)) {
     const ribbons = geometry.ribbons.filter((ribbon) => ribbon.sourceId === sourceId).sort((left, right) => endpoints(left).source - endpoints(right).source)
     assert.deepEqual(
@@ -580,6 +612,73 @@ test('alternating origins order endpoints by topology and pack ribbons toward th
       ribbons.map(({ sourceId }) => sourceId).sort((left, right) => nodePosition.get(left) - nodePosition.get(right)),
     )
   }
+})
+
+test('money flow layout keeps amount order and Other last without geometry re-sorting', () => {
+  const nodes = [
+    { id: 'income:z', layer: 0, kind: 'income', value: 70, transactionIds: [] },
+    { id: 'income:a', layer: 0, kind: 'income', value: 30, transactionIds: [] },
+    { id: 'other:income', layer: 0, kind: 'otherIncome', value: 10, transactionIds: [] },
+    { id: 'income', layer: 1, kind: 'income', value: 110, transactionIds: [] },
+  ]
+  const links = nodes.slice(0, 3).map((node) => ({ id: `${node.id}->income`, sourceId: node.id, targetId: 'income', kind: 'income', value: node.value, transactionIds: [] }))
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ nodes, links, isDesktop: true, renderedWidth: 900, mode: 'full' })
+
+  assert.deepEqual(
+    geometry.nodes
+      .filter(({ layer }) => layer === 0)
+      .sort((left, right) => left.y - right.y)
+      .map(({ id }) => id),
+    ['income:z', 'income:a', 'other:income'],
+  )
+})
+
+test('six-stage geometry gives the Available-to-Savings bridge a measurable transfer span', () => {
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth: 1200, mode: 'full' })
+  const bridge = geometry.ribbons.find(({ kind }) => kind === 'bridge')
+
+  assert.equal(new Set(geometry.nodes.map(({ layer }) => layer).sort()).size, 6)
+  assert.equal(bridge.source.layer, 2)
+  assert.equal(bridge.target.layer, 3)
+  assert.ok(bridge.transferSpan >= 44)
+  assert.equal(
+    geometry.ribbons.every(({ source, target }) => source.layer < target.layer),
+    true,
+  )
+})
+
+test('ribbon endpoints both preserve direct amount proportionality', () => {
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth: 1200, mode: 'full' })
+
+  for (const ribbon of geometry.ribbons) {
+    assert.equal(ribbon.sourceWidth, Math.abs(ribbon.value) * geometry.scale)
+    assert.equal(ribbon.targetWidth, Math.abs(ribbon.value) * geometry.scale)
+  }
+})
+
+test('money flow item details expose independent source, destination, bridge, and refund evidence', () => {
+  assert.equal(typeof ChartUtils.resolveMoneyFlowItemDetails, 'function')
+  const bridge = layeredGeometryGraph.links.find(({ kind }) => kind === 'bridge')
+  const bridgeDetails = ChartUtils.resolveMoneyFlowItemDetails({ item: bridge, nodes: layeredGeometryGraph.nodes })
+  const coveredExpense = layeredGeometryGraph.nodes.find(({ id }) => id === 'expense:food')
+  const expenseDetails = ChartUtils.resolveMoneyFlowItemDetails({ item: coveredExpense, nodes: layeredGeometryGraph.nodes })
+
+  assert.deepEqual(bridgeDetails, {
+    value: 40,
+    sourcePercent: 40 / 120,
+    destinationPercent: 1,
+    refundCoverage: null,
+    bridge: bridge.details,
+    transactionIds: ['deposit'],
+  })
+  assert.deepEqual(expenseDetails, {
+    value: 60,
+    sourcePercent: null,
+    destinationPercent: null,
+    refundCoverage: { value: 20, transactionIds: ['refund'] },
+    bridge: null,
+    transactionIds: ['expense-available', 'refund'],
+  })
 })
 
 test('reduced Other nodes retain their semantic colors', () => {
@@ -598,11 +697,11 @@ test('desktop money flow reserves outer label gutters without collapsing interna
   const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...layeredGeometryGraph, isDesktop: true, renderedWidth: 1000, mode: 'full' })
   const layerPositions = [...new Set(geometry.nodes.map(({ layer, x }) => `${layer}:${x}`))].map((entry) => Number(entry.split(':')[1]))
   const firstLayerNodes = geometry.nodes.filter(({ layer }) => layer === 0)
-  const lastLayerNodes = geometry.nodes.filter(({ layer }) => layer === 4)
+  const lastLayerNodes = geometry.nodes.filter(({ layer }) => layer === 5)
 
   assert.ok(firstLayerNodes.every(({ x }) => x >= 192))
   assert.ok(lastLayerNodes.every(({ x, width }) => x + width <= geometry.width - 192))
-  assert.equal(layerPositions.length, 5)
+  assert.equal(layerPositions.length, 6)
   assert.equal(
     layerPositions.slice(1).every((position, index) => position - layerPositions[index] > 0),
     true,
@@ -668,7 +767,7 @@ test('full mobile flow preserves baseline spacing and separate 44px interaction 
 test('crowded 390px flow condenses outer details without discarding their selection metadata', () => {
   const detailNodes = Array.from({ length: 7 }, (_, index) => ({
     id: `expense:${index + 1}`,
-    layer: 4,
+    layer: 5,
     kind: 'expenseCategory',
     refId: String(index + 1),
     value: 10,
@@ -684,19 +783,23 @@ test('crowded 390px flow condenses outer details without discarding their select
     transactionIds: node.transactionIds,
   }))
   const graph = {
-    nodes: [...layeredGeometryGraph.nodes.filter(({ layer }) => layer !== 4), ...detailNodes],
+    nodes: [...layeredGeometryGraph.nodes.filter(({ kind }) => kind !== 'expenseCategory'), ...detailNodes],
     links: [...layeredGeometryGraph.links.filter(({ targetId }) => !targetId.startsWith('expense:')), ...detailLinks],
   }
 
   assert.equal(ChartUtils.resolveMoneyFlowGraphMode({ nodes: graph.nodes, isDesktop: false, renderedWidth: 390 }), 'condensed')
   const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ ...graph, isDesktop: false, renderedWidth: 390, mode: 'condensed' })
-  const hiddenNodes = graph.nodes.filter(({ layer }) => layer === 0 || layer === 4)
+  const hiddenNodes = graph.nodes.filter(({ layer, kind }) => (layer === 0 && ['income', 'refund'].includes(kind)) || (layer === 5 && kind === 'expenseCategory'))
   const hiddenNodeIds = new Set(hiddenNodes.map(({ id }) => id))
   const hiddenLinks = graph.links.filter(({ sourceId, targetId }) => hiddenNodeIds.has(sourceId) || hiddenNodeIds.has(targetId))
 
-  assert.equal(
-    geometry.nodes.every(({ layer }) => layer > 0 && layer < 4),
-    true,
+  assert.deepEqual(
+    geometry.nodes.map(({ id }) => id),
+    graph.nodes.filter(({ id }) => !hiddenNodeIds.has(id)).map(({ id }) => id),
+  )
+  assert.deepEqual(
+    geometry.nodes.filter(({ kind }) => ['available', 'savings', 'expenses', 'savingsDeposited', 'savingsDeposit'].includes(kind)).map(({ id }) => id),
+    ['available', 'savingsAccessible', 'expenses', 'savingsDeposited:accessible', 'savingsDeposit:hysa'],
   )
   assert.deepEqual(
     geometry.details.nodes.map(({ id }) => id),
@@ -712,17 +815,36 @@ test('crowded 390px flow condenses outer details without discarding their select
   )
 })
 
-test('layered flow renderer uses filled ribbons and emits exact selected graph objects', () => {
+test('layered flow renderer uses accessible patterns and emits exact selected graph objects', () => {
   const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
 
   assert.match(component, /<path[^>]*:d="ribbon\.path" :fill="linkColor\(ribbon\)"/)
   assert.doesNotMatch(component, /stroke-linecap|strokeWidth/)
+  assert.match(component, /id="analytics-flow-refund-pattern"/)
+  assert.match(component, /id="analytics-flow-savings-accessible-pattern"/)
+  assert.match(component, /id="analytics-flow-savings-restricted-pattern"/)
   assert.match(component, /defineEmits\(\['select-node', 'select-link', 'mode-change'\]\)/)
   assert.match(component, /emit\('select-node', node\)/)
   assert.match(component, /emit\('select-link', link\)/)
   assert.match(component, /emit\('mode-change', value\)/)
   assert.match(component, /linkAriaLabel[\s\S]*analytics\.flow\.source[\s\S]*analytics\.flow\.destination/)
   assert.doesNotMatch(component, /<details[\s\S]*analytics-flow-values/)
+})
+
+test('money flow hover, focus, tap, outside-dismiss, and keyboard behavior share pinned details', () => {
+  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+
+  assert.match(component, /resolveMoneyFlowItemDetails/)
+  assert.match(component, /const pinned = ref\(null\)/)
+  assert.match(component, /onClickOutside\(root, clearPinned\)/)
+  assert.match(component, /@keydown\.esc\.stop="clearPinned"/)
+  assert.match(component, /@keydown\.(?:left|up)\.prevent="focusRelative\(\$event, -1\)"/)
+  assert.match(component, /@keydown\.(?:right|down)\.prevent="focusRelative\(\$event, 1\)"/)
+  assert.match(component, /class="analytics-flow-hover-details"/)
+  assert.match(component, /profileStore\.showAnimations/)
+  assert.doesNotMatch(whiteCss, /(?:^|\n)\.analytics-flow-ribbon-shape\s*\{[^}]*transition:/s)
+  assert.match(whiteCss, /\.analytics-flow-animated \.analytics-flow-ribbon-shape\s*\{[^}]*transition:/s)
 })
 
 test('money flow card uses the layered graph, persisted detail control, and one exact-details popup', () => {
@@ -736,7 +858,12 @@ test('money flow card uses the layered graph, persisted detail control, and one 
   assert.match(component, /<details class="analytics-flow-exact-values"/)
   assert.match(component, /v-for="link in fullLinks"/)
   assert.equal(component.match(/<app-popup/g)?.length, 1)
+  assert.match(component, /resolveMoneyFlowItemDetails/)
+  assert.match(component, /selectedItemDetails\.sourcePercent/)
+  assert.match(component, /selectedItemDetails\.destinationPercent/)
   assert.match(component, /TransactionFilterUtils\.filters\.id\.toUrl/)
+  assert.match(component, /selectedItem\.value\?\.refundCoverage\?\.transactionIds/)
+  assert.doesNotMatch(component, /analytics-flow-fx|flow\.meta\.displayCurrencyCode/)
 })
 
 test('money flow detail popup keeps long drilldowns inside a bounded scroll region', () => {

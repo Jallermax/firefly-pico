@@ -104,6 +104,10 @@
           <div class="flex-1">
             <strong>{{ selectedItemLabel }}</strong>
             <div class="analytics-card-subtitle">{{ formatCurrency(selectedItem.value) }}</div>
+            <div v-if="selectedItemDetails.sourcePercent !== null" class="analytics-card-subtitle">
+              {{ $t('analytics.flow.source') }}: {{ formatPercent(selectedItemDetails.sourcePercent) }} · {{ $t('analytics.flow.destination') }}:
+              {{ formatPercent(selectedItemDetails.destinationPercent) }}
+            </div>
           </div>
           <van-button size="small" @click="detailsVisible = false">{{ $t('ok') }}</van-button>
         </div>
@@ -114,6 +118,15 @@
               ><strong>{{ formatCurrency(row.value) }}</strong>
             </div>
             <div v-if="row.transactionIds.length" class="analytics-flow-transaction-ids">{{ $t('analytics.flow.transaction_ids', { ids: row.transactionIds.join(', ') }) }}</div>
+          </div>
+          <div v-if="selectedRefundCoverage" class="analytics-flow-detail-row analytics-flow-refund-coverage">
+            <div class="analytics-flow-detail-value">
+              <span>{{ $t('analytics.flow.refund_category') }}</span
+              ><strong>{{ formatCurrency(selectedRefundCoverage.value) }}</strong>
+            </div>
+            <div v-if="selectedRefundCoverage.transactionIds.length" class="analytics-flow-transaction-ids">
+              {{ $t('analytics.flow.transaction_ids', { ids: selectedRefundCoverage.transactionIds.join(', ') }) }}
+            </div>
           </div>
         </div>
         <van-button v-if="selectedTransactionIds.length" block type="primary" @click="openTransactions">
@@ -133,7 +146,7 @@ import { useAccountStore } from '~/stores/accountStore.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
-import { resolveMoneyFlowPresentation, resolveMoneyFlowSemanticColor } from '~/utils/ChartUtils.js'
+import { resolveMoneyFlowItemDetails, resolveMoneyFlowPresentation, resolveMoneyFlowSemanticColor } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
@@ -184,6 +197,7 @@ const isBlockingError = computed(() => analyticsStore.flowState.status === 'erro
 const stateLabel = computed(() => t(`analytics.flow.state.${presentation.value.reason}`))
 const stateDescription = computed(() => t(`analytics.flow.state.${presentation.value.reason}_description`))
 const formatCurrency = (value) => (Number.isFinite(value) ? [formatNumberForDashboard(value), analyticsStore.displayCurrencyCode].filter(Boolean).join(' ') : '—')
+const formatPercent = (value) => new Intl.NumberFormat(profileStore.language, { style: 'percent', maximumFractionDigits: 1 }).format(value)
 const categoryLabel = (id) => (['uncategorized', 'uncategorized-income'].includes(id) ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[id]) || id)
 const accountLabel = (id) => Account.getDisplayName(accountStore.accountDictionary[id]) || id
 
@@ -254,6 +268,20 @@ const nodeDetailRows = (item) => {
   return detailed.length ? [...new Map(detailed.map((node) => [node.id, node])).values()] : [fullNodeDictionary.value.get(item.id) ?? item]
 }
 const linkDetailRows = (item) => {
+  if (item.details?.availableToSavings && item.details?.savingsToAvailable) {
+    return [
+      {
+        id: `${item.id}:available-to-savings`,
+        label: t('analytics.flow.exact_path', { source: t('analytics.flow.available_pool'), destination: t('analytics.flow.savings_pool') }),
+        ...item.details.availableToSavings,
+      },
+      {
+        id: `${item.id}:savings-to-available`,
+        label: t('analytics.flow.exact_path', { source: t('analytics.flow.savings_pool'), destination: t('analytics.flow.available_pool') }),
+        ...item.details.savingsToAvailable,
+      },
+    ].filter(({ value }) => value > 0)
+  }
   const visibleSource = flow.value.nodes.find(({ id }) => id === item.sourceId)
   const visibleTarget = flow.value.nodes.find(({ id }) => id === item.targetId)
   const sourceIds = new Set(visibleSource?.details?.nodes?.map(({ id }) => id) ?? [item.sourceId])
@@ -269,7 +297,11 @@ const selectedRows = computed(() => {
   return items.map((item) => ({ id: item.id, label: itemLabel(item), value: item.value, transactionIds: [...new Set(item.transactionIds ?? [])].sort() }))
 })
 const selectedItemLabel = computed(() => itemLabel(selectedItem.value))
-const selectedTransactionIds = computed(() => [...new Set(selectedRows.value.flatMap(({ transactionIds }) => transactionIds))].sort())
+const selectedItemDetails = computed(() => resolveMoneyFlowItemDetails({ item: selectedItem.value ?? {}, nodes: flow.value.nodes }))
+const selectedRefundCoverage = computed(() => selectedItem.value?.refundCoverage ?? null)
+const selectedTransactionIds = computed(() =>
+  [...new Set([...selectedRows.value.flatMap(({ transactionIds }) => transactionIds), ...(selectedItem.value?.refundCoverage?.transactionIds ?? [])])].sort(),
+)
 
 const moveMonth = (amount) => analyticsStore.moveFlowMonth(amount)
 const openDetails = (item) => {

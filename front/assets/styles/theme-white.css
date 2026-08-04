@@ -2892,6 +2892,7 @@ body {
 }
 
 .analytics-flow {
+    position: relative;
     padding: 0 16px 12px;
     overflow: hidden;
 }
@@ -2912,7 +2913,7 @@ body {
 .analytics-flow-node-label {
     fill: var(--van-text-color);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
     pointer-events: none;
 }
 
@@ -2924,8 +2925,48 @@ body {
     pointer-events: none;
 }
 
-.analytics-flow-ribbon-shape {
+.analytics-flow-animated .analytics-flow-ribbon-shape {
     transition: opacity 0.15s ease;
+}
+
+.analytics-flow-animated .analytics-flow-ribbon-pattern {
+    transition: opacity 0.15s ease;
+}
+
+.analytics-flow-pattern-line {
+    fill: none;
+    stroke: var(--van-text-color);
+    stroke-width: 1.25;
+}
+
+.analytics-flow-pattern-dot {
+    fill: var(--van-text-color);
+}
+
+.analytics-flow-hover-details {
+    position: absolute;
+    z-index: 2;
+    top: 4px;
+    left: 50%;
+    display: grid;
+    min-width: 180px;
+    max-width: calc(100% - 32px);
+    gap: 2px;
+    padding: 7px 9px;
+    border: 1px dashed var(--van-border-color);
+    border-radius: 6px;
+    color: var(--van-text-color-2);
+    background: var(--van-background-2);
+    box-shadow: rgba(0, 0, 0, 0.16) 0 3px 8px;
+    font-size: 11px;
+    line-height: 1.35;
+    pointer-events: none;
+    transform: translateX(-50%);
+}
+
+.analytics-flow-hover-details strong {
+    color: var(--van-text-color);
+    font-size: 12px;
 }
 
 .analytics-flow-pool-bar {

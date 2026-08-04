@@ -147,41 +147,27 @@ const MONEY_FLOW_GRAPH_NODE_THICKNESS = 12
 const MONEY_FLOW_GRAPH_DESKTOP_LABEL_GUTTER = 192
 
 const moneyFlowGraphWidth = (renderedWidth, isDesktop) => (Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : isDesktop ? 1000 : 360)
-const moneyFlowGraphLayerGroups = (nodes, links = []) => {
+const moneyFlowGraphLayerGroups = (nodes) => {
   const layers = new Map()
   for (const node of nodes) layers.set(node.layer, [...(layers.get(node.layer) ?? []), node])
-  const groups = [...layers.entries()].sort(([left], [right]) => left - right).map(([layer, entries]) => ({ layer, nodes: entries.sort((left, right) => left.id.localeCompare(right.id)) }))
-  const orderByCounterpart = (groupIndex, counterpartGroups, nodeIdKey, counterpartIdKey) => {
-    const counterpartPositions = new Map(counterpartGroups.flatMap(({ nodes: entries }) => entries.map(({ id }, index) => [id, entries.length > 1 ? index / (entries.length - 1) : 0.5])))
-    const scores = new Map(
-      groups[groupIndex].nodes.map((node) => {
-        const connected = links.filter((link) => link[nodeIdKey] === node.id && counterpartPositions.has(link[counterpartIdKey]) && Number.isFinite(link.value) && link.value !== 0)
-        const total = connected.reduce((sum, link) => sum + Math.abs(link.value), 0)
-        const score = total ? connected.reduce((sum, link) => sum + counterpartPositions.get(link[counterpartIdKey]) * Math.abs(link.value), 0) / total : null
-        return [node.id, score]
-      }),
-    )
-    groups[groupIndex].nodes.sort((left, right) => {
-      const leftScore = scores.get(left.id)
-      const rightScore = scores.get(right.id)
-      if (leftScore === null && rightScore !== null) return 1
-      if (leftScore !== null && rightScore === null) return -1
-      return (leftScore ?? 0) - (rightScore ?? 0) || left.id.localeCompare(right.id)
-    })
-  }
-  for (let index = 1; index < groups.length; index++) orderByCounterpart(index, groups.slice(0, index), 'targetId', 'sourceId')
-  for (let index = groups.length - 2; index >= 0; index--) orderByCounterpart(index, groups.slice(index + 1), 'sourceId', 'targetId')
-  return groups
+  return [...layers.entries()].sort(([left], [right]) => left - right).map(([layer, entries]) => ({ layer, nodes: entries }))
 }
+
+const moneyFlowGraphOuterCategory = ({ layer, kind }, firstLayer, lastLayer) =>
+  (layer === firstLayer && ['income', 'refund', 'otherIncome', 'otherRefund'].includes(kind)) || (layer === lastLayer && ['expenseCategory', 'otherExpenseCategory'].includes(kind))
 
 export function resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth }) {
   if (isDesktop) return 'full'
   const width = moneyFlowGraphWidth(renderedWidth, false)
+  const groups = moneyFlowGraphLayerGroups(nodes)
   const requiredWidth = Math.max(
     0,
-    ...moneyFlowGraphLayerGroups(nodes).map(({ nodes: entries }) => entries.length * MONEY_FLOW_GRAPH_HIT_SIZE + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP + MONEY_FLOW_GRAPH_PADDING * 2),
+    ...groups.map(({ nodes: entries }) => entries.length * MONEY_FLOW_GRAPH_HIT_SIZE + Math.max(0, entries.length - 1) * MONEY_FLOW_GRAPH_GAP + MONEY_FLOW_GRAPH_PADDING * 2),
   )
-  return requiredWidth <= width ? 'full' : 'condensed'
+  if (requiredWidth <= width) return 'full'
+  const firstLayer = groups[0]?.layer
+  const lastLayer = groups.at(-1)?.layer
+  return nodes.some((node) => moneyFlowGraphOuterCategory(node, firstLayer, lastLayer)) ? 'condensed' : 'full'
 }
 
 const moneyFlowGraphHitBox = ({ x, y, width, height }) => {
@@ -221,13 +207,16 @@ const moneyFlowGraphRibbonPath = ({ source, target, sourceOffset, targetOffset, 
 export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedWidth, mode }) {
   const width = moneyFlowGraphWidth(renderedWidth, isDesktop)
   const resolvedMode = mode ?? resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth: width })
-  const hiddenNodes = resolvedMode === 'condensed' ? nodes.filter(({ layer }) => layer === 0 || layer === 4) : []
+  const layers = [...new Set(nodes.map(({ layer }) => layer))].sort((left, right) => left - right)
+  const firstLayer = layers[0]
+  const lastLayer = layers.at(-1)
+  const hiddenNodes = resolvedMode === 'condensed' ? nodes.filter((node) => moneyFlowGraphOuterCategory(node, firstLayer, lastLayer)) : []
   const hiddenNodeIds = new Set(hiddenNodes.map(({ id }) => id))
   const visibleNodes = nodes.filter(({ id }) => !hiddenNodeIds.has(id))
   const visibleNodeIds = new Set(visibleNodes.map(({ id }) => id))
   const visibleLinks = links.filter(({ sourceId, targetId, value }) => visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId) && Number.isFinite(value) && value !== 0)
   const hiddenLinks = resolvedMode === 'condensed' ? links.filter(({ sourceId, targetId }) => hiddenNodeIds.has(sourceId) || hiddenNodeIds.has(targetId)) : []
-  const layerGroups = moneyFlowGraphLayerGroups(visibleNodes, visibleLinks)
+  const layerGroups = moneyFlowGraphLayerGroups(visibleNodes)
   const incoming = new Map(visibleNodes.map(({ id }) => [id, 0]))
   const outgoing = new Map(visibleNodes.map(({ id }) => [id, 0]))
   for (const link of visibleLinks) {
@@ -299,7 +288,8 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
       const sourceOffset = sourceOffsets.get(link)
       const targetOffset = targetOffsets.get(link)
       const { path, bounds } = moneyFlowGraphRibbonPath({ source, target, sourceOffset, targetOffset, width: ribbonWidth, isDesktop })
-      return { ...link, link, width: ribbonWidth, path, source, target, hitBox: moneyFlowGraphHitBox(bounds) }
+      const transferSpan = isDesktop ? target.x - (source.x + source.width) : target.y - (source.y + source.height)
+      return { ...link, link, width: ribbonWidth, sourceWidth: ribbonWidth, targetWidth: ribbonWidth, transferSpan, path, source, target, hitBox: moneyFlowGraphHitBox(bounds) }
     })
 
   const baselines = layerGroups.flatMap(({ nodes: entries }) => {
@@ -322,6 +312,22 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
     ribbons,
     pools: graphNodes.filter(({ kind }) => ['available', 'savings'].includes(kind)),
     details: resolvedMode === 'condensed' ? { nodes: hiddenNodes, links: hiddenLinks } : null,
+  }
+}
+
+export function resolveMoneyFlowItemDetails({ item, nodes }) {
+  const nodeDictionary = new Map(nodes.map((node) => [node.id, node]))
+  const value = Math.abs(Number(item.value) || 0)
+  const sourceValue = Math.abs(Number(nodeDictionary.get(item.sourceId)?.value) || 0)
+  const destinationValue = Math.abs(Number(nodeDictionary.get(item.targetId)?.value) || 0)
+  const refundCoverage = item.refundCoverage ?? null
+  return {
+    value: Number(item.value) || 0,
+    sourcePercent: item.sourceId && sourceValue ? value / sourceValue : null,
+    destinationPercent: item.targetId && destinationValue ? value / destinationValue : null,
+    refundCoverage,
+    bridge: item.details?.availableToSavings && item.details?.savingsToAvailable ? item.details : null,
+    transactionIds: [...new Set([...(item.transactionIds ?? []), ...(refundCoverage?.transactionIds ?? [])])].sort(),
   }
 }
 
