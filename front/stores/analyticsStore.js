@@ -9,9 +9,9 @@ import TransactionLinkTypeRepository from '~/repository/TransactionLinkTypeRepos
 import SubscriptionRepository from '~/repository/SubscriptionRepository.js'
 import RecurringTransactionRepository from '~/repository/RecurringTransactionRepository.js'
 import TransactionTransformer from '~/transformers/TransactionTransformer.js'
-import Account from '~/models/Account.js'
 import Currency from '~/models/Currency.js'
-import ResponseUtils from '~/utils/ResponseUtils.js'
+import { reconstructBalanceSeries } from '~/utils/AnalyticsBalanceUtils.js'
+import { buildAnalyticsLedger } from '~/utils/AnalyticsLedgerUtils.js'
 import { getExcludedTransactionFilters } from '~/utils/DashboardUtils.js'
 import { createAnalyticsStore } from '~/stores/analyticsStoreFactory.js'
 
@@ -27,10 +27,9 @@ export const useAnalyticsStore = createAnalyticsStore('analytics', () => ({
   subscriptionRepository: new SubscriptionRepository(),
   recurringTransactionRepository: new RecurringTransactionRepository(),
   transformTransactions: (transactions) => TransactionTransformer.transformFromApiList(transactions),
-  getAccountBalance: (account) => Account.getBalance(account),
-  getAccountCurrencyCode: (account) => Account.getCurrencyCode(account),
   getCurrencyCode: (currency) => Currency.getCode(currency),
   getCurrencyDecimalPlaces: (currency) => Currency.getDecimalPlaces(currency),
   getExcludedTransactionFilters,
-  isResponseSuccess: (response) => ResponseUtils.isSuccess(response),
+  buildLedger: buildAnalyticsLedger,
+  reconstructBalances: reconstructBalanceSeries,
 }))

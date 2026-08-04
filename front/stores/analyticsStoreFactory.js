@@ -1,4 +1,4 @@
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import DateUtils from '../utils/DateUtils.js'
@@ -6,11 +6,8 @@ import {
   buildCategoryLedger,
   buildMonthlyMoneyFlow,
   combineSavingsBalanceSeries,
-  convertAnalyticsAmount,
   getAnalyticsAccountGroups,
-  getAnalyticsCurrentAmount,
   limitMoneyFlowGraphDetail,
-  normalizeBalanceSeries,
   rankCategoryIds,
   summarizeBalanceMovements,
   summarizeCategoryWindow,
@@ -40,12 +37,11 @@ export function createAnalyticsStore(id, useDependencies) {
       subscriptionRepository,
       recurringTransactionRepository,
       transformTransactions,
-      getAccountBalance,
-      getAccountCurrencyCode,
       getCurrencyCode,
       getCurrencyDecimalPlaces,
       getExcludedTransactionFilters,
-      isResponseSuccess,
+      buildLedger,
+      reconstructBalances,
       getNow = () => new Date(),
     } = useDependencies()
 
@@ -118,21 +114,24 @@ export function createAnalyticsStore(id, useDependencies) {
       subscriptions: { status: 'idle', error: null },
       recurringTransactions: { status: 'idle', error: null },
     })
-    const balanceCache = ref({})
-    const accounts = ref([])
-    const transactions = ref([])
-    const transactionLinks = ref([])
-    const transactionLinkTypes = ref([])
-    const subscriptions = ref([])
-    const recurringTransactions = ref([])
-    const snapshotRates = ref({ ...currencyStore.exchangeRates?.rates })
+    const rawSnapshot = ref({
+      accounts: [],
+      transactions: [],
+      transactionLinks: [],
+      transactionLinkTypes: [],
+      subscriptions: [],
+      recurringTransactions: [],
+      rates: { ...currencyStore.exchangeRates?.rates },
+      transactionCoverage: null,
+      asOfDate: null,
+    })
+    const accounts = computed(() => rawSnapshot.value.accounts)
+    const transactions = computed(() => rawSnapshot.value.transactions)
+    const transactionLinks = computed(() => rawSnapshot.value.transactionLinks)
+    const transactionLinkTypes = computed(() => rawSnapshot.value.transactionLinkTypes)
+    const subscriptions = computed(() => rawSnapshot.value.subscriptions)
+    const recurringTransactions = computed(() => rawSnapshot.value.recurringTransactions)
     const categorySelectionInitialized = ref(false)
-    const balanceRequests = new Map()
-    let balanceRequestSequence = 0
-    let activeBalanceRequestToken = null
-    let transactionRequestSequence = 0
-    let activeTransactionRequestToken = null
-    let transactionRequest = null
     let snapshotGeneration = 0
     let activeSnapshotGeneration = 0
     let snapshotRequest = null
@@ -143,16 +142,45 @@ export function createAnalyticsStore(id, useDependencies) {
       const decimalPlaces = getCurrencyDecimalPlaces(dashboardStore.dashboardCurrency)
       return decimalPlaces === null || decimalPlaces === undefined ? 2 : Number(decimalPlaces)
     })
-    const rates = computed(() => snapshotRates.value)
+    const rates = computed(() => rawSnapshot.value.rates)
     const accountGroups = computed(() => getAnalyticsAccountGroups(accounts.value))
-    const categoryLedger = computed(() =>
-      buildCategoryLedger({
+    const ledger = computed(() =>
+      buildLedger({
         transactions: transactions.value,
+        transactionLinks: transactionLinks.value,
+        linkTypes: transactionLinkTypes.value,
+        accounts: accounts.value,
         displayCurrencyCode: displayCurrencyCode.value,
         primaryCurrencyCode: primaryCurrencyCode.value,
         rates: rates.value,
       }),
     )
+    const legacyTransactions = computed(() => {
+      const grouped = new Map()
+      ledger.value.entries.forEach((entry) => {
+        const transaction = grouped.get(entry.transactionId) ?? { id: entry.transactionId, attributes: { transactions: [] } }
+        transaction.attributes.transactions.push({
+          amount: entry.value,
+          currency_code: displayCurrencyCode.value,
+          date: parseISO(entry.date),
+          category_id: entry.categoryId,
+          tags: entry.tags,
+          accountSource: entry.sourceAccount,
+          accountDestination: entry.destinationAccount,
+        })
+        grouped.set(entry.transactionId, transaction)
+      })
+      return [...grouped.values()]
+    })
+    const categoryLedger = computed(() => {
+      const projection = buildCategoryLedger({
+        transactions: legacyTransactions.value,
+        displayCurrencyCode: displayCurrencyCode.value,
+        primaryCurrencyCode: displayCurrencyCode.value,
+        rates: { [displayCurrencyCode.value]: 1 },
+      })
+      return { ...projection, isEstimated: ledger.value.fx.isEstimated, missingCurrencies: ledger.value.fx.missingCurrencies }
+    })
     const categoryUnavailableTransactionIds = computed(() => categoryLedger.value.unclassified?.transactionIds ?? [])
     const categoryRanking = computed(() =>
       rankCategoryIds({
@@ -197,17 +225,18 @@ export function createAnalyticsStore(id, useDependencies) {
         ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: categoryUnavailableTransactionIds.value.length ? null : 0 })),
       ]
     })
-    const selectedFullFlow = computed(() =>
-      buildMonthlyMoneyFlow({
-        transactions: transactions.value,
+    const selectedFullFlow = computed(() => {
+      const projection = buildMonthlyMoneyFlow({
+        transactions: legacyTransactions.value,
         monthKey: format(selectedFlowMonth.value, 'yyyy-MM'),
         displayCurrencyCode: displayCurrencyCode.value,
-        primaryCurrencyCode: primaryCurrencyCode.value,
-        rates: rates.value,
+        primaryCurrencyCode: displayCurrencyCode.value,
+        rates: { [displayCurrencyCode.value]: 1 },
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
         savingsView: savingsView.value,
-      }),
-    )
+      })
+      return { ...projection, isEstimated: ledger.value.fx.isEstimated, missingCurrencies: ledger.value.fx.missingCurrencies }
+    })
     const selectedFlow = computed(() => {
       const fullGraph = selectedFullFlow.value
       const graph = limitMoneyFlowGraphDetail({ graph: fullGraph, detailLevel: graphDetail.value })
@@ -220,48 +249,39 @@ export function createAnalyticsStore(id, useDependencies) {
     const flowMonthMin = computed(() => (categoryLedger.value.ledgerStartMonth ? startOfMonth(parseISO(categoryLedger.value.ledgerStartMonth + '-01')) : null))
     const flowMonthMax = computed(() => startOfMonth(getNow()))
 
-    function getBalanceSnapshot() {
-      const groups = Object.fromEntries(
-        BALANCE_GROUPS.map((metric) => [
+    const balanceMonthKeys = computed(() => {
+      const currentMonth = startOfMonth(rawSnapshot.value.asOfDate ? parseISO(rawSnapshot.value.asOfDate) : getNow())
+      const months = Number(balancePeriod.value)
+      return Array.from({ length: months + 1 }, (_, index) => format(subMonths(currentMonth, months + 1 - index), 'yyyy-MM'))
+    })
+    const balanceSeriesByMetric = computed(() =>
+      Object.fromEntries(
+        [...BALANCE_GROUPS, 'expenses'].map((metric) => [
           metric,
-          accountGroups.value[metric].map((account) => {
-            const currentDate = account?.attributes?.current_balance_date
-            return {
-              id: account.id,
-              currencyCode: getAccountCurrencyCode(account) ?? account?.attributes?.currency_code,
-              currentAmount: getAnalyticsCurrentAmount({ account, metric, fallbackAmount: getAccountBalance(account) }),
-              currentDate: currentDate instanceof Date ? DateUtils.dateToString(currentDate) : currentDate?.slice(0, 10),
-            }
+          reconstructBalances({
+            accounts: accounts.value,
+            entries: ledger.value.entries,
+            metric,
+            monthKeys: balanceMonthKeys.value,
+            asOfDate: rawSnapshot.value.asOfDate,
+            coverage: rawSnapshot.value.transactionCoverage,
+            displayCurrencyCode: displayCurrencyCode.value,
+            primaryCurrencyCode: primaryCurrencyCode.value,
+            rates: rates.value,
+            currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
           }),
         ]),
-      )
-      const displayCode = displayCurrencyCode.value
-      const primaryCode = primaryCurrencyCode.value
-      const rateSnapshot = { ...rates.value }
-      const currencyCodes = [displayCode, primaryCode, ...BALANCE_GROUPS.flatMap((metric) => groups[metric].map(({ currencyCode }) => currencyCode))].filter(Boolean).sort()
-      const relevantRates = Object.fromEntries([...new Set(currencyCodes)].map((currencyCode) => [currencyCode, rateSnapshot[currencyCode] ?? null]))
-      const months = Number(balancePeriod.value)
-      const today = getNow()
-      const groupIds = Object.fromEntries(BALANCE_GROUPS.map((metric) => [metric, groups[metric].map(({ id }) => id).sort()]))
-      const cacheKey = JSON.stringify({ period: months, displayCurrencyCode: displayCode, primaryCurrencyCode: primaryCode, rates: relevantRates, groups: groupIds })
-      return {
-        cacheKey,
-        groups,
-        start: DateUtils.dateToString(startOfMonth(subMonths(today, months + 1))),
-        end: DateUtils.dateToString(today),
-        period: months === 3 ? '1D' : '1W',
-        displayCurrencyCode: displayCode,
-        primaryCurrencyCode: primaryCode,
-        rates: rateSnapshot,
-        decimalPlaces: displayCurrencyDecimalPlaces.value,
-      }
-    }
-
-    const balanceCacheKey = computed(() => getBalanceSnapshot().cacheKey)
-    const currentFourGroupSeries = computed(() => {
-      const cached = balanceCache.value[balanceCacheKey.value] ?? []
-      return Object.fromEntries(BALANCE_GROUPS.map((metric) => [metric, cached.find(({ id }) => id === metric) ?? emptyBalanceSeries(metric)]))
+      ),
+    )
+    const toLegacyBalanceSeries = (result) => ({
+      id: result.id,
+      points: result.points,
+      currentPoint: result.currentPoint,
+      isEstimated: result.fx.isEstimated,
+      missingCurrencies: result.fx.missingCurrencies,
+      warnings: result.reconciliation.status === 'mismatch' ? [{ type: 'current-balance-mismatch' }] : [],
     })
+    const currentFourGroupSeries = computed(() => Object.fromEntries(BALANCE_GROUPS.map((metric) => [metric, toLegacyBalanceSeries(balanceSeriesByMetric.value[metric])])))
     const combinedSavingsSeries = computed(() => {
       const includedIsEmpty = accountGroups.value.savingsIncluded.length === 0
       const excludedIsEmpty = accountGroups.value.savingsExcluded.length === 0
@@ -279,189 +299,63 @@ export function createAnalyticsStore(id, useDependencies) {
       if (savingsView.value === 'split') return [base.netWorth, base.savingsIncluded, base.savingsExcluded, base.debt]
       return [base.netWorth, combinedSavingsSeries.value, base.debt]
     })
+    const analyticsAudit = computed(() => {
+      const groupedWarnings = new Map()
+      BALANCE_GROUPS.forEach((metricId) => {
+        const reconciliation = balanceSeriesByMetric.value[metricId].reconciliation
+        if (reconciliation.status !== 'mismatch') return
+        const code = 'current-balance-mismatch'
+        const warning = groupedWarnings.get(code) ?? { code, metricIds: [], accountIds: new Set(), transactionIds: new Set() }
+        warning.metricIds.push(metricId)
+        reconciliation.accounts.forEach((account) => {
+          warning.accountIds.add(account.id)
+          account.transactionIds.forEach((transactionId) => warning.transactionIds.add(transactionId))
+        })
+        groupedWarnings.set(code, warning)
+      })
+      return {
+        ...ledger.value.audit,
+        warnings: [...groupedWarnings.values()].map((warning) => ({
+          code: warning.code,
+          metricIds: warning.metricIds,
+          accountIds: [...warning.accountIds].sort(),
+          transactionIds: [...warning.transactionIds].sort(),
+        })),
+      }
+    })
     const balanceWarnings = computed(() => {
       const selectedMetricIds = financialTrendView.value === 'balances' ? visibleBalanceMetrics.value : visibleFinancialMetrics.value
-      const grouped = new Map()
-      balanceSeries.value
-        .filter(({ id: metricId }) => selectedMetricIds.includes(metricId))
-        .forEach(({ id: metricId, warnings }) => {
-          warnings.forEach(({ type, sampleDate }) => {
-            const key = JSON.stringify([type, sampleDate])
-            const warning = grouped.get(key)
-            if (!warning) grouped.set(key, { type, sampleDate, metricIds: [metricId] })
-            else if (!warning.metricIds.includes(metricId)) warning.metricIds.push(metricId)
-          })
-        })
-      return [...grouped.values()]
+      return analyticsAudit.value.warnings.flatMap(({ code, metricIds }) => {
+        const visibleMetricIds = [...new Set(metricIds.map((metricId) => (savingsView.value === 'combined' && ['savingsIncluded', 'savingsExcluded'].includes(metricId) ? 'savings' : metricId)))]
+        const affectedMetricIds = visibleMetricIds.filter((metricId) => selectedMetricIds.includes(metricId))
+        return affectedMetricIds.length > 0 ? [{ type: code, metricIds: affectedMetricIds }] : []
+      })
+    })
+    const fxDisclosure = computed(() => {
+      const affectedMetrics = new Set(
+        [...BALANCE_GROUPS, 'expenses'].filter((metric) => {
+          const fx = balanceSeriesByMetric.value[metric].fx
+          return fx.isEstimated || fx.missingCurrencies.length > 0
+        }),
+      )
+      if (ledger.value.entries.some(({ destinationKind, conversion }) => destinationKind === 'expense' && ['rate', 'unavailable'].includes(conversion.mode))) affectedMetrics.add('expenses')
+      const affected = [...affectedMetrics]
+      const usesCurrentRates = ledger.value.fx.isEstimated || affected.some((metric) => balanceSeriesByMetric.value[metric].fx.isEstimated)
+      const missingCurrencies = [...new Set([...ledger.value.fx.missingCurrencies, ...affected.flatMap((metric) => balanceSeriesByMetric.value[metric].fx.missingCurrencies)])].sort()
+      if (!usesCurrentRates && missingCurrencies.length === 0) return null
+      return { displayCurrencyCode: displayCurrencyCode.value, usesCurrentRates, missingCurrencies, metricIds: affected }
     })
     const financialTrend = computed(() => ({
       ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() }),
       expenses: categoryUnavailableTransactionIds.value.length ? null : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() }),
     }))
 
-    async function fetchTransactions({ force = false, generation = null } = {}) {
-      const isReady = ['ready', 'empty'].includes(categoryState.status) && ['ready', 'empty'].includes(flowState.status)
-      if (isReady && !force) return
-      if (!force && transactionRequest) return transactionRequest.promise
-
-      const hasExistingData = transactions.value.length > 0
-      const requestToken = ++transactionRequestSequence
-      activeTransactionRequestToken = requestToken
-      Object.assign(categoryState, { status: 'loading', error: null, isStale: hasExistingData })
-      Object.assign(flowState, { status: 'loading', error: null, isStale: hasExistingData })
-
-      const request = (async () => {
-        const today = getNow()
-        const query = [`date_after:${DateUtils.dateToString(startOfMonth(subMonths(today, 24)))}`, `date_before:${DateUtils.dateToString(today)}`, ...getExcludedTransactionFilters()]
-        const filters = [{ field: 'query', value: query.join(' ') }]
-        const repository = transactionRepository
-        const getAll = (options) => repository.searchTransaction({ ...options, showLoading: false, showErrorToast: false })
-        const result = await repository.getAllWithMergeResult({ filters, getAll, pageSize: 200 })
-        const ownsCurrentState = () => activeTransactionRequestToken === requestToken && (generation === null || activeSnapshotGeneration === generation)
-
-        if (!result.ok) {
-          if (ownsCurrentState()) {
-            const error = new Error('Analytics transaction request failed')
-            Object.assign(categoryState, { status: 'error', error, isStale: hasExistingData })
-            Object.assign(flowState, { status: 'error', error, isStale: hasExistingData })
-          }
-          return
-        }
-
-        const transformed = transformTransactions(result.data)
-        if (!ownsCurrentState()) return
-
-        transactions.value = transformed
-        const status = transformed.length > 0 ? 'ready' : 'empty'
-        Object.assign(categoryState, { status, error: null, isStale: false })
-        Object.assign(flowState, { status, error: null, isStale: false })
-
-        if (!categorySelectionInitialized.value) {
-          if (persistedSelectedCategoryIds.value.length === 0) selectedCategoryIds.value = (categoryRanking.value.length > 0 ? categoryRanking.value : currentMonthCategoryIds.value).slice(0, 5)
-          categorySelectionInitialized.value = true
-        }
-      })()
-      transactionRequest = { token: requestToken, promise: request }
-      try {
-        return await request
-      } finally {
-        if (transactionRequest?.token === requestToken) transactionRequest = null
-      }
-    }
-
-    async function fetchBalances({ force = false, generation = null } = {}) {
-      const snapshot = getBalanceSnapshot()
-      const cached = balanceCache.value[snapshot.cacheKey]
-      if (cached && !force) {
-        Object.assign(balanceState, { status: cached.some(({ points }) => points.length > 0) ? 'ready' : 'empty', error: null, isStale: false })
-        return
-      }
-
-      const hasExistingData = Boolean(cached?.some(({ points }) => points.length > 0))
-      const existingRequest = balanceRequests.get(snapshot.cacheKey)
-      if (existingRequest && !force && existingRequest.generation === generation) {
-        activeBalanceRequestToken = existingRequest.token
-        Object.assign(balanceState, { status: 'loading', error: null, isStale: hasExistingData })
-        return existingRequest.promise
-      }
-
-      const requestToken = ++balanceRequestSequence
-      activeBalanceRequestToken = requestToken
-      Object.assign(balanceState, { status: 'loading', error: null, isStale: hasExistingData })
-
-      const request = (async () => {
-        const repository = accountRepository
-        const responses = await Promise.all(
-          BALANCE_GROUPS.map(async (metric) => {
-            const accountIds = snapshot.groups[metric].map(({ id }) => id)
-            if (accountIds.length === 0) return { metric, response: null }
-            const response = await repository.getChartOverview({ start: snapshot.start, end: snapshot.end, period: snapshot.period, accountIds })
-            return { metric, response }
-          }),
-        )
-        const ownsCurrentState = () => activeBalanceRequestToken === requestToken && balanceCacheKey.value === snapshot.cacheKey && (generation === null || activeSnapshotGeneration === generation)
-
-        if (responses.some(({ response }) => response && !isResponseSuccess(response))) {
-          if (ownsCurrentState()) Object.assign(balanceState, { status: 'error', error: new Error('Analytics balance request failed'), isStale: hasExistingData })
-          return
-        }
-
-        const responsesWithCurrent = await Promise.all(
-          responses.map(async ({ metric, response }) => {
-            const currentAmounts = snapshot.groups[metric].map((account) => ({
-              account,
-              converted: convertAnalyticsAmount({
-                amount: account.currentAmount,
-                currencyCode: account.currencyCode,
-                primaryAmount: null,
-                primaryCurrencyCode: snapshot.primaryCurrencyCode,
-                displayCurrencyCode: snapshot.displayCurrencyCode,
-                rates: snapshot.rates,
-              }),
-            }))
-            const hasCompleteCurrentTotal = currentAmounts.every(({ converted }) => converted.value !== null)
-            const currentResponse =
-              !hasCompleteCurrentTotal && snapshot.period !== '1D'
-                ? await repository.getChartOverview({ start: snapshot.end.slice(0, 7) + '-01', end: snapshot.end, period: '1D', accountIds: snapshot.groups[metric].map(({ id }) => id) })
-                : null
-            return { metric, response, currentResponse, currentAmounts, hasCompleteCurrentTotal }
-          }),
-        )
-
-        if (responsesWithCurrent.some(({ currentResponse }) => currentResponse && !isResponseSuccess(currentResponse))) {
-          if (ownsCurrentState()) Object.assign(balanceState, { status: 'error', error: new Error('Analytics balance request failed'), isStale: hasExistingData })
-          return
-        }
-
-        const normalized = responsesWithCurrent.map(({ metric, response, currentResponse, currentAmounts, hasCompleteCurrentTotal }) => {
-          const normalize = (chartLines) =>
-            normalizeBalanceSeries({
-              chartLines,
-              metric,
-              displayCurrencyCode: snapshot.displayCurrencyCode,
-              primaryCurrencyCode: snapshot.primaryCurrencyCode,
-              rates: snapshot.rates,
-            })
-          const result = normalize(response?.data ?? [])
-          const currentResult = currentResponse ? normalize(currentResponse.data ?? []) : result
-          const currentTotal = currentAmounts.reduce((total, { converted }) => total + (converted.value ?? 0), 0)
-          const finalPoint = currentResult.points.at(-1)
-          const tolerance = 0.5 * 10 ** -snapshot.decimalPlaces
-          const isCurrentEstimated = currentAmounts.some(({ converted }) => converted.isEstimated)
-          const hasCurrentMonthChartPoint = Number.isFinite(finalPoint?.value) && finalPoint.x.slice(0, 7) === snapshot.end.slice(0, 7)
-          const hasSampleDateTruth = snapshot.groups[metric].every(({ currentDate }) => currentDate === finalPoint?.x || (!currentDate && finalPoint?.x === snapshot.end))
-          const hasMismatch =
-            finalPoint && hasCompleteCurrentTotal && hasSampleDateTruth && (Math.sign(finalPoint.value) !== Math.sign(currentTotal) || Math.abs(finalPoint.value - currentTotal) > tolerance)
-          const warnings =
-            (hasCompleteCurrentTotal && finalPoint && !hasSampleDateTruth) || (!hasCompleteCurrentTotal && hasCurrentMonthChartPoint && finalPoint.x < snapshot.end)
-              ? [{ type: 'current-balance-unverified', sampleDate: finalPoint.x, currentDate: snapshot.end }]
-              : hasMismatch
-                ? [{ type: 'current-balance-mismatch', sampleDate: finalPoint.x, chartValue: finalPoint.value, currentValue: currentTotal }]
-                : []
-
-          return {
-            id: metric,
-            ...result,
-            currentPoint: hasCompleteCurrentTotal
-              ? { x: snapshot.end, value: currentTotal, ...(isCurrentEstimated ? { isEstimated: true } : {}) }
-              : hasCurrentMonthChartPoint
-                ? { x: finalPoint.x, value: finalPoint.value, ...(finalPoint.isEstimated ? { isEstimated: true } : {}) }
-                : null,
-            missingCurrencies: [...new Set([...result.missingCurrencies, ...currentResult.missingCurrencies, ...currentAmounts.map(({ converted }) => converted.missingCurrency).filter(Boolean)])],
-            warnings,
-          }
-        })
-
-        if (!ownsCurrentState()) return
-        balanceCache.value = { ...balanceCache.value, [snapshot.cacheKey]: normalized }
-        Object.assign(balanceState, { status: normalized.some(({ points }) => points.length > 0) ? 'ready' : 'empty', error: null, isStale: false })
-      })()
-      balanceRequests.set(snapshot.cacheKey, { token: requestToken, generation, promise: request })
-      try {
-        return await request
-      } finally {
-        if (balanceRequests.get(snapshot.cacheKey)?.token === requestToken) balanceRequests.delete(snapshot.cacheKey)
-      }
+    async function loadTransactions(startDate, endDate) {
+      const query = [`date_after:${startDate}`, `date_before:${endDate}`, ...getExcludedTransactionFilters()]
+      const filters = [{ field: 'query', value: query.join(' ') }]
+      const getAll = (options) => transactionRepository.searchTransaction({ ...options, showLoading: false, showErrorToast: false })
+      const result = await transactionRepository.getAllWithMergeResult({ filters, getAll, pageSize: 200 })
+      return result.ok ? { ok: true, data: transformTransactions(result.data) } : { ok: false, data: [] }
     }
 
     async function loadSnapshot({ force = false } = {}) {
@@ -474,9 +368,12 @@ export function createAnalyticsStore(id, useDependencies) {
       const endDate = DateUtils.dateToString(today)
       const ownsCurrentSnapshot = () => activeSnapshotGeneration === generation
       Object.values(ancillaryState).forEach((state) => Object.assign(state, { status: 'loading', error: null }))
+      Object.assign(balanceState, { status: 'loading', error: null, isStale: false })
+      Object.assign(categoryState, { status: 'loading', error: null, isStale: false })
+      Object.assign(flowState, { status: 'loading', error: null, isStale: false })
 
       const request = (async () => {
-        const [accountResult, transactionLinkResult, transactionLinkTypeResult, subscriptionResult, recurringTransactionResult, rateResult] = await Promise.all([
+        const [accountResult, transactionLinkResult, transactionLinkTypeResult, subscriptionResult, recurringTransactionResult, rateResult, transactionResult] = await Promise.all([
           accountRepository.getAllWithMergeResult({ pageSize: 200 }),
           transactionLinkRepository.getAll(),
           transactionLinkTypeRepository.getAll(),
@@ -486,35 +383,58 @@ export function createAnalyticsStore(id, useDependencies) {
             await currencyStore.fetchExchangeRate?.()
             return { ...currencyStore.exchangeRates?.rates }
           })(),
-          fetchTransactions({ force, generation }),
+          loadTransactions(startDate, endDate),
         ])
         if (!ownsCurrentSnapshot()) return
 
-        snapshotRates.value = rateResult
         const ancillaryInputs = [
-          ['transactionLinks', transactionLinks, transactionLinkResult, 'transaction link'],
-          ['transactionLinkTypes', transactionLinkTypes, transactionLinkTypeResult, 'transaction link type'],
-          ['subscriptions', subscriptions, subscriptionResult, 'subscription'],
-          ['recurringTransactions', recurringTransactions, recurringTransactionResult, 'recurring transaction'],
+          ['transactionLinks', transactionLinkResult, 'transaction link'],
+          ['transactionLinkTypes', transactionLinkTypeResult, 'transaction link type'],
+          ['subscriptions', subscriptionResult, 'subscription'],
+          ['recurringTransactions', recurringTransactionResult, 'recurring transaction'],
         ]
-        ancillaryInputs.forEach(([name, input, result, label]) => {
+        ancillaryInputs.forEach(([name, result, label]) => {
           if (result?.ok) {
-            input.value = result.data
             Object.assign(ancillaryState[name], { status: result.data.length > 0 ? 'ready' : 'empty', error: null })
           } else {
-            input.value = []
             Object.assign(ancillaryState[name], { status: 'error', error: new Error(`Analytics ${label} request failed`) })
           }
         })
 
-        if (!accountResult?.ok) {
-          accounts.value = []
-          Object.assign(balanceState, { status: 'error', error: new Error('Analytics account request failed'), isStale: false })
-          return
+        rawSnapshot.value = {
+          accounts: accountResult?.ok ? accountResult.data : [],
+          transactions: transactionResult.ok ? transactionResult.data : [],
+          transactionLinks: transactionLinkResult?.ok ? transactionLinkResult.data : [],
+          transactionLinkTypes: transactionLinkTypeResult?.ok ? transactionLinkTypeResult.data : [],
+          subscriptions: subscriptionResult?.ok ? subscriptionResult.data : [],
+          recurringTransactions: recurringTransactionResult?.ok ? recurringTransactionResult.data : [],
+          rates: rateResult,
+          transactionCoverage: transactionResult.ok ? { startMonth: startDate.slice(0, 7), endDate } : null,
+          asOfDate: endDate,
         }
 
-        accounts.value = accountResult.data
-        await fetchBalances({ force, generation })
+        const transactionStatus = transactionResult.data.length > 0 ? 'ready' : 'empty'
+        if (transactionResult.ok) {
+          Object.assign(categoryState, { status: transactionStatus, error: null, isStale: false })
+          Object.assign(flowState, { status: transactionStatus, error: null, isStale: false })
+        } else {
+          const error = new Error('Analytics transaction request failed')
+          Object.assign(categoryState, { status: 'error', error, isStale: false })
+          Object.assign(flowState, { status: 'error', error, isStale: false })
+        }
+
+        if (!accountResult?.ok) Object.assign(balanceState, { status: 'error', error: new Error('Analytics account request failed'), isStale: false })
+        else if (!transactionResult.ok) Object.assign(balanceState, { status: 'error', error: new Error('Analytics transaction request failed'), isStale: false })
+        else {
+          const projections = balanceSeriesByMetric.value
+          const hasBalanceData = BALANCE_GROUPS.some((metric) => projections[metric].currentPoint || projections[metric].points.some(({ value }) => Number.isFinite(value)))
+          Object.assign(balanceState, { status: hasBalanceData ? 'ready' : 'empty', error: null, isStale: false })
+        }
+
+        if (!categorySelectionInitialized.value) {
+          if (persistedSelectedCategoryIds.value.length === 0) selectedCategoryIds.value = (categoryRanking.value.length > 0 ? categoryRanking.value : currentMonthCategoryIds.value).slice(0, 5)
+          categorySelectionInitialized.value = true
+        }
       })()
       snapshotRequest = { generation, promise: request }
       try {
@@ -534,7 +454,7 @@ export function createAnalyticsStore(id, useDependencies) {
     }
 
     async function retryBalance() {
-      await fetchBalances({ force: true })
+      await loadSnapshot({ force: true })
     }
 
     async function retryCategory() {
@@ -544,9 +464,6 @@ export function createAnalyticsStore(id, useDependencies) {
     async function retryFlow() {
       await loadSnapshot({ force: true })
     }
-
-    watch(balancePeriod, () => fetchBalances())
-    watch(displayCurrencyCode, () => fetchBalances())
 
     return {
       balancePeriod,
@@ -570,8 +487,12 @@ export function createAnalyticsStore(id, useDependencies) {
       transactionLinkTypes,
       subscriptions,
       recurringTransactions,
+      ledger,
+      balanceSeriesByMetric,
       balanceSeries,
       balanceWarnings,
+      analyticsAudit,
+      fxDisclosure,
       financialTrend,
       categoryRanking,
       categoryRankingItems,

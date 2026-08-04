@@ -3,12 +3,13 @@ import { readFileSync } from 'node:fs'
 import test, { afterEach, beforeEach } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, reactive, ref } from 'vue'
-import { format, subDays, subMonths } from 'date-fns'
+import { format, subMonths } from 'date-fns'
 import { createAnalyticsStore } from '../../stores/analyticsStoreFactory.js'
+import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
+import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 
 const currency = (id, code, decimalPlaces = 2) => ({ id, attributes: { code, decimal_places: decimalPlaces, default: code === 'USD' } })
 const usd = currency('usd', 'USD')
-const eur = currency('eur', 'EUR')
 const dashboardStore = reactive({
   dashboardCurrency: usd,
   get dashboardCurrencyCode() {
@@ -33,6 +34,8 @@ let recurringTransactionResult = async () => ({ ok: true, data: [] })
 let exchangeRateResponse = async () => {}
 let analyticsStore = null
 let now = new Date()
+const ledgerBuilds = []
+const balanceReconstructions = []
 
 const localeNames = ['de-DE', 'en', 'es-MX', 'fr', 'it', 'ko', 'pl', 'pt-BR', 'ro', 'ru-RU', 'zh-CN']
 const savingsPresentationKeys = [
@@ -166,6 +169,14 @@ const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   getCurrencyDecimalPlaces: (value) => Currency.getDecimalPlaces(value),
   getExcludedTransactionFilters: () => [],
   isResponseSuccess: (response) => [200, 204].includes(response?.status),
+  buildLedger: (options) => {
+    ledgerBuilds.push(options)
+    return buildAnalyticsLedger(options)
+  },
+  reconstructBalances: (options) => {
+    balanceReconstructions.push(options)
+    return reconstructBalanceSeries(options)
+  },
   getNow: () => now,
 }))
 
@@ -192,19 +203,6 @@ const debitLiability = () => ({
     current_balance: null,
     current_balance_date: format(new Date(), 'yyyy-MM-dd') + 'T23:59:59+00:00',
     current_debt: '250',
-  },
-})
-const creditLiability = () => ({
-  id: 'receivable',
-  attributes: {
-    active: true,
-    type: { fireflyCode: 'liabilities' },
-    liability_direction: { fireflyCode: 'credit' },
-    include_net_worth: false,
-    currency_code: 'USD',
-    current_balance: '150',
-    current_balance_date: format(new Date(), 'yyyy-MM-dd') + 'T23:59:59+00:00',
-    current_debt: '150',
   },
 })
 const chartResponse = (value, date = format(new Date(), 'yyyy-MM-dd')) => ({ status: 200, data: [{ currency_code: 'USD', entries: { [date]: String(value) } }] })
@@ -248,6 +246,8 @@ beforeEach(() => {
   accountRequests.length = 0
   transactionRequests.length = 0
   snapshotRequests.length = 0
+  ledgerBuilds.length = 0
+  balanceReconstructions.length = 0
   storageOverrides.clear()
   accountResponse = async () => chartResponse(100)
   transactionResult = []
@@ -295,63 +295,195 @@ test('provides the unavailable-amount calculation warning in every supported loc
   }
 })
 
-test('keeps overlapping balance requests isolated to their captured currency and current state', async () => {
-  const usdRequest = deferred()
-  const eurRequest = deferred()
-  const usdRetryRequest = deferred()
-  const responses = [usdRequest, eurRequest, usdRetryRequest]
-  accountResponse = () => responses.shift().promise
-  const store = (analyticsStore = useAnalyticsStore())
-
-  const initPromise = store.init()
-  await waitFor(() => accountRequests.length === 1)
-  dashboardStore.dashboardCurrency = eur
-  await nextTick()
-  await waitFor(() => accountRequests.length === 2)
-
-  eurRequest.resolve({ status: 500, data: {} })
-  await waitFor(() => store.balanceState.status === 'error')
-  usdRequest.resolve(chartResponse(100))
-  await initPromise
-  await nextTick()
-
-  assert.equal(store.balanceState.status, 'error')
-  dashboardStore.dashboardCurrency = usd
-  await nextTick()
-  await waitFor(() => accountRequests.length === 3)
-  usdRetryRequest.resolve(chartResponse(100))
-  await waitFor(() => store.balanceState.status === 'ready')
-  assert.equal(accountRequests.length, 3)
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').points, [{ x: format(new Date(), 'yyyy-MM-dd'), value: 100 }])
-})
-
-test('initializes a fallback currency with one request per non-empty group and range', async () => {
-  dashboardStore.dashboardCurrency = null
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-  await nextTick()
-
-  assert.equal(accountRequests.length, 1)
-})
-
-test('repairs the shared savings view and requests four logical balance groups without a unified fifth request', async () => {
-  storageOverrides.set('analyticsSavingsView', 'corrupt')
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  accountStore.accountList = [activeAsset(), includedSaving(), excludedSaving(), debitLiability(), creditLiability()]
+test('builds one coherent ledger and feeds the same entries to every balance projection', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const linkTypes = [{ id: 'refund', attributes: { outward: 'refund' } }]
+  const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '125', current_balance_date: '2026-08-10' } }
+  freshAccountResult = async () => ({ ok: true, data: [checking] })
+  transactionLinkTypeResult = async () => ({ ok: true, data: linkTypes })
+  transactionResult = [
+    {
+      id: 'expense-1',
+      attributes: {
+        transactions: [
+          {
+            transaction_journal_id: 'journal-1',
+            amount: '25',
+            currency_code: 'USD',
+            date: now,
+            source_id: 'checking',
+            destination_id: 'expense',
+            category_id: 'food',
+            accountDestination: { id: 'expense', attributes: { type: { fireflyCode: 'expense' } } },
+          },
+        ],
+      },
+    },
+  ]
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
 
-  assert.equal(store.savingsView, 'combined')
-  assert.equal(accountRequests.filter(({ period }) => period !== '1D').length, 4)
+  assert.equal(ledgerBuilds.length, 1)
+  assert.deepEqual(ledgerBuilds[0].linkTypes, linkTypes)
+  assert.equal(store.ledger.entries.length, 1)
   assert.deepEqual(
-    accountRequests
-      .filter(({ period }) => period !== '1D')
-      .map(({ accountIds }) => [...accountIds].sort())
-      .sort(),
-    [['checking', 'saving-included'], ['saving-excluded'], ['saving-included'], ['loan', 'receivable']].sort(),
+    balanceReconstructions.map(({ metric }) => metric),
+    ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt', 'expenses'],
   )
+  assert.equal(
+    balanceReconstructions.every(({ entries }) => entries === store.ledger.entries),
+    true,
+  )
+  assert.equal(store.categorySummary.series[0].currentActual, 25)
+  assert.equal(store.selectedFlow.audit.totalDestinations, 25)
+})
+
+test('reconstructs balance metrics from fresh accounts with explicit transaction-fetch coverage', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const staleAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '900' } }
+  const freshAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '125', current_balance_date: '2026-08-10' } }
+  accountStore.accountList = [staleAccount]
+  freshAccountResult = async () => ({ ok: true, data: [freshAccount] })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.balanceSeriesByMetric.netWorth.currentPoint.value, 125)
+  assert.deepEqual(balanceReconstructions[0].accounts[0], freshAccount)
+  assert.deepEqual(balanceReconstructions[0].coverage, { startMonth: '2024-08', endDate: '2026-08-10' })
+  assert.equal(accountStore.accountList[0].attributes.current_balance, '900')
+})
+
+test('refresh publishes only the newest complete ledger generation', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const olderAccounts = deferred()
+  const newerAccounts = deferred()
+  const olderTransactions = deferred()
+  const newerTransactions = deferred()
+  const accountResults = [olderAccounts, newerAccounts]
+  const transactionResults = [olderTransactions, newerTransactions]
+  freshAccountResult = () => accountResults.shift().promise
+  transactionResponse = () => transactionResults.shift().promise
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const initialLoad = store.init()
+  await waitFor(() => snapshotRequests.filter(({ input }) => input === 'accounts').length === 1)
+  const refreshedLoad = store.refresh()
+  await waitFor(() => snapshotRequests.filter(({ input }) => input === 'accounts').length === 2)
+
+  newerAccounts.resolve({ ok: true, data: [{ ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '250', current_balance_date: '2026-08-10' } }] })
+  newerTransactions.resolve({ ok: true, data: [currentExpenseTransaction(25)] })
+  await refreshedLoad
+  olderAccounts.resolve({ ok: true, data: [{ ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '100', current_balance_date: '2026-08-10' } }] })
+  olderTransactions.resolve({ ok: true, data: [currentExpenseTransaction(10)] })
+  await initialLoad
+
+  assert.equal(store.balanceSeriesByMetric.netWorth.currentPoint.value, 250)
+  assert.equal(store.ledger.entries[0].value, 25)
+  assert.equal(ledgerBuilds.length, 1)
+})
+
+test('dedupes one reconciliation warning across affected balance metrics', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const savings = { ...includedSaving(), attributes: { ...includedSaving().attributes, current_balance_date: '2026-08-09' } }
+  freshAccountResult = async () => ({ ok: true, data: [savings] })
+  transactionResult = [
+    {
+      id: 'saving-expense',
+      attributes: {
+        transactions: [
+          {
+            transaction_journal_id: 'saving-expense-journal',
+            amount: '20',
+            currency_code: 'USD',
+            date: now,
+            source_id: savings.id,
+            destination_id: 'expense',
+            accountDestination: { id: 'expense', attributes: { type: { fireflyCode: 'expense' } } },
+          },
+        ],
+      },
+    },
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.analyticsAudit.warnings, [
+    {
+      code: 'current-balance-mismatch',
+      metricIds: ['netWorth', 'savingsIncluded'],
+      accountIds: [savings.id],
+      transactionIds: ['saving-expense'],
+    },
+  ])
+  assert.deepEqual(store.balanceWarnings, [{ type: 'current-balance-mismatch', metricIds: ['netWorth', 'savings'] }])
+  assert.equal(
+    store.analyticsAudit.warnings.some(({ code }) => code === 'current-balance-unverified'),
+    false,
+  )
+})
+
+test('keeps unrelated cards ready when an optional Firefly input fails', async () => {
+  subscriptionResult = async () => ({ ok: false, data: [] })
+  transactionResult = [currentExpenseTransaction(25)]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.ancillaryState.subscriptions.status, 'error')
+  assert.equal(store.balanceState.status, 'ready')
+  assert.equal(store.categoryState.status, 'ready')
+  assert.equal(store.flowState.status, 'ready')
+  assert.equal(store.ledger.entries.length, 1)
+})
+
+test('publishes one FX disclosure only when conversion is used or incomplete', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const euroAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, currency_code: 'EUR', current_balance: '90', current_balance_date: '2026-08-10' } }
+  const expenseAccount = { id: 'expense', attributes: { active: true, type: { fireflyCode: 'expense' }, currency_code: 'JPY' } }
+  const yenExpense = {
+    id: 'yen-expense',
+    attributes: {
+      transactions: [
+        {
+          transaction_journal_id: 'yen-expense-journal',
+          amount: '500',
+          currency_code: 'JPY',
+          date: now,
+          source_id: euroAccount.id,
+          destination_id: 'expense',
+          accountDestination: { id: 'expense', attributes: { type: { fireflyCode: 'expense' } } },
+        },
+      ],
+    },
+  }
+  freshAccountResult = async () => ({ ok: true, data: [euroAccount, expenseAccount] })
+  transactionResult = [yenExpense]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(
+    store.ledger.entries.map(({ destinationKind, conversion }) => ({ destinationKind, conversion })),
+    [{ destinationKind: 'expense', conversion: { mode: 'unavailable', sourceCurrency: 'JPY', missingCurrency: 'JPY' } }],
+  )
+  assert.deepEqual(store.fxDisclosure, {
+    displayCurrencyCode: 'USD',
+    usesCurrentRates: true,
+    missingCurrencies: ['JPY'],
+    metricIds: ['netWorth', 'expenses'],
+  })
+
+  store.$dispose()
+  setActivePinia(createPinia())
+  freshAccountResult = async () => ({ ok: true, data: [activeAsset()] })
+  transactionResult = []
+  analyticsStore = useAnalyticsStore()
+  await analyticsStore.init()
+  assert.equal(analyticsStore.fxDisclosure, null)
 })
 
 test('defaults and repairs graph detail while accepting every supported level', () => {
@@ -445,12 +577,11 @@ test('combines included and excluded savings without refetching when the view ch
     { ...included, attributes: { ...included.attributes, current_balance: '100' } },
     { ...excluded, attributes: { ...excluded.attributes, current_balance: '40' } },
   ]
-  accountResponse = async ({ accountIds }) => chartResponse(accountIds.includes('saving-excluded') ? 40 : 100, '2026-08-10')
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
 
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').points, [{ x: '2026-08-10', value: 140 }])
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').points.at(-1), { x: '2026-07-31', value: 140 })
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').currentPoint, { x: '2026-08-10', value: 140 })
   const requestCount = accountRequests.length
 
@@ -497,337 +628,13 @@ test('uses included savings as the complete combined series when the excluded gr
   now = new Date('2026-08-10T12:00:00')
   const included = includedSaving()
   accountStore.accountList = [{ ...included, attributes: { ...included.attributes, current_balance: '100' } }]
-  accountResponse = async () => chartResponse(100, '2026-08-10')
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
 
   const savings = store.balanceSeries.find(({ id }) => id === 'savings')
-  assert.deepEqual(savings.points, [{ x: '2026-08-10', value: 100 }])
+  assert.deepEqual(savings.points.at(-1), { x: '2026-07-31', value: 100 })
   assert.deepEqual(savings.currentPoint, { x: '2026-08-10', value: 100 })
-})
-
-test('retains a complete combined savings series as stale when the excluded refresh fails', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  const included = includedSaving()
-  const excluded = excludedSaving()
-  accountStore.accountList = [
-    { ...included, attributes: { ...included.attributes, current_balance: '100' } },
-    { ...excluded, attributes: { ...excluded.attributes, current_balance: '40' } },
-  ]
-  let excludedFails = false
-  accountResponse = async ({ accountIds }) => {
-    if (accountIds.includes('saving-excluded')) return excludedFails ? { status: 500, data: {} } : chartResponse(40, '2026-08-10')
-    return chartResponse(excludedFails ? 999 : 100, '2026-08-10')
-  }
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-  excludedFails = true
-  await store.retryBalance()
-
-  assert.equal(store.balanceState.status, 'error')
-  assert.equal(store.balanceState.isStale, true)
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').points, [{ x: '2026-08-10', value: 140 }])
-})
-
-test('groups the same selected balance warning under both metric IDs', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  const sampleDate = '2026-08-07'
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  storageOverrides.set('analyticsVisibleBalanceTotalMetrics', ['netWorth', 'savings'])
-  accountStore.accountList = [includedSaving(), excludedSaving()]
-  accountResponse = async ({ accountIds }) => chartResponse(accountIds.includes('saving-excluded') ? 50 : 200, sampleDate)
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  assert.deepEqual(store.balanceWarnings, [{ type: 'current-balance-unverified', sampleDate, metricIds: ['netWorth', 'savings'] }])
-})
-
-test('limits four incomplete non-empty groups to four primary and four current fallbacks', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  const available = activeAsset()
-  const included = includedSaving()
-  const excluded = excludedSaving()
-  const debt = debitLiability()
-  accountStore.accountList = [
-    { ...available, attributes: { ...available.attributes, current_balance: null } },
-    { ...included, attributes: { ...included.attributes, current_balance: null } },
-    { ...excluded, attributes: { ...excluded.attributes, current_balance: null } },
-    { ...debt, attributes: { ...debt.attributes, current_balance: null, current_debt: null } },
-  ]
-  accountResponse = async ({ period }) => chartResponse(100, period === '1D' ? '2026-08-10' : '2026-07-31')
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  assert.equal(accountRequests.length, 8)
-  assert.equal(accountRequests.filter(({ period }) => period === '1W').length, 4)
-  assert.equal(accountRequests.filter(({ period }) => period === '1D').length, 4)
-})
-
-test('normalizes a current Firefly chart timestamp before validating balances', async () => {
-  const date = format(new Date(), 'yyyy-MM-dd')
-  const atomDate = date + 'T00:00:00+00:00'
-  accountResponse = async () => chartResponse(100, atomDate)
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  const netWorth = store.balanceSeries.find(({ id }) => id === 'netWorth')
-  assert.deepEqual(netWorth.points, [{ x: date, value: 100 }])
-  assert.deepEqual(netWorth.warnings, [])
-})
-
-test('validates debit liabilities against current debt', async () => {
-  accountStore.accountList = [debitLiability()]
-  accountResponse = async () => chartResponse(-200)
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  const debt = store.balanceSeries.find(({ id }) => id === 'debt')
-  assert.deepEqual(debt.currentPoint, { x: format(new Date(), 'yyyy-MM-dd'), value: 250 })
-  assert.deepEqual(debt.warnings, [{ type: 'current-balance-mismatch', sampleDate: format(new Date(), 'yyyy-MM-dd'), chartValue: 200, currentValue: 250 }])
-})
-
-for (const { name, direction, currentDebt, currentBalance, expected } of [
-  { name: 'negative debit current debt', direction: 'debit', currentDebt: '-250', currentBalance: '-125', expected: 250 },
-  { name: 'credit-direction current debt', direction: 'credit', currentDebt: '150', currentBalance: '-125', expected: 150 },
-  { name: 'blank current debt fallback', direction: 'debit', currentDebt: '   ', currentBalance: '-125', expected: 125 },
-  { name: 'explicit zero current debt', direction: 'debit', currentDebt: '0', currentBalance: '-125', expected: 0 },
-]) {
-  test(`uses ${name} for the current debt total`, async () => {
-    const liability = debitLiability()
-    accountStore.accountList = [
-      {
-        ...liability,
-        attributes: {
-          ...liability.attributes,
-          liability_direction: { fireflyCode: direction },
-          current_debt: currentDebt,
-          current_balance: currentBalance,
-        },
-      },
-    ]
-    accountResponse = async () => chartResponse(-500)
-    const store = (analyticsStore = useAnalyticsStore())
-
-    await store.init()
-
-    assert.equal(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint.value, expected)
-  })
-}
-
-test('marks a weekly final point unverified when no account value exists for its sample date', async () => {
-  const sampleDate = format(subDays(new Date(), 3), 'yyyy-MM-dd')
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  accountStore.accountList = [debitLiability()]
-  accountResponse = async () => chartResponse(-200, sampleDate)
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').warnings, [{ type: 'current-balance-unverified', sampleDate, currentDate: format(new Date(), 'yyyy-MM-dd') }])
-})
-
-test('uses a same-day debt chart actual when direct current debt is missing and preserves zero change', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  accountStore.accountList = [
-    {
-      ...debitLiability(),
-      attributes: { ...debitLiability().attributes, current_debt: null },
-    },
-  ]
-  accountResponse = async () => ({ status: 200, data: [{ currency_code: 'USD', entries: { '2026-07-31': '-200', '2026-08-10': '-200' } }] })
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'debt')
-  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'debt')
-  assert.deepEqual(sourceSeries.currentPoint, { x: '2026-08-10', value: 200 })
-  assert.deepEqual(sourceSeries.warnings, [])
-  assert.equal(trendSeries.currentTotal, 200)
-  assert.equal(trendSeries.currentChange, 0)
-  assert.deepEqual(
-    trendSeries.changePoints.find(({ kind }) => kind === 'partial'),
-    { x: '2026-08', value: 0, kind: 'partial' },
-  )
-})
-
-test('uses a current-month daily debt actual without replacing longer-window weekly history', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  accountStore.accountList = [
-    {
-      ...debitLiability(),
-      attributes: { ...debitLiability().attributes, current_debt: null },
-    },
-  ]
-  accountResponse = async ({ period }) =>
-    period === '1D' ? chartResponse(-147, '2026-08-07') : { status: 200, data: [{ currency_code: 'USD', entries: { '2026-06-30': '-253', '2026-07-28': '-200' } }] }
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'debt')
-  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'debt')
-  assert.deepEqual(
-    accountRequests.map(({ start, end, period }) => ({ start, end, period })),
-    [
-      { start: '2026-01-01', end: '2026-08-10', period: '1W' },
-      { start: '2026-08-01', end: '2026-08-10', period: '1D' },
-    ],
-  )
-  assert.deepEqual(sourceSeries.points, [
-    { x: '2026-06-30', value: 253 },
-    { x: '2026-07-28', value: 200 },
-  ])
-  assert.deepEqual(sourceSeries.currentPoint, { x: '2026-08-07', value: 147 })
-  assert.deepEqual(sourceSeries.warnings, [{ type: 'current-balance-unverified', sampleDate: '2026-08-07', currentDate: '2026-08-10' }])
-  assert.equal(trendSeries.currentTotal, 147)
-  assert.equal(trendSeries.currentChange, -53)
-})
-
-test('does not cache longer-window balances when the current-month auxiliary request fails', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  accountStore.accountList = [
-    {
-      ...debitLiability(),
-      attributes: { ...debitLiability().attributes, current_debt: null },
-    },
-  ]
-  let dailyFails = true
-  accountResponse = async ({ period }) => (period === '1D' ? (dailyFails ? { status: 500, data: {} } : chartResponse(-147, '2026-08-10')) : chartResponse(-200, '2026-07-28'))
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  assert.equal(store.balanceState.status, 'error')
-  assert.equal(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, undefined)
-
-  dailyFails = false
-  await store.retryBalance()
-
-  assert.equal(accountRequests.length, 4)
-  assert.equal(store.balanceState.status, 'ready')
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, { x: '2026-08-10', value: 147 })
-})
-
-test('keeps a newer currency result current while an older auxiliary debt request finishes', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  storageOverrides.set('analyticsBalancePeriod', 6)
-  accountStore.accountList = [
-    {
-      ...debitLiability(),
-      attributes: { ...debitLiability().attributes, current_debt: null },
-    },
-  ]
-  const olderDaily = deferred()
-  const newerDaily = deferred()
-  const dailyResponses = [olderDaily, newerDaily]
-  accountResponse = ({ period }) => (period === '1D' ? dailyResponses.shift().promise : Promise.resolve(chartResponse(-200, '2026-07-28')))
-  const store = (analyticsStore = useAnalyticsStore())
-
-  const initPromise = store.init()
-  await waitFor(() => accountRequests.length === 2)
-  dashboardStore.dashboardCurrency = eur
-  await nextTick()
-  await waitFor(() => accountRequests.length === 4)
-
-  newerDaily.resolve(chartResponse(-100, '2026-08-10'))
-  await waitFor(() => store.balanceState.status === 'ready')
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, { x: '2026-08-10', value: 90, isEstimated: true })
-
-  olderDaily.resolve(chartResponse(-200, '2026-08-10'))
-  await initPromise
-  await nextTick()
-
-  assert.equal(store.balanceState.status, 'ready')
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'debt').currentPoint, { x: '2026-08-10', value: 90, isEstimated: true })
-})
-
-test('keeps a prior-month debt chart actual out of current totals when direct current debt is missing', async () => {
-  const previousMonthEnd = format(new Date(new Date().getFullYear(), new Date().getMonth(), 0), 'yyyy-MM-dd')
-  accountStore.accountList = [
-    {
-      ...debitLiability(),
-      attributes: { ...debitLiability().attributes, current_debt: null, current_balance_date: previousMonthEnd },
-    },
-  ]
-  accountResponse = async () => chartResponse(-130, previousMonthEnd)
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'debt')
-  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'debt')
-  assert.equal(sourceSeries.currentPoint, null)
-  assert.equal(trendSeries.currentTotal, null)
-  assert.equal(trendSeries.currentChange, null)
-  assert.equal(
-    trendSeries.totalPoints.some(({ kind }) => kind === 'partial'),
-    false,
-  )
-  assert.equal(
-    trendSeries.changePoints.some(({ kind }) => kind === 'partial'),
-    false,
-  )
-})
-
-test('retains estimation and staleness metadata on a current-month debt chart fallback', async () => {
-  now = new Date('2026-08-10T12:00:00')
-  accountStore.accountList = [
-    {
-      ...debitLiability(),
-      attributes: { ...debitLiability().attributes, currency_code: 'EUR', current_debt: '   ' },
-    },
-  ]
-  accountResponse = async () => ({ status: 200, data: [{ currency_code: 'EUR', entries: { '2026-08-07': '-90' } }] })
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  const debt = store.balanceSeries.find(({ id }) => id === 'debt')
-  assert.deepEqual(debt.currentPoint, { x: '2026-08-07', value: 100, isEstimated: true })
-  assert.deepEqual(debt.warnings, [{ type: 'current-balance-unverified', sampleDate: '2026-08-07', currentDate: '2026-08-10' }])
-})
-
-test('keeps current-rate estimation on current points without marking exact history estimated', async () => {
-  const today = new Date()
-  const previousMonthEnd = format(new Date(today.getFullYear(), today.getMonth(), 0), 'yyyy-MM-dd')
-  accountStore.accountList = [
-    {
-      ...activeAsset(),
-      attributes: { ...activeAsset().attributes, currency_code: 'EUR', current_balance: '90', current_balance_date: previousMonthEnd },
-    },
-  ]
-  accountResponse = async () => ({ status: 200, data: [{ primary_currency_code: 'USD', pc_entries: { [previousMonthEnd]: '100' } }] })
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  const sourceSeries = store.balanceSeries.find(({ id }) => id === 'netWorth')
-  const trendSeries = store.financialTrend.series.find(({ id }) => id === 'netWorth')
-  assert.equal(sourceSeries.isEstimated, false)
-  assert.deepEqual(sourceSeries.currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 100, isEstimated: true })
-  assert.deepEqual(
-    trendSeries.totalPoints.find(({ kind }) => kind === 'partial'),
-    { x: format(today, 'yyyy-MM'), value: 100, kind: 'partial', isEstimated: true },
-  )
-  assert.equal(
-    trendSeries.totalPoints.filter(({ kind }) => kind === 'actual').every(({ isEstimated }) => isEstimated === undefined),
-    true,
-  )
-  assert.deepEqual(
-    trendSeries.changePoints.find(({ kind }) => kind === 'partial'),
-    { x: format(today, 'yyyy-MM'), value: 0, kind: 'partial', isEstimated: true },
-  )
 })
 
 test('defaults to all financial metrics and preserves valid legacy selections', () => {
@@ -868,34 +675,31 @@ test('repairs the financial trend view and keeps balance and change selections i
   assert.deepEqual(store.visibleFinancialMetrics, ['netWorth'])
 })
 
-test('requests one baseline month before three completed months', async () => {
-  const today = new Date()
-  const store = (analyticsStore = useAnalyticsStore())
-
-  await store.init()
-
-  assert.equal(accountRequests[0].start, format(new Date(today.getFullYear(), today.getMonth() - 4, 1), 'yyyy-MM-dd'))
-})
-
-test('derives financial trends from three account requests and the transaction ledger', async () => {
-  const today = new Date()
-  const checking = activeAsset()
+test('derives financial trends from the shared ledger and reconstructed balances', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const today = now
+  const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
   const savings = {
     id: 'savings',
-    attributes: { active: true, type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'savingAsset' }, include_net_worth: true, currency_code: 'USD', current_balance: '200' },
+    attributes: {
+      active: true,
+      type: { fireflyCode: 'asset' },
+      account_role: { fireflyCode: 'savingAsset' },
+      include_net_worth: true,
+      currency_code: 'USD',
+      current_balance: '200',
+      current_balance_date: '2026-08-10',
+    },
   }
-  accountStore.accountList = [checking, savings, debitLiability()]
-  accountResponse = async ({ accountIds }) => {
-    const sampleDate = format(subDays(today, 3), 'yyyy-MM-dd')
-    if (accountIds.includes('loan')) return chartResponse(-225, sampleDate)
-    if (accountIds.includes('savings') && !accountIds.includes('checking')) return chartResponse(175, sampleDate)
-    return chartResponse(275, sampleDate)
-  }
-  const checkingAccount = { attributes: { type: { fireflyCode: 'asset' } } }
-  const expenseAccount = { attributes: { type: { fireflyCode: 'expense' } } }
+  const expenseAccount = { id: 'expense', attributes: { active: true, type: { fireflyCode: 'expense' } } }
+  accountStore.accountList = [checking, savings, debitLiability(), expenseAccount]
   const expense = (id, amount, date, categoryId) => ({
     id,
-    attributes: { transactions: [{ amount: String(amount), currency_code: 'USD', date, category_id: categoryId, accountSource: checkingAccount, accountDestination: expenseAccount }] },
+    attributes: {
+      transactions: [
+        { transaction_journal_id: `${id}-journal`, amount: String(amount), currency_code: 'USD', date, category_id: categoryId, source_id: checking.id, destination_id: expenseAccount.id },
+      ],
+    },
   })
   transactionResult = [
     expense('three-months-ago', 100, new Date(today.getFullYear(), today.getMonth() - 3, 20), 'food'),
@@ -908,13 +712,9 @@ test('derives financial trends from three account requests and the transaction l
 
   await store.init()
 
-  assert.equal(accountRequests.length, 3)
-  assert.equal(
-    accountRequests.some(({ accountIds }) => accountIds.includes('expenses')),
-    false,
-  )
-  assert.equal(accountRequests[0].start, format(new Date(today.getFullYear(), today.getMonth() - 4, 1), 'yyyy-MM-dd'))
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 300 })
+  assert.equal(accountRequests.length, 0)
+  assert.deepEqual(balanceReconstructions[0].monthKeys, ['2026-04', '2026-05', '2026-06', '2026-07'])
+  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 300, transactionIds: [] })
   assert.equal(store.financialTrend.series.find(({ id }) => id === 'netWorth').currentTotal, 300)
   assert.deepEqual(
     store.financialTrend.expenses.actualPoints.map(({ value }) => value),
@@ -1181,28 +981,6 @@ test('waits for an in-flight non-forced snapshot before resolving a second init'
   accountRequest.resolve({ ok: true, data: [activeAsset()] })
   await Promise.all([firstInit, secondInit])
   assert.equal(secondInitResolved, true)
-})
-
-test('refresh replaces an in-flight same-key balance request and keeps its newer result', async () => {
-  const olderBalance = deferred()
-  const newerBalance = deferred()
-  const balanceResponses = [olderBalance, newerBalance]
-  accountResponse = () => balanceResponses.shift().promise
-  const store = (analyticsStore = useAnalyticsStore())
-
-  const initialLoad = store.init()
-  await waitFor(() => accountRequests.length === 1)
-  const refreshedLoad = store.refresh()
-  await waitFor(() => accountRequests.length === 2)
-
-  newerBalance.resolve(chartResponse(250))
-  await refreshedLoad
-  assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').points.at(-1).value, 250)
-
-  olderBalance.resolve(chartResponse(100))
-  await initialLoad
-  assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').points.at(-1).value, 250)
-  assert.equal(store.balanceState.status, 'ready')
 })
 
 test('retains failure metadata for each ancillary snapshot input', async () => {
