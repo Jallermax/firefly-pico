@@ -1,4 +1,5 @@
 import { format, startOfMonth, subMonths } from 'date-fns'
+import { sortMoneyFlowPresentationItems } from './AnalyticsCategoryPresentationUtils.js'
 
 const codeOf = (value) => value?.fireflyCode ?? value ?? null
 const unique = (values) => [...new Set(values.filter(Boolean))]
@@ -133,39 +134,43 @@ const splitDay = (item) => {
   return Number.isNaN(date.getTime()) ? null : date.getDate()
 }
 
-export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyCode, primaryCurrencyCode, rates, currencyDecimalPlaces = 2, savingsView }) {
+export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalPlaces = 2, savingsView }) {
   const nodes = new Map()
   const links = new Map()
-  const pairs = new Map()
   const savingsChanges = new Map()
-  const missingCurrencies = new Set()
   const unclassified = { value: 0, transactionIds: new Set() }
   const liabilityReallocations = new Map()
   const pools = {
     available: { incoming: 0, outgoing: 0 },
-    savings: { incoming: 0, outgoing: 0 },
+    savingsAccessible: { incoming: 0, outgoing: 0 },
+    savingsRestricted: { incoming: 0, outgoing: 0 },
   }
   const totals = {
     income: 0,
     refunds: 0,
     newDebt: 0,
-    liabilityCollected: 0,
     expenses: 0,
     debtPaid: 0,
-    liabilityExtended: 0,
+    savingsDeposited: 0,
+    excess: 0,
+    existingAvailable: 0,
+    savingsWithdrawal: 0,
   }
-  const bridge = { availableToSavings: 0, savingsToAvailable: 0, transactionIds: new Set() }
-  let isEstimated = false
-
-  const accountId = (account, fallback) => String(account?.id ?? account?.attributes?.name ?? fallback)
-  const categoryId = (item, fallback = ANALYTICS_UNCATEGORIZED_ID) => String(item?.category_id ?? fallback)
+  const coverage = new Map()
+  const savingsGroup = (kind) => (kind === 'savingsAccessible' ? 'accessible' : 'restricted')
+  const savingsPool = (kind) => (['savingsAccessible', 'savingsRestricted'].includes(kind) ? kind : null)
+  const accountId = (account, fallback) => String(account?.id ?? fallback)
   const sortedIds = (ids) => [...ids].filter(Boolean).sort()
+  const ensureNode = (id, options) => {
+    const node = nodes.get(id) ?? { id, ...options, value: 0, transactionIds: new Set() }
+    nodes.set(id, node)
+    return node
+  }
   const addNode = (id, options, value, transactionId) => {
     if (!Number.isFinite(value) || value === 0) return
-    const node = nodes.get(id) ?? { id, ...options, value: 0, transactionIds: new Set() }
+    const node = ensureNode(id, options)
     node.value += value
     if (transactionId) node.transactionIds.add(transactionId)
-    nodes.set(id, node)
   }
   const addLink = (sourceId, targetId, options, value, transactionId) => {
     if (!Number.isFinite(value) || value === 0) return
@@ -175,279 +180,249 @@ export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyC
     if (transactionId) link.transactionIds.add(transactionId)
     links.set(id, link)
   }
-  const addNodeFromIds = (id, options, value, transactionIds) => {
-    const ids = sortedIds(transactionIds)
-    if (ids.length === 0) return addNode(id, options, value, null)
-    for (const transactionId of ids) addNode(id, options, value / ids.length, transactionId)
-  }
-  const addLinkFromIds = (sourceId, targetId, options, value, transactionIds) => {
-    const ids = sortedIds(transactionIds)
-    if (ids.length === 0) return addLink(sourceId, targetId, options, value, null)
-    for (const transactionId of ids) addLink(sourceId, targetId, options, value / ids.length, transactionId)
-  }
   const addPool = (pool, direction, value) => {
     pools[pool][direction] += value
   }
-  const addSavingsChange = (account, value, transactionId) => {
+  const addSavingsChange = (kind, account, value, transactionId) => {
     const id = accountId(account, 'unknown-savings')
-    const change = savingsChanges.get(id) ?? { value: 0, transactionIds: new Set(), savingsGroup: account?.attributes?.include_net_worth === true ? 'included' : 'excluded' }
+    const key = `${kind}:${id}`
+    const change = savingsChanges.get(key) ?? { id, kind, value: 0, transactionIds: new Set() }
     change.value += value
     if (transactionId) change.transactionIds.add(transactionId)
-    savingsChanges.set(id, change)
+    savingsChanges.set(key, change)
   }
   const addUnclassified = (value, transactionId) => {
     if (!Number.isFinite(value)) unclassified.value = null
     else if (Number.isFinite(unclassified.value)) unclassified.value += value
     if (transactionId) unclassified.transactionIds.add(transactionId)
   }
-  const addPair = (pool, category, direction, value, transactionId) => {
-    const key = `${pool}:${category}`
-    const pair = pairs.get(key) ?? { pool, category, purchases: 0, refunds: 0, transactionIds: new Set() }
-    pair[direction] += value
-    if (transactionId) pair.transactionIds.add(transactionId)
-    pairs.set(key, pair)
+  const addSourceToPool = ({ id, options, pool, value, transactionId }) => {
+    addNode(id, { layer: 0, ...options }, value, transactionId)
+    addNode(pool, { layer: 1, kind: pool === 'available' ? 'available' : 'savings', ...(pool === 'available' ? {} : { savingsGroup: savingsGroup(pool) }) }, value, transactionId)
+    addLink(id, pool, { kind: options.kind, fundingPool: pool }, value, transactionId)
+    addPool(pool, 'incoming', value)
   }
-  const addIncome = (item, amount, transactionId, target) => {
-    const revenueAccount = item.accountSource
-    const id = String(item.category_id ?? revenueAccount?.id ?? 'uncategorized-income')
-    const label = String(item.category_name ?? revenueAccount?.attributes?.name ?? revenueAccount?.id ?? 'uncategorized-income')
-    addNode(`income:${id}`, { layer: 0, kind: 'income', refId: id, label }, amount, transactionId)
-    addNode('income', { layer: 1, kind: 'income' }, amount, transactionId)
-    addLink(`income:${id}`, 'income', { kind: 'income' }, amount, transactionId)
+  const addIncome = (entry, amount, targetKind) => {
+    const id = String(entry.categoryId ?? entry.sourceAccount?.id ?? 'uncategorized-income')
+    const sourceId = `income:${id}`
     totals.income += amount
-    if (target === 'available' || target === 'savings') {
-      addNode(target, { layer: 2, kind: target }, amount, transactionId)
-      addLink('income', target, { kind: 'income', fundingPool: target }, amount, transactionId)
-      addPool(target, 'incoming', amount)
-      if (target === 'savings') addSavingsChange(item.accountDestination, amount, transactionId)
+    const pool = targetKind === 'available' ? 'available' : savingsPool(targetKind)
+    if (pool) {
+      addSourceToPool({ id: sourceId, options: { kind: 'income', refId: id }, pool, value: amount, transactionId: entry.transactionId })
+      if (pool !== 'available') addSavingsChange(pool, entry.destinationAccount, amount, entry.transactionId)
       return
     }
-    addLiabilityDestination('income', target, item.accountDestination, amount, transactionId)
+    if (targetKind === 'liability') addDebtPayment(sourceId, entry.destinationAccount, amount, entry.transactionId, 'income')
   }
-  const addRefund = (item, amount, transactionId, target) => {
-    const category = categoryId(item)
-    const id = `refund:${category}`
-    addNode(id, { layer: 0, kind: 'refund', refId: category }, amount, transactionId)
+  const addRefund = (entry, amount, targetKind) => {
+    const category = String(entry.refund?.coverageCategoryId ?? entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID)
+    const sourceId = `refund:${category}`
     totals.refunds += amount
-    if (target === 'available' || target === 'savings') {
-      addNode(target, { layer: 2, kind: target }, amount, transactionId)
-      addLink(id, target, { kind: 'refund', fundingPool: target }, amount, transactionId)
-      addPool(target, 'incoming', amount)
-      if (target === 'savings') addSavingsChange(item.accountDestination, amount, transactionId)
+    const pool = targetKind === 'available' ? 'available' : savingsPool(targetKind)
+    if (pool) {
+      addSourceToPool({ id: sourceId, options: { kind: 'refund', refId: category, receiptSource: true }, pool, value: amount, transactionId: entry.transactionId })
+      if (pool !== 'available') addSavingsChange(pool, entry.destinationAccount, amount, entry.transactionId)
       return
     }
-    addLiabilityDestination(id, target, item.accountDestination, amount, transactionId)
+    if (targetKind === 'liability') addDebtPayment(sourceId, entry.destinationAccount, amount, entry.transactionId, 'refund')
   }
-  const addLiabilitySource = (sourceKind, account, amount, transactionId, target, item) => {
+  const addDebtPayment = (sourceId, account, amount, transactionId, sourceKind = null, fundingPool = null) => {
     const refId = accountId(account, 'unknown-liability')
-    const isDebit = sourceKind === 'liabilityDebit'
-    const id = `${isDebit ? 'newDebt' : 'liabilityCollected'}:${refId}`
-    const kind = isDebit ? 'newDebt' : 'liabilityCollected'
-    addNode(id, { layer: 0, kind, refId }, amount, transactionId)
-    totals[kind] += amount
-    if (target === 'available' || target === 'savings') {
-      addNode(target, { layer: 2, kind: target }, amount, transactionId)
-      addLink(id, target, { kind, fundingPool: target }, amount, transactionId)
-      addPool(target, 'incoming', amount)
-      if (target === 'savings') addSavingsChange(item.accountDestination, amount, transactionId)
-      return
+    if (sourceKind) addNode(sourceId, { layer: 0, kind: sourceKind, refId: sourceId.split(':').slice(1).join(':') }, amount, transactionId)
+    addNode('debtPaid', { layer: 2, kind: 'debtPaid' }, amount, transactionId)
+    addNode(`debtPaid:${refId}`, { layer: 3, kind: 'debtPaid', refId }, amount, transactionId)
+    addLink(sourceId, 'debtPaid', { kind: 'debtPaid', ...(fundingPool ? { fundingPool } : {}) }, amount, transactionId)
+    addLink('debtPaid', `debtPaid:${refId}`, { kind: 'debtPaid' }, amount, transactionId)
+    totals.debtPaid += amount
+  }
+  const addExpense = (pool, entry, amount, sourceId = pool) => {
+    const category = String(entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID)
+    if (pool) {
+      addNode(pool, { layer: 1, kind: pool === 'available' ? 'available' : 'savings', ...(pool === 'available' ? {} : { savingsGroup: savingsGroup(pool) }) }, amount, entry.transactionId)
+      addPool(pool, 'outgoing', amount)
     }
-    if (target === 'expense') {
-      const category = categoryId(item)
-      addNode('expenses', { layer: 3, kind: 'expenses' }, amount, transactionId)
-      addNode(`expense:${category}`, { layer: 4, kind: 'expenseCategory', refId: category }, amount, transactionId)
-      addLink(id, 'expenses', { kind }, amount, transactionId)
-      addLink('expenses', `expense:${category}`, { kind: 'expense' }, amount, transactionId)
-      totals.expenses += amount
+    addNode('expenses', { layer: 2, kind: 'expenses' }, amount, entry.transactionId)
+    addNode(`expense:${category}`, { layer: 3, kind: 'expenseCategory', refId: category }, amount, entry.transactionId)
+    addLink(sourceId, 'expenses', { kind: 'expense', ...(pool ? { fundingPool: pool } : {}) }, amount, entry.transactionId)
+    addLink('expenses', `expense:${category}`, { kind: 'expense', ...(pool ? { fundingPool: pool } : {}) }, amount, entry.transactionId)
+    totals.expenses += amount
+  }
+
+  for (const entry of entries) {
+    if (entry.refund?.isRefund && entry.refund.coverageMonthKey === monthKey && Number.isFinite(entry.refund.coverageValue)) {
+      const category = String(entry.refund.coverageCategoryId ?? entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID)
+      const item = coverage.get(category) ?? { value: 0, transactionIds: new Set() }
+      item.value += Math.abs(entry.refund.coverageValue)
+      if (entry.transactionId) item.transactionIds.add(entry.transactionId)
+      coverage.set(category, item)
     }
-  }
-  const addLiabilityDestination = (sourceId, destinationKind, account, amount, transactionId, fundingPool = null) => {
-    const refId = accountId(account, 'unknown-liability')
-    const isDebit = destinationKind === 'liabilityDebit'
-    const commonId = isDebit ? 'debtPaid' : 'liabilityExtended'
-    const id = `${commonId}:${refId}`
-    addNode(commonId, { layer: 3, kind: commonId }, amount, transactionId)
-    addNode(id, { layer: 4, kind: commonId, refId }, amount, transactionId)
-    addLink(sourceId, commonId, { kind: commonId, ...(fundingPool ? { fundingPool } : {}) }, amount, transactionId)
-    addLink(commonId, id, { kind: commonId }, amount, transactionId)
-    totals[commonId] += amount
-  }
-
-  for (const transaction of transactions) {
-    for (const item of transaction?.attributes?.transactions ?? []) {
-      if (splitMonthKey(item) !== monthKey) continue
-      const converted = convertAnalyticsAmount({
-        amount: item.amount,
-        currencyCode: item.currency_code,
-        primaryAmount: item.primary_amount,
-        primaryCurrencyCode,
-        displayCurrencyCode,
-        rates,
-      })
-      if (converted.missingCurrency) {
-        missingCurrencies.add(converted.missingCurrency)
-        continue
-      }
-      if (!Number.isFinite(converted.value)) {
-        addUnclassified(null, transaction.id)
-        continue
-      }
-
-      const amount = Math.abs(converted.value)
-      const sourceKind = getAnalyticsAccountKind(item.accountSource)
-      const destinationKind = getAnalyticsAccountKind(item.accountDestination)
-      isEstimated ||= converted.isEstimated
-
-      if (sourceKind === 'revenue' && ['available', 'savings', 'liabilityDebit', 'liabilityCredit'].includes(destinationKind)) {
-        addIncome(item, amount, transaction.id, destinationKind)
-        continue
-      }
-      if (sourceKind === 'expense' && ['available', 'savings'].includes(destinationKind)) {
-        addPair(destinationKind, categoryId(item), 'refunds', amount, transaction.id)
-        if (destinationKind === 'savings') addSavingsChange(item.accountDestination, amount, transaction.id)
-        continue
-      }
-      if (sourceKind === 'expense' && ['liabilityDebit', 'liabilityCredit'].includes(destinationKind)) {
-        addRefund(item, amount, transaction.id, destinationKind)
-        continue
-      }
-      if ((sourceKind === 'available' || sourceKind === 'savings') && destinationKind === 'expense') {
-        addPair(sourceKind, categoryId(item), 'purchases', amount, transaction.id)
-        if (sourceKind === 'savings') addSavingsChange(item.accountSource, -amount, transaction.id)
-        continue
-      }
-      if (sourceKind === 'available' && destinationKind === 'savings') {
-        bridge.availableToSavings += amount
-        bridge.transactionIds.add(transaction.id)
-        addSavingsChange(item.accountDestination, amount, transaction.id)
-        continue
-      }
-      if (sourceKind === 'savings' && destinationKind === 'available') {
-        bridge.savingsToAvailable += amount
-        bridge.transactionIds.add(transaction.id)
-        addSavingsChange(item.accountSource, -amount, transaction.id)
-        continue
-      }
-      if (sourceKind === 'savings' && destinationKind === 'savings') {
-        addSavingsChange(item.accountSource, -amount, transaction.id)
-        addSavingsChange(item.accountDestination, amount, transaction.id)
-        continue
-      }
-      if (sourceKind === 'available' && destinationKind === 'available') continue
-      if ((sourceKind === 'available' || sourceKind === 'savings') && ['liabilityDebit', 'liabilityCredit'].includes(destinationKind)) {
-        addNode(sourceKind, { layer: 2, kind: sourceKind }, amount, transaction.id)
-        addLiabilityDestination(sourceKind, destinationKind, item.accountDestination, amount, transaction.id, sourceKind)
-        addPool(sourceKind, 'outgoing', amount)
-        if (sourceKind === 'savings') addSavingsChange(item.accountSource, -amount, transaction.id)
-        continue
-      }
-      if (['liabilityDebit', 'liabilityCredit'].includes(sourceKind) && ['available', 'savings', 'expense'].includes(destinationKind)) {
-        addLiabilitySource(sourceKind, item.accountSource, amount, transaction.id, destinationKind, item)
-        continue
-      }
-      if (['liabilityDebit', 'liabilityCredit'].includes(sourceKind) && ['liabilityDebit', 'liabilityCredit'].includes(destinationKind)) {
-        const sourceId = accountId(item.accountSource, 'unknown-liability')
-        const targetId = accountId(item.accountDestination, 'unknown-liability')
-        const key = `${sourceId}->${targetId}`
-        const reallocation = liabilityReallocations.get(key) ?? { sourceId, targetId, value: 0, transactionIds: new Set() }
-        reallocation.value += amount
-        reallocation.transactionIds.add(transaction.id)
-        liabilityReallocations.set(key, reallocation)
-        continue
-      }
-
-      addUnclassified(amount, transaction.id)
+    if (entry.monthKey !== monthKey) continue
+    if (entry.conversion?.missingCurrency) continue
+    if (!Number.isFinite(entry.value)) {
+      addUnclassified(null, entry.transactionId)
+      continue
     }
-  }
 
-  for (const { pool, category, purchases, refunds, transactionIds } of pairs.values()) {
-    const net = purchases - refunds
-    const ids = sortedIds(transactionIds)
-    if (net > 0) {
-      addNodeFromIds(pool, { layer: 2, kind: pool }, net, ids)
-      addNodeFromIds('expenses', { layer: 3, kind: 'expenses' }, net, ids)
-      addNodeFromIds(`expense:${category}`, { layer: 4, kind: 'expenseCategory', refId: category }, net, ids)
-      addLinkFromIds(pool, 'expenses', { kind: 'expense', fundingPool: pool }, net, ids)
-      addLinkFromIds('expenses', `expense:${category}`, { kind: 'expense', fundingPool: pool }, net, ids)
-      addPool(pool, 'outgoing', net)
-      totals.expenses += net
+    const amount = Math.abs(entry.value)
+    const sourceKind = entry.sourceKind
+    const destinationKind = entry.destinationKind
+    const sourceSavings = savingsPool(sourceKind)
+    const destinationSavings = savingsPool(destinationKind)
+    if (entry.refund?.isRefund && sourceKind === 'expense' && ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(destinationKind)) {
+      addRefund(entry, amount, destinationKind)
+      continue
     }
-    if (net < 0) {
-      const value = -net
-      const id = `refund:${category}`
-      addNodeFromIds(id, { layer: 0, kind: 'refund', refId: category }, value, ids)
-      addNodeFromIds(pool, { layer: 2, kind: pool }, value, ids)
-      addLinkFromIds(id, pool, { kind: 'refund', fundingPool: pool }, value, ids)
-      addPool(pool, 'incoming', value)
-      totals.refunds += value
+    if (sourceKind === 'revenue' && ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(destinationKind)) {
+      addIncome(entry, amount, destinationKind)
+      continue
     }
-  }
-
-  const netBridge = bridge.availableToSavings - bridge.savingsToAvailable
-  for (const transactionId of sortedIds(bridge.transactionIds)) {
-    if (netBridge > 0) addLink('available', 'savings', { kind: 'bridge', fundingPool: 'available' }, netBridge / bridge.transactionIds.size, transactionId)
-    if (netBridge < 0) addLink('savings', 'available', { kind: 'bridge', fundingPool: 'savings' }, -netBridge / bridge.transactionIds.size, transactionId)
-  }
-  if (netBridge > 0) {
-    addNode('available', { layer: 2, kind: 'available' }, netBridge, null)
-    addNode('savings', { layer: 2, kind: 'savings' }, netBridge, null)
-    addPool('available', 'outgoing', netBridge)
-    addPool('savings', 'incoming', netBridge)
-  }
-  if (netBridge < 0) {
-    addNode('savings', { layer: 2, kind: 'savings' }, -netBridge, null)
-    addNode('available', { layer: 2, kind: 'available' }, -netBridge, null)
-    addPool('savings', 'outgoing', -netBridge)
-    addPool('available', 'incoming', -netBridge)
+    if ((sourceKind === 'available' || sourceSavings) && destinationKind === 'expense') {
+      addExpense(sourceKind === 'available' ? 'available' : sourceSavings, entry, amount)
+      if (sourceSavings) addSavingsChange(sourceSavings, entry.sourceAccount, -amount, entry.transactionId)
+      continue
+    }
+    if (sourceKind === 'available' && destinationSavings) {
+      addNode('available', { layer: 1, kind: 'available' }, amount, entry.transactionId)
+      addNode(destinationSavings, { layer: 1, kind: 'savings', savingsGroup: savingsGroup(destinationSavings) }, amount, entry.transactionId)
+      addLink('available', destinationSavings, { kind: 'bridge', fundingPool: 'available' }, amount, entry.transactionId)
+      addPool('available', 'outgoing', amount)
+      addPool(destinationSavings, 'incoming', amount)
+      addSavingsChange(destinationSavings, entry.destinationAccount, amount, entry.transactionId)
+      continue
+    }
+    if (sourceSavings && destinationKind === 'available') {
+      addNode(sourceSavings, { layer: 1, kind: 'savings', savingsGroup: savingsGroup(sourceSavings) }, amount, entry.transactionId)
+      addNode('available', { layer: 1, kind: 'available' }, amount, entry.transactionId)
+      addLink(sourceSavings, 'available', { kind: 'bridge', fundingPool: sourceSavings }, amount, entry.transactionId)
+      addPool(sourceSavings, 'outgoing', amount)
+      addPool('available', 'incoming', amount)
+      addSavingsChange(sourceSavings, entry.sourceAccount, -amount, entry.transactionId)
+      continue
+    }
+    if (sourceSavings && destinationSavings) {
+      addNode(sourceSavings, { layer: 1, kind: 'savings', savingsGroup: savingsGroup(sourceSavings) }, amount, entry.transactionId)
+      addNode(destinationSavings, { layer: 1, kind: 'savings', savingsGroup: savingsGroup(destinationSavings) }, amount, entry.transactionId)
+      addLink(sourceSavings, destinationSavings, { kind: 'bridge', fundingPool: sourceSavings }, amount, entry.transactionId)
+      addPool(sourceSavings, 'outgoing', amount)
+      addPool(destinationSavings, 'incoming', amount)
+      addSavingsChange(sourceSavings, entry.sourceAccount, -amount, entry.transactionId)
+      addSavingsChange(destinationSavings, entry.destinationAccount, amount, entry.transactionId)
+      continue
+    }
+    if ((sourceKind === 'available' || sourceSavings) && destinationKind === 'liability') {
+      const pool = sourceKind === 'available' ? 'available' : sourceSavings
+      addNode(pool, { layer: 1, kind: pool === 'available' ? 'available' : 'savings', ...(pool === 'available' ? {} : { savingsGroup: savingsGroup(pool) }) }, amount, entry.transactionId)
+      addDebtPayment(pool, entry.destinationAccount, amount, entry.transactionId, null, pool)
+      addPool(pool, 'outgoing', amount)
+      if (sourceSavings) addSavingsChange(sourceSavings, entry.sourceAccount, -amount, entry.transactionId)
+      continue
+    }
+    if (sourceKind === 'liability' && ['available', 'savingsAccessible', 'savingsRestricted', 'expense'].includes(destinationKind)) {
+      const refId = accountId(entry.sourceAccount, 'unknown-liability')
+      const sourceId = `newDebt:${refId}`
+      totals.newDebt += amount
+      if (destinationKind === 'expense') {
+        addNode(sourceId, { layer: 0, kind: 'newDebt', refId }, amount, entry.transactionId)
+        addExpense(null, entry, amount, sourceId)
+      } else {
+        const pool = destinationKind === 'available' ? 'available' : destinationSavings
+        addSourceToPool({ id: sourceId, options: { kind: 'newDebt', refId }, pool, value: amount, transactionId: entry.transactionId })
+        if (destinationSavings) addSavingsChange(destinationSavings, entry.destinationAccount, amount, entry.transactionId)
+      }
+      continue
+    }
+    if (sourceKind === 'liability' && destinationKind === 'liability') {
+      const sourceId = accountId(entry.sourceAccount, 'unknown-liability')
+      const targetId = accountId(entry.destinationAccount, 'unknown-liability')
+      const key = `${sourceId}->${targetId}`
+      const reallocation = liabilityReallocations.get(key) ?? { sourceId, targetId, value: 0, transactionIds: new Set() }
+      reallocation.value += amount
+      if (entry.transactionId) reallocation.transactionIds.add(entry.transactionId)
+      liabilityReallocations.set(key, reallocation)
+      continue
+    }
+    if (sourceKind === 'available' && destinationKind === 'available') continue
+    addUnclassified(amount, entry.transactionId)
   }
 
   let positiveSavingsMovement = 0
   let negativeSavingsMovement = 0
-  for (const [id, change] of savingsChanges) {
+  for (const change of savingsChanges.values()) {
+    const group = savingsGroup(change.kind)
     if (change.value > 0) {
+      const useId = `savingsDeposited:${group}`
       positiveSavingsMovement += change.value
-      addNodeFromIds('savingsDeposited', { layer: 3, kind: 'savingsDeposited' }, change.value, change.transactionIds)
-      addNodeFromIds(`savingsDeposit:${id}`, { layer: 4, kind: 'savingsDeposit', refId: id, savingsGroup: change.savingsGroup }, change.value, change.transactionIds)
-      addLinkFromIds('savings', 'savingsDeposited', { kind: 'savingsDeposit' }, change.value, change.transactionIds)
-      addLinkFromIds('savingsDeposited', `savingsDeposit:${id}`, { kind: 'savingsDeposit' }, change.value, change.transactionIds)
+      totals.savingsDeposited += change.value
+      addNode(useId, { layer: 2, kind: 'savingsDeposited', savingsGroup: group }, change.value, null)
+      addNode(`savingsDeposit:${change.id}`, { layer: 3, kind: 'savingsDeposit', refId: change.id, savingsGroup: group }, change.value, null)
+      addLink(change.kind, useId, { kind: 'savingsDeposit', fundingPool: change.kind }, change.value, null)
+      addLink(useId, `savingsDeposit:${change.id}`, { kind: 'savingsDeposit', fundingPool: change.kind }, change.value, null)
+      addPool(change.kind, 'outgoing', change.value)
+      for (const transactionId of change.transactionIds) {
+        ensureNode(useId, {}).transactionIds.add(transactionId)
+        ensureNode(`savingsDeposit:${change.id}`, {}).transactionIds.add(transactionId)
+        links.get(`${change.kind}->${useId}:savingsDeposit:${change.kind}`).transactionIds.add(transactionId)
+        links.get(`${useId}->savingsDeposit:${change.id}:savingsDeposit:${change.kind}`).transactionIds.add(transactionId)
+      }
     }
     if (change.value < 0) {
       const value = -change.value
+      const sourceId = `savingsWithdrawal:${change.id}`
       negativeSavingsMovement += value
-      addNodeFromIds(`existingSavings:${id}`, { layer: 0, kind: 'existingSavings', refId: id, savingsGroup: change.savingsGroup }, value, change.transactionIds)
-      addLinkFromIds(`existingSavings:${id}`, 'savings', { kind: 'existingSavings' }, value, change.transactionIds)
+      totals.savingsWithdrawal += value
+      addSourceToPool({ id: sourceId, options: { kind: 'existingSavings', movementKind: 'savingsWithdrawal', refId: change.id, savingsGroup: group }, pool: change.kind, value, transactionId: null })
+      for (const transactionId of change.transactionIds) {
+        ensureNode(sourceId, {}).transactionIds.add(transactionId)
+        nodes.get(change.kind).transactionIds.add(transactionId)
+        links.get(`${sourceId}->${change.kind}:existingSavings:${change.kind}`).transactionIds.add(transactionId)
+      }
     }
   }
 
-  const availableNet = pools.available.incoming - pools.available.outgoing
-  const savingsNet = pools.savings.incoming - pools.savings.outgoing
-  const newExcess = Math.max(availableNet, 0)
-  const existingAvailableFundsUsed = Math.max(-availableNet, 0)
-  if (newExcess > 0) {
-    addNode('newExcess', { layer: 3, kind: 'newExcess' }, newExcess, null)
-    addLink('available', 'newExcess', { kind: 'newExcess' }, newExcess, null)
-  }
-  if (existingAvailableFundsUsed > 0) {
-    addNode('existingAvailable', { layer: 0, kind: 'existingAvailable' }, existingAvailableFundsUsed, null)
-    addLink('existingAvailable', 'available', { kind: 'existingAvailable' }, existingAvailableFundsUsed, null)
+  for (const [category, item] of coverage) {
+    const node = ensureNode(`expense:${category}`, { layer: 3, kind: 'expenseCategory', refId: category })
+    const coverageTransactionIds = sortedIds(item.transactionIds)
+    node.refundCoverage = { value: item.value, transactionIds: coverageTransactionIds }
+    for (const transactionId of coverageTransactionIds) {
+      node.transactionIds.add(transactionId)
+      for (const link of links.values()) if (link.targetId === node.id) link.transactionIds.add(transactionId)
+    }
   }
 
-  for (const pool of ['available', 'savings']) {
-    const node = nodes.get(pool)
-    if (!node) continue
-    node.value = [...links.values()].filter((link) => link.targetId === pool).reduce((total, link) => total + link.value, 0)
+  for (const pool of Object.keys(pools)) {
+    const net = pools[pool].incoming - pools[pool].outgoing
+    if (pool !== 'available' || net >= 0) continue
+    const value = -net
+    totals.existingAvailable += value
+    addSourceToPool({ id: 'existingAvailable', options: { kind: 'existingAvailable' }, pool, value, transactionId: null })
   }
+  const availableNet = pools.available.incoming - pools.available.outgoing
+  if (availableNet > 0) {
+    totals.excess += availableNet
+    addNode('newExcess', { layer: 2, kind: 'newExcess' }, availableNet, null)
+    addLink('available', 'newExcess', { kind: 'newExcess', fundingPool: 'available' }, availableNet, null)
+    addPool('available', 'outgoing', availableNet)
+  }
+
+  for (const pool of Object.keys(pools)) {
+    const node = nodes.get(pool)
+    if (node) node.value = Math.max(pools[pool].incoming, pools[pool].outgoing)
+  }
+  const savingsIncoming = pools.savingsAccessible.incoming + pools.savingsRestricted.incoming
+  const savingsOutgoing = pools.savingsAccessible.outgoing + pools.savingsRestricted.outgoing
 
   const audit = {
     pools: {
-      available: { ...pools.available, net: availableNet },
-      savings: { ...pools.savings, net: savingsNet },
+      available: { ...pools.available, net: pools.available.incoming - pools.available.outgoing },
+      savings: { incoming: savingsIncoming, outgoing: savingsOutgoing, net: savingsIncoming - savingsOutgoing },
+      savingsAccessible: { ...pools.savingsAccessible, net: pools.savingsAccessible.incoming - pools.savingsAccessible.outgoing },
+      savingsRestricted: { ...pools.savingsRestricted, net: pools.savingsRestricted.incoming - pools.savingsRestricted.outgoing },
     },
-    totalSources: totals.income + totals.refunds + totals.newDebt + totals.liabilityCollected + existingAvailableFundsUsed + negativeSavingsMovement,
-    totalDestinations: totals.expenses + totals.debtPaid + totals.liabilityExtended + positiveSavingsMovement + newExcess,
-    liabilityIncrease: totals.newDebt + totals.liabilityExtended,
-    liabilityReduction: totals.debtPaid + totals.liabilityCollected,
-    netDebtChange: totals.newDebt + totals.liabilityExtended - totals.debtPaid - totals.liabilityCollected,
+    totalSources: totals.income + totals.refunds + totals.newDebt + totals.existingAvailable + totals.savingsWithdrawal,
+    totalDestinations: totals.expenses + totals.debtPaid + totals.savingsDeposited + totals.excess,
+    liabilityIncrease: totals.newDebt,
+    liabilityReduction: totals.debtPaid,
+    netDebtChange: totals.newDebt - totals.debtPaid,
     positiveSavingsMovement,
     negativeSavingsMovement,
     netSavings: positiveSavingsMovement - negativeSavingsMovement,
@@ -456,24 +431,29 @@ export function buildMonthlyMoneyFlow({ transactions, monthKey, displayCurrencyC
   }
   audit.equationDifference = audit.totalSources - audit.totalDestinations
   const tolerance = 0.5 * 10 ** -currencyDecimalPlaces
-  const availableDifference = pools.available.incoming + existingAvailableFundsUsed - pools.available.outgoing - newExcess
-  const savingsDifference = pools.savings.incoming + negativeSavingsMovement - pools.savings.outgoing - positiveSavingsMovement
+  const poolsBalanced = Object.values(pools).every(({ incoming, outgoing }) => Math.abs(incoming - outgoing) <= tolerance)
+  const missingCurrencies = unique(entries.filter(({ monthKey: entryMonthKey }) => entryMonthKey === monthKey).map(({ conversion }) => conversion?.missingCurrency))
   const isBalanced =
-    Math.abs(availableDifference) <= tolerance &&
-    Math.abs(savingsDifference) <= tolerance &&
-    Math.abs(audit.equationDifference) <= tolerance &&
-    Number.isFinite(unclassified.value) &&
-    Math.abs(unclassified.value) <= tolerance &&
-    missingCurrencies.size === 0
+    poolsBalanced && Math.abs(audit.equationDifference) <= tolerance && Number.isFinite(unclassified.value) && Math.abs(unclassified.value) <= tolerance && missingCurrencies.length === 0
+
+  const graphNodes = [...nodes.values()].map((node) => ({ ...node, transactionIds: sortedIds(node.transactionIds) }))
+  const sortedNodes = sortMoneyFlowNodes(graphNodes)
+  const nodeOrder = new Map(sortedNodes.map(({ id }, index) => [id, index]))
+  const sortedLinks = [...links.values()]
+    .map((link) => ({ ...link, transactionIds: sortedIds(link.transactionIds) }))
+    .sort(
+      (left, right) =>
+        (nodeOrder.get(left.sourceId) ?? 0) - (nodeOrder.get(right.sourceId) ?? 0) || (nodeOrder.get(left.targetId) ?? 0) - (nodeOrder.get(right.targetId) ?? 0) || left.id.localeCompare(right.id),
+    )
 
   return {
-    nodes: [...nodes.values()].map((node) => ({ ...node, transactionIds: sortedIds(node.transactionIds) })).sort((left, right) => left.id.localeCompare(right.id)),
-    links: [...links.values()].map((link) => ({ ...link, transactionIds: sortedIds(link.transactionIds) })).sort((left, right) => left.id.localeCompare(right.id)),
+    nodes: sortedNodes,
+    links: sortedLinks,
     pools: audit.pools,
     audit,
     meta: { savingsView },
-    isEstimated,
-    missingCurrencies: [...missingCurrencies].sort(),
+    isEstimated: entries.some(({ monthKey: entryMonthKey, isEstimated }) => entryMonthKey === monthKey && isEstimated),
+    missingCurrencies,
     unclassified: { value: unclassified.value, transactionIds: sortedIds(unclassified.transactionIds) },
     isBalanced,
   }
@@ -487,6 +467,7 @@ const moneyFlowOtherGroups = {
 
 const moneyFlowOtherKind = (kind) => `other${kind.charAt(0).toUpperCase()}${kind.slice(1)}`
 const sortedTransactionIds = (items) => unique(items.flatMap(({ transactionIds }) => transactionIds ?? [])).sort()
+const sortMoneyFlowNodes = (nodes) => [...new Set(nodes.map(({ layer }) => layer))].sort().flatMap((layer) => sortMoneyFlowPresentationItems(nodes.filter((node) => node.layer === layer)))
 
 export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
   if (detailLevel === 'all') return graph
@@ -574,8 +555,12 @@ export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
     existing.transactionIds = sortedTransactionIds([existing, link])
   }
 
-  const nodes = [...graph.nodes.filter(({ id }) => !hiddenToOther.has(id)), ...otherNodes].sort((left, right) => left.id.localeCompare(right.id))
-  const links = [...rewiredLinks.values()].sort((left, right) => left.id.localeCompare(right.id))
+  const nodes = sortMoneyFlowNodes([...graph.nodes.filter(({ id }) => !hiddenToOther.has(id)), ...otherNodes])
+  const nodeOrder = new Map(nodes.map(({ id }, index) => [id, index]))
+  const links = [...rewiredLinks.values()].sort(
+    (left, right) =>
+      (nodeOrder.get(left.sourceId) ?? 0) - (nodeOrder.get(right.sourceId) ?? 0) || (nodeOrder.get(left.targetId) ?? 0) - (nodeOrder.get(right.targetId) ?? 0) || left.id.localeCompare(right.id),
+  )
   return { ...graph, nodes, links }
 }
 

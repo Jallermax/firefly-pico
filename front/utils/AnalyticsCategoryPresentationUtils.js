@@ -44,3 +44,10 @@ export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, un
     showCalculation: true,
   }
 }
+
+export const sortMoneyFlowPresentationItems = (items) =>
+  [...items].sort((left, right) => {
+    const leftIsOther = String(left.id).startsWith('other:') || String(left.kind).startsWith('other') || left.label === 'Other'
+    const rightIsOther = String(right.id).startsWith('other:') || String(right.kind).startsWith('other') || right.label === 'Other'
+    return Number(leftIsOther) - Number(rightIsOther) || Math.abs(right.value) - Math.abs(left.value) || String(left.refId ?? left.id).localeCompare(String(right.refId ?? right.id))
+  })

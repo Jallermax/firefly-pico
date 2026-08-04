@@ -164,3 +164,18 @@ test('category card renders unavailable amounts as a blocking warning before emp
   assert.match(template, /analytics\.common\.unavailable_amounts/)
   assert.match(template, /readyPresentation\.unavailableTransactionIds\.join\(', '\)/)
 })
+
+test('money-flow presentation order is amount descending, stable by ID, with Other last', () => {
+  assert.equal(typeof CategoryPresentation.sortMoneyFlowPresentationItems, 'function')
+  const items = [
+    { id: 'other:expenses', label: 'Other', value: 200 },
+    { id: 'expense:z', value: 40 },
+    { id: 'expense:largest', value: 90 },
+    { id: 'expense:a', value: -40 },
+  ]
+
+  assert.deepEqual(
+    CategoryPresentation.sortMoneyFlowPresentationItems(items).map(({ id }) => id),
+    ['expense:largest', 'expense:a', 'expense:z', 'other:expenses'],
+  )
+})

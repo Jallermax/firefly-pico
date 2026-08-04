@@ -252,31 +252,12 @@ export function createAnalyticsStore(id, useDependencies) {
       ]
     })
     const selectedFullFlow = computed(() => {
-      const projection = buildMonthlyMoneyFlow({
-        transactions: legacyTransactions.value,
+      return buildMonthlyMoneyFlow({
+        entries: ledger.value.entries,
         monthKey: format(selectedFlowMonth.value, 'yyyy-MM'),
-        displayCurrencyCode: displayCurrencyCode.value,
-        primaryCurrencyCode: displayCurrencyCode.value,
-        rates: { [displayCurrencyCode.value]: 1 },
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
         savingsView: savingsView.value,
       })
-      const selectedMonthKey = format(selectedFlowMonth.value, 'yyyy-MM')
-      const unavailableTransactionIds = legacyUnavailableEntries.value
-        .filter(({ monthKey, sourceAccount, destinationAccount }) => {
-          if (monthKey !== selectedMonthKey) return false
-          const sourceKind = getAnalyticsAccountKind(sourceAccount)
-          const destinationKind = getAnalyticsAccountKind(destinationAccount)
-          return sourceKind !== 'available' || destinationKind !== 'available'
-        })
-        .map(({ transactionId }) => transactionId)
-      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...unavailableTransactionIds].filter(Boolean))].sort()
-      return {
-        ...projection,
-        isEstimated: ledger.value.fx.isEstimated,
-        missingCurrencies: ledger.value.fx.missingCurrencies,
-        unclassified: { value: unclassifiedTransactionIds.length ? null : projection.unclassified.value, transactionIds: unclassifiedTransactionIds },
-      }
     })
     const selectedFlow = computed(() => {
       const fullGraph = selectedFullFlow.value

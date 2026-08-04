@@ -985,60 +985,258 @@ test('category ranking uses category ID as a stable tie-breaker', () => {
   assert.deepEqual(ids, ['food', 'rent'])
 })
 
-test('publishes only the layered monthly money-flow contract', () => {
-  const graph = buildMonthlyMoneyFlow({
-    monthKey: '2026-04',
-    displayCurrencyCode: 'USD',
-    primaryCurrencyCode: 'USD',
-    rates: { USD: 1 },
-    savingsView: 'combined',
-    transactions: [transaction('card-buy', [split({ amount: 100, date: '2026-04-04', source: card, destination: expense, categoryId: 'food' })])],
-  })
-
-  assert.equal(Array.isArray(graph.nodes), true)
-  assert.equal(Array.isArray(graph.links), true)
-  assert.equal(graph.sources, undefined)
-  assert.equal(graph.destinations, undefined)
-  assert.deepEqual(graph.meta, { savingsView: 'combined' })
-  assert.equal(linkValue(graph, 'available', 'expenses'), 100)
-})
-
 const flowArgs = { monthKey: '2026-08', displayCurrencyCode: 'USD', primaryCurrencyCode: 'USD', rates: { USD: 1 }, currencyDecimalPlaces: 2, savingsView: 'combined' }
 const nodeValue = (graph, id) => graph.nodes.find((node) => node.id === id)?.value ?? 0
 const nodeTransactions = (graph, id) => graph.nodes.find((node) => node.id === id)?.transactionIds ?? []
 const linkValue = (graph, sourceId, targetId) => graph.links.filter((link) => link.sourceId === sourceId && link.targetId === targetId).reduce((sum, link) => sum + link.value, 0)
 const linkTotal = (graph, id, direction) => graph.links.filter((link) => link[`${direction}Id`] === id).reduce((sum, link) => sum + link.value, 0)
 
-const manyCategoryGraph = {
-  nodes: [
-    { id: 'available', layer: 2, kind: 'available', value: 280, transactionIds: [] },
-    { id: 'expenses', layer: 3, kind: 'expenses', value: 280, transactionIds: [] },
-    { id: 'expense:category-1', layer: 4, kind: 'expenseCategory', refId: 'category-1', value: 70, transactionIds: ['expense-1'] },
-    { id: 'expense:category-2', layer: 4, kind: 'expenseCategory', refId: 'category-2', value: 60, transactionIds: ['expense-2'] },
-    { id: 'expense:category-3', layer: 4, kind: 'expenseCategory', refId: 'category-3', value: 50, transactionIds: ['expense-3'] },
-    { id: 'expense:category-4', layer: 4, kind: 'expenseCategory', refId: 'category-4', value: 40, transactionIds: ['expense-4'] },
-    { id: 'expense:category-5', layer: 4, kind: 'expenseCategory', refId: 'category-5', value: 30, transactionIds: ['expense-5'] },
-    { id: 'expense:category-6', layer: 4, kind: 'expenseCategory', refId: 'category-6', value: 20, transactionIds: ['expense-6'] },
-    { id: 'expense:category-7', layer: 4, kind: 'expenseCategory', refId: 'category-7', value: 10, transactionIds: ['expense-7'] },
-  ],
-  links: [
-    { id: 'available->expenses', sourceId: 'available', targetId: 'expenses', kind: 'expense', fundingPool: 'available', value: 280, transactionIds: [] },
-    { id: 'expenses->category-1', sourceId: 'expenses', targetId: 'expense:category-1', kind: 'expense', fundingPool: 'available', value: 70, transactionIds: ['expense-1'] },
-    { id: 'expenses->category-2', sourceId: 'expenses', targetId: 'expense:category-2', kind: 'expense', fundingPool: 'available', value: 60, transactionIds: ['expense-2'] },
-    { id: 'expenses->category-3', sourceId: 'expenses', targetId: 'expense:category-3', kind: 'expense', fundingPool: 'available', value: 50, transactionIds: ['expense-3'] },
-    { id: 'expenses->category-4', sourceId: 'expenses', targetId: 'expense:category-4', kind: 'expense', fundingPool: 'available', value: 40, transactionIds: ['expense-4'] },
-    { id: 'expenses->category-5', sourceId: 'expenses', targetId: 'expense:category-5', kind: 'expense', fundingPool: 'available', value: 30, transactionIds: ['expense-5'] },
-    { id: 'expenses->category-6', sourceId: 'expenses', targetId: 'expense:category-6', kind: 'expense', fundingPool: 'available', value: 20, transactionIds: ['expense-6'] },
-    { id: 'expenses->category-7', sourceId: 'expenses', targetId: 'expense:category-7', kind: 'expense', fundingPool: 'available', value: 10, transactionIds: ['expense-7'] },
-  ],
-  pools: { available: { incoming: 280, outgoing: 280, net: 0 }, savings: { incoming: 0, outgoing: 0, net: 0 } },
-  audit: { totalSources: 280, totalDestinations: 280, equationDifference: 0 },
-  meta: { savingsView: 'combined' },
+const ledgerEntry = ({
+  id,
+  value,
+  sourceKind,
+  destinationKind,
+  categoryId = ANALYTICS_UNCATEGORIZED_ID,
+  sourceAccountId = `${sourceKind}-source`,
+  destinationAccountId = `${destinationKind}-destination`,
+  monthKey = '2026-08',
+  refund = {},
+}) => ({
+  id: `${id}:${id}-journal:0`,
+  transactionId: id,
+  journalId: `${id}-journal`,
+  splitIndex: 0,
+  date: `${monthKey}-05`,
+  monthKey,
+  day: 5,
+  value,
   isEstimated: false,
-  missingCurrencies: [],
-  unclassified: { value: 0, transactionIds: [] },
-  isBalanced: true,
-}
+  conversion: { mode: 'exact', sourceCurrency: 'USD' },
+  sourceAccount: { id: sourceAccountId },
+  destinationAccount: { id: destinationAccountId },
+  sourceKind,
+  destinationKind,
+  categoryId,
+  tags: [],
+  refund: {
+    isRefund: false,
+    signals: [],
+    linkedPurchaseTransactionId: null,
+    linkedPurchaseMonthKey: null,
+    coverageCategoryId: null,
+    coverageMonthKey: null,
+    coverageValue: null,
+    isLinked: false,
+    ...refund,
+  },
+})
+
+const buildLedgerFlow = (entries, overrides = {}) => buildMonthlyMoneyFlow({ entries, ...flowArgs, ...overrides })
+
+test('sorts income and expense categories by amount descending with stable ID ties', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'income-z', value: 40, sourceKind: 'revenue', destinationKind: 'available', categoryId: 'z-art' }),
+    ledgerEntry({ id: 'income-a', value: 40, sourceKind: 'revenue', destinationKind: 'available', categoryId: 'a-art' }),
+    ledgerEntry({ id: 'income-big', value: 90, sourceKind: 'revenue', destinationKind: 'available', categoryId: 'salary' }),
+    ledgerEntry({ id: 'expense-z', value: 20, sourceKind: 'available', destinationKind: 'expense', categoryId: 'z-food' }),
+    ledgerEntry({ id: 'expense-a', value: 20, sourceKind: 'available', destinationKind: 'expense', categoryId: 'a-food' }),
+    ledgerEntry({ id: 'expense-big', value: 50, sourceKind: 'available', destinationKind: 'expense', categoryId: 'rent' }),
+  ])
+
+  assert.deepEqual(
+    graph.nodes.filter(({ kind }) => kind === 'income').map(({ id }) => id),
+    ['income:salary', 'income:a-art', 'income:z-art'],
+  )
+  assert.deepEqual(
+    graph.nodes.filter(({ kind }) => kind === 'expenseCategory').map(({ id }) => id),
+    ['expense:rent', 'expense:a-food', 'expense:z-food'],
+  )
+})
+
+test('keeps ordinary Art income and Art expense as distinct cash paths', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'art-income', value: 80, sourceKind: 'revenue', destinationKind: 'available', categoryId: 'art' }),
+    ledgerEntry({ id: 'art-expense', value: 30, sourceKind: 'available', destinationKind: 'expense', categoryId: 'art' }),
+  ])
+
+  assert.equal(nodeValue(graph, 'income:art'), 80)
+  assert.equal(linkValue(graph, 'income:art', 'available'), 80)
+  assert.equal(nodeValue(graph, 'expense:art'), 30)
+  assert.equal(linkValue(graph, 'expenses', 'expense:art'), 30)
+})
+
+test('keeps a linked Tech refund receipt and annotates gross Tech expense coverage', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'tech-purchase', value: 100, sourceKind: 'available', destinationKind: 'expense', categoryId: 'tech' }),
+    ledgerEntry({
+      id: 'tech-refund',
+      value: 40,
+      sourceKind: 'expense',
+      destinationKind: 'available',
+      categoryId: 'misc',
+      refund: {
+        isRefund: true,
+        signals: ['link'],
+        isLinked: true,
+        linkedPurchaseTransactionId: 'tech-purchase',
+        linkedPurchaseMonthKey: '2026-08',
+        coverageCategoryId: 'tech',
+        coverageMonthKey: '2026-08',
+        coverageValue: 40,
+      },
+    }),
+  ])
+
+  assert.equal(linkValue(graph, 'refund:tech', 'available'), 40)
+  assert.equal(nodeValue(graph, 'expense:tech'), 100)
+  assert.deepEqual(graph.nodes.find(({ id }) => id === 'expense:tech').refundCoverage, { value: 40, transactionIds: ['tech-refund'] })
+  assert.equal(graph.audit.totalSources, 100)
+  assert.equal(graph.audit.totalDestinations, 100)
+})
+
+test('attaches a tag-only refund to its category in the receipt month', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({
+      id: 'tag-refund',
+      value: 25,
+      sourceKind: 'expense',
+      destinationKind: 'available',
+      categoryId: 'books',
+      refund: { isRefund: true, signals: ['tag'], coverageCategoryId: 'books', coverageMonthKey: '2026-08', coverageValue: 25 },
+    }),
+  ])
+
+  assert.equal(linkValue(graph, 'refund:books', 'available'), 25)
+  assert.deepEqual(graph.nodes.find(({ id }) => id === 'expense:books').refundCoverage, { value: 25, transactionIds: ['tag-refund'] })
+  assert.equal(graph.nodes.find(({ id }) => id === 'expense:books').value, 0)
+})
+
+test('routes Available deposits through accessible and restricted Savings with exact thickness', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'accessible-deposit', value: 70, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'hysa' }),
+    ledgerEntry({ id: 'restricted-deposit', value: 30, sourceKind: 'available', destinationKind: 'savingsRestricted', destinationAccountId: 'hsa' }),
+  ])
+
+  assert.equal(linkValue(graph, 'available', 'savingsAccessible'), 70)
+  assert.equal(linkValue(graph, 'available', 'savingsRestricted'), 30)
+  assert.equal(linkValue(graph, 'savingsAccessible', 'savingsDeposited:accessible'), 70)
+  assert.equal(linkValue(graph, 'savingsRestricted', 'savingsDeposited:restricted'), 30)
+  assert.equal(linkValue(graph, 'savingsDeposited:accessible', 'savingsDeposit:hysa'), 70)
+  assert.equal(linkValue(graph, 'savingsDeposited:restricted', 'savingsDeposit:hsa'), 30)
+})
+
+test('routes a Savings-originated expense through its savings pool', () => {
+  const graph = buildLedgerFlow([ledgerEntry({ id: 'savings-medical', value: 45, sourceKind: 'savingsAccessible', destinationKind: 'expense', sourceAccountId: 'hysa', categoryId: 'medical' })])
+
+  assert.equal(linkValue(graph, 'savingsWithdrawal:hysa', 'savingsAccessible'), 45)
+  assert.equal(linkValue(graph, 'savingsAccessible', 'expenses'), 45)
+  assert.equal(linkValue(graph, 'expenses', 'expense:medical'), 45)
+  assert.equal(graph.audit.netSavings, -45)
+})
+
+test('shows net negative Savings as a left-side withdrawal source', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'deposit', value: 20, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'hysa' }),
+    ledgerEntry({ id: 'withdraw', value: 50, sourceKind: 'savingsAccessible', destinationKind: 'available', sourceAccountId: 'hysa' }),
+  ])
+
+  assert.equal(nodeValue(graph, 'savingsWithdrawal:hysa'), 30)
+  assert.deepEqual((({ kind, movementKind, savingsGroup }) => ({ kind, movementKind, savingsGroup }))(graph.nodes.find(({ id }) => id === 'savingsWithdrawal:hysa')), {
+    kind: 'existingSavings',
+    movementKind: 'savingsWithdrawal',
+    savingsGroup: 'accessible',
+  })
+  assert.equal(linkValue(graph, 'savingsWithdrawal:hysa', 'savingsAccessible'), 30)
+  assert.equal(linkValue(graph, 'savingsAccessible', 'available'), 50)
+  assert.equal(graph.audit.netSavings, -30)
+})
+
+test('adds existing Available funds when uses exceed new sources', () => {
+  const graph = buildLedgerFlow([ledgerEntry({ id: 'rent', value: 125, sourceKind: 'available', destinationKind: 'expense', categoryId: 'rent' })])
+
+  assert.equal(linkValue(graph, 'existingAvailable', 'available'), 125)
+  assert.equal(graph.audit.totalSources, 125)
+  assert.equal(graph.audit.totalDestinations, 125)
+  assert.equal(graph.audit.equationDifference, 0)
+})
+
+test('withholds nonzero unclassified ledger value without emitting a ribbon', () => {
+  const graph = buildLedgerFlow([ledgerEntry({ id: 'unknown-expense', value: 35, sourceKind: 'unknown', destinationKind: 'expense', categoryId: 'food' })])
+
+  assert.deepEqual(graph.nodes, [])
+  assert.deepEqual(graph.links, [])
+  assert.deepEqual(graph.unclassified, { value: 35, transactionIds: ['unknown-expense'] })
+  assert.equal(graph.isBalanced, false)
+})
+
+test('groups Top 5 detail from ledger values, leaves Top 10 expanded, and preserves Other transaction IDs', () => {
+  const entries = [70, 60, 50, 40, 30, 20, 10].map((value, index) =>
+    ledgerEntry({ id: `expense-${index + 1}`, value, sourceKind: 'available', destinationKind: 'expense', categoryId: `category-${index + 1}` }),
+  )
+  const graph = buildLedgerFlow(entries)
+  const topFive = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 5 })
+  const topTen = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 10 })
+
+  assert.deepEqual(
+    topFive.nodes.filter(({ layer }) => layer === 3).map(({ id }) => id),
+    ['expense:category-1', 'expense:category-2', 'expense:category-3', 'expense:category-4', 'expense:category-5', 'other:expenses:available:positive'],
+  )
+  assert.equal(nodeValue(topFive, 'other:expenses:available:positive'), 30)
+  assert.deepEqual(nodeTransactions(topFive, 'other:expenses:available:positive'), ['expense-6', 'expense-7'])
+  assert.deepEqual(topFive.links.find(({ targetId }) => targetId === 'other:expenses:available:positive').transactionIds, ['expense-6', 'expense-7'])
+  assert.deepEqual(
+    topFive.nodes.map(({ layer }) => layer),
+    [...topFive.nodes.map(({ layer }) => layer)].sort(),
+  )
+  assert.equal(
+    topTen.nodes.some(({ id }) => id.startsWith('other:')),
+    false,
+  )
+  assert.equal(AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 'all' }), graph)
+})
+
+test('groups only compatible income, refund, accessible Savings, and restricted Savings siblings', () => {
+  const entries = []
+  for (let index = 1; index <= 6; index++) {
+    entries.push(ledgerEntry({ id: `income-${index}`, value: 10, sourceKind: 'revenue', destinationKind: 'available', categoryId: `income-${index}` }))
+    entries.push(
+      ledgerEntry({
+        id: `refund-${index}`,
+        value: 5,
+        sourceKind: 'expense',
+        destinationKind: 'available',
+        categoryId: `refund-${index}`,
+        refund: { isRefund: true, signals: ['tag'], coverageCategoryId: `refund-${index}`, coverageMonthKey: '2026-08', coverageValue: 5 },
+      }),
+    )
+    entries.push(ledgerEntry({ id: `accessible-${index}`, value: index, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: `accessible-${index}` }))
+    entries.push(ledgerEntry({ id: `restricted-${index}`, value: index, sourceKind: 'available', destinationKind: 'savingsRestricted', destinationAccountId: `restricted-${index}` }))
+  }
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: buildLedgerFlow(entries), detailLevel: 5 })
+  const otherNodes = limited.nodes.filter(({ id }) => id.startsWith('other:'))
+
+  assert.equal(
+    otherNodes.some(({ kind }) => kind === 'otherIncome'),
+    true,
+  )
+  assert.equal(
+    otherNodes.some(({ kind }) => kind === 'otherRefund'),
+    true,
+  )
+  assert.equal(
+    otherNodes.some(({ kind, savingsGroup }) => kind === 'otherSavingsDeposit' && savingsGroup === 'accessible'),
+    true,
+  )
+  assert.equal(
+    otherNodes.some(({ kind, savingsGroup }) => kind === 'otherSavingsDeposit' && savingsGroup === 'restricted'),
+    true,
+  )
+})
+
+const manyCategoryGraph = buildLedgerFlow(
+  [70, 60, 50, 40, 30, 20, 10].map((value, index) => ledgerEntry({ id: `expense-${index + 1}`, value, sourceKind: 'available', destinationKind: 'expense', categoryId: `category-${index + 1}` })),
+)
 
 const flowAccounts = {
   checking: typedAccount({ id: 'checking', type: 'asset' }),
@@ -1053,17 +1251,15 @@ const flowAccounts = {
   other: typedAccount({ id: 'other', type: 'bill' }),
 }
 
-test('withholds invalid Money flow amounts and blocks on their transaction IDs', () => {
-  const transactions = [
-    transaction('null-amount', [{ ...split({ amount: 1, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' }), amount: null }]),
-    transaction('blank-amount', [{ ...split({ amount: 1, date: '2026-08-02', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' }), amount: '   ' }]),
-    transaction('non-finite-amount', [{ ...split({ amount: 1, date: '2026-08-03', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' }), amount: Number.NaN }]),
-  ]
-  const graph = buildMonthlyMoneyFlow({ ...flowArgs, transactions })
+test('withholds unavailable ledger values and blocks on their exact transaction IDs', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'invalid-z', value: null, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' }),
+    ledgerEntry({ id: 'invalid-a', value: null, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' }),
+  ])
 
   assert.deepEqual(graph.nodes, [])
   assert.deepEqual(graph.links, [])
-  assert.deepEqual(graph.unclassified, { value: null, transactionIds: ['blank-amount', 'non-finite-amount', 'null-amount'] })
+  assert.deepEqual(graph.unclassified, { value: null, transactionIds: ['invalid-a', 'invalid-z'] })
   assert.equal(graph.isBalanced, false)
 })
 
@@ -1074,242 +1270,47 @@ test('classifies layered money-flow endpoints without treating credit cards as d
   assert.equal(AnalyticsUtils.getAnalyticsAccountKind(flowAccounts.unknownLiability), 'liabilityUnknown')
 })
 
-test('routes card purchases through Available and never through Debt', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [transaction('card-food', [split({ amount: 80, date: '2026-08-02', source: flowAccounts.card, destination: flowAccounts.expense, categoryId: 'food' })])],
-  })
+test('routes only normalized liabilities through debt outcomes', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'card-food', value: 80, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'card', categoryId: 'food' }),
+    ledgerEntry({ id: 'loan-proceeds', value: 50, sourceKind: 'liability', destinationKind: 'available', sourceAccountId: 'loan' }),
+    ledgerEntry({ id: 'loan-payment', value: 20, sourceKind: 'available', destinationKind: 'liability', destinationAccountId: 'loan' }),
+  ])
 
   assert.equal(linkValue(graph, 'available', 'expenses'), 80)
+  assert.equal(linkValue(graph, 'newDebt:loan', 'available'), 50)
+  assert.equal(linkValue(graph, 'available', 'debtPaid'), 20)
   assert.equal(
-    graph.nodes.some(({ kind }) => ['newDebt', 'debtPaid', 'liabilityExtended', 'liabilityCollected'].includes(kind)),
+    graph.nodes.some(({ id }) => id === 'newDebt:card' || id === 'debtPaid:card'),
     false,
   )
 })
 
-test('routes immediate account transitions through their literal layered endpoints', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('revenue-available', [split({ amount: 10, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
-      transaction('revenue-savings', [split({ amount: 11, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.savings, categoryId: 'bonus' })]),
-      transaction('available-expense', [split({ amount: 12, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
-      transaction('savings-expense', [split({ amount: 13, date: '2026-08-01', source: flowAccounts.savings, destination: flowAccounts.expense, categoryId: 'food' })]),
-      transaction('available-savings', [split({ amount: 14, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.savings })]),
-      transaction('savings-available', [split({ amount: 5, date: '2026-08-01', source: flowAccounts.savings, destination: flowAccounts.checking })]),
-      transaction('debit-available', [split({ amount: 15, date: '2026-08-01', source: flowAccounts.debit, destination: flowAccounts.checking })]),
-      transaction('debit-expense', [split({ amount: 16, date: '2026-08-01', source: flowAccounts.debit, destination: flowAccounts.expense, categoryId: 'medical' })]),
-      transaction('available-debit', [split({ amount: 17, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.debit })]),
-      transaction('revenue-debit', [split({ amount: 18, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.debit, categoryId: 'salary' })]),
-      transaction('refund-debit', [split({ amount: 19, date: '2026-08-01', source: flowAccounts.expense, destination: flowAccounts.debit, categoryId: 'food' })]),
-      transaction('credit-available', [split({ amount: 20, date: '2026-08-01', source: flowAccounts.credit, destination: flowAccounts.checking })]),
-      transaction('credit-expense', [split({ amount: 21, date: '2026-08-01', source: flowAccounts.credit, destination: flowAccounts.expense, categoryId: 'medical' })]),
-      transaction('available-credit', [split({ amount: 22, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.credit })]),
-      transaction('revenue-credit', [split({ amount: 23, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.credit, categoryId: 'salary' })]),
-      transaction('refund-credit', [split({ amount: 24, date: '2026-08-01', source: flowAccounts.expense, destination: flowAccounts.credit, categoryId: 'food' })]),
-    ],
-  })
-
-  assert.equal(linkValue(graph, 'income', 'available'), 10)
-  assert.equal(linkValue(graph, 'income', 'savings'), 11)
-  assert.equal(linkValue(graph, 'available', 'expenses'), 12)
-  assert.equal(linkValue(graph, 'savings', 'expenses'), 13)
-  assert.equal(linkValue(graph, 'available', 'savings'), 9)
-  assert.equal(linkValue(graph, 'newDebt:loan', 'available'), 15)
-  assert.equal(linkValue(graph, 'newDebt:loan', 'expenses'), 16)
-  assert.equal(linkValue(graph, 'available', 'debtPaid'), 17)
-  assert.equal(linkValue(graph, 'income', 'debtPaid'), 18)
-  assert.equal(linkValue(graph, 'refund:food', 'debtPaid'), 19)
-  assert.equal(linkValue(graph, 'liabilityCollected:receivable', 'available'), 20)
-  assert.equal(linkValue(graph, 'liabilityCollected:receivable', 'expenses'), 21)
-  assert.equal(linkValue(graph, 'available', 'liabilityExtended'), 22)
-  assert.equal(linkValue(graph, 'income', 'liabilityExtended'), 23)
-  assert.equal(linkValue(graph, 'refund:food', 'liabilityExtended'), 24)
-})
-
-test('uses the income category before revenue account name and sorts graph drilldowns', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('z-income', [split({ amount: 10, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
-      transaction('a-income', [split({ amount: 5, date: '2026-08-02', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
-    ],
-  })
-
-  assert.equal(nodeValue(graph, 'income:salary'), 15)
-  assert.deepEqual(nodeTransactions(graph, 'income:salary'), ['a-income', 'z-income'])
-  assert.equal(graph.links.find(({ sourceId, targetId }) => sourceId === 'income:salary' && targetId === 'income').transactionIds.join(','), 'a-income,z-income')
-})
-
-test('keeps uncategorized income node IDs stable across account renames and duplicate account names', () => {
-  const beforeRename = typedAccount({ id: 'salary-one', name: 'Salary', type: 'revenue' })
-  const afterRename = typedAccount({ id: 'salary-one', name: 'New Salary', type: 'revenue' })
-  const sameNamedAccount = typedAccount({ id: 'salary-two', name: 'Salary', type: 'revenue' })
-  const buildGraph = (source) =>
-    buildMonthlyMoneyFlow({
-      ...flowArgs,
-      transactions: [transaction('income', [split({ amount: 10, date: '2026-08-01', source, destination: flowAccounts.checking })])],
-    })
-
-  assert.equal(nodeValue(buildGraph(beforeRename), 'income:salary-one'), 10)
-  assert.equal(nodeValue(buildGraph(afterRename), 'income:salary-one'), 10)
-  const duplicateNamesGraph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('first', [split({ amount: 10, date: '2026-08-01', source: beforeRename, destination: flowAccounts.checking })]),
-      transaction('second', [split({ amount: 20, date: '2026-08-02', source: sameNamedAccount, destination: flowAccounts.checking })]),
-    ],
-  })
-  assert.equal(nodeValue(duplicateNamesGraph, 'income:salary-one'), 10)
-  assert.equal(nodeValue(duplicateNamesGraph, 'income:salary-two'), 20)
-})
-
-test('preserves immediate Available and Savings funding on shared liability outcomes', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('available-payment', [split({ amount: 30, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.debit })]),
-      transaction('savings-payment', [split({ amount: 20, date: '2026-08-02', source: flowAccounts.savings, destination: flowAccounts.debit })]),
-    ],
-  })
-
-  assert.equal(graph.links.find(({ sourceId, targetId }) => sourceId === 'available' && targetId === 'debtPaid').fundingPool, 'available')
-  assert.equal(graph.links.find(({ sourceId, targetId }) => sourceId === 'savings' && targetId === 'debtPaid').fundingPool, 'savings')
-})
-
-test('keeps a purchase from Available and refund to Savings as separate category paths', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('purchase', [split({ amount: 100, date: '2026-08-02', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
-      transaction('refund', [split({ amount: 40, date: '2026-08-03', source: flowAccounts.expense, destination: flowAccounts.savings, categoryId: 'food' })]),
-    ],
-  })
-  assert.equal(linkValue(graph, 'available', 'expenses'), 100)
-  assert.equal(linkValue(graph, 'refund:food', 'savings'), 40)
-  assert.equal(graph.nodes.find(({ id }) => id === 'expense:food').kind, 'expenseCategory')
-})
-
-test('retains sorted unique transaction IDs on netted and residual layered nodes', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('z-purchase', [split({ amount: 100, date: '2026-08-01', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
-      transaction('a-refund', [split({ amount: 40, date: '2026-08-02', source: flowAccounts.expense, destination: flowAccounts.checking, categoryId: 'food' })]),
-      transaction('save', [split({ amount: 20, date: '2026-08-03', source: flowAccounts.checking, destination: flowAccounts.savings })]),
-    ],
-  })
-
-  assert.deepEqual(nodeTransactions(graph, 'expense:food'), ['a-refund', 'z-purchase'])
-  assert.deepEqual(nodeTransactions(graph, 'savingsDeposit:hysa'), ['save'])
-})
-
-test('shows opposing savings account movements and their net', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('hysa-in', [split({ amount: 1000, date: '2026-08-04', source: flowAccounts.checking, destination: flowAccounts.savings })]),
-      transaction('hsa-out', [split({ amount: 500, date: '2026-08-05', source: flowAccounts.hsa, destination: flowAccounts.checking })]),
-    ],
-  })
-  assert.equal(nodeValue(graph, 'savingsDeposit:hysa'), 1000)
-  assert.equal(nodeValue(graph, 'existingSavings:hsa'), 500)
-  assert.equal(graph.audit.netSavings, 500)
-})
-
-test('annotates per-account savings residual nodes with their net-worth group', () => {
-  for (const savingsView of ['combined', 'split']) {
-    const graph = buildMonthlyMoneyFlow({
-      ...flowArgs,
-      savingsView,
-      transactions: [
-        transaction('hysa-in', [split({ amount: 1000, date: '2026-08-04', source: flowAccounts.checking, destination: flowAccounts.savings })]),
-        transaction('hsa-out', [split({ amount: 500, date: '2026-08-05', source: flowAccounts.hsa, destination: flowAccounts.checking })]),
-      ],
-    })
-
-    assert.equal(graph.nodes.find(({ id }) => id === 'savingsDeposit:hysa').savingsGroup, 'included')
-    assert.equal(graph.nodes.find(({ id }) => id === 'existingSavings:hsa').savingsGroup, 'excluded')
-  }
-})
-
-test('keeps liability reallocations out of outer funding while retaining their exact transaction', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [transaction('reallocate', [split({ amount: 30, date: '2026-08-06', source: flowAccounts.debit, destination: flowAccounts.credit })])],
-  })
+test('keeps liability reallocations out of outer funding with exact transaction IDs', () => {
+  const graph = buildLedgerFlow([ledgerEntry({ id: 'reallocate', value: 30, sourceKind: 'liability', destinationKind: 'liability', sourceAccountId: 'loan', destinationAccountId: 'receivable' })])
 
   assert.deepEqual(graph.audit.liabilityReallocations, [{ sourceId: 'loan', targetId: 'receivable', value: 30, transactionIds: ['reallocate'] }])
   assert.equal(graph.audit.totalSources, 0)
   assert.equal(graph.audit.totalDestinations, 0)
-})
-
-test('reconciles pool and outer equations with literal totals', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('income', [split({ amount: 100, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
-      transaction('expense-available', [split({ amount: 60, date: '2026-08-02', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
-      transaction('save', [split({ amount: 20, date: '2026-08-03', source: flowAccounts.checking, destination: flowAccounts.savings })]),
-      transaction('expense-savings', [split({ amount: 10, date: '2026-08-04', source: flowAccounts.savings, destination: flowAccounts.expense, categoryId: 'food' })]),
-    ],
-  })
-
-  assert.deepEqual(graph.pools, {
-    available: { incoming: 100, outgoing: 80, net: 20 },
-    savings: { incoming: 20, outgoing: 10, net: 10 },
-  })
-  assert.equal(graph.audit.totalSources, 100)
-  assert.equal(graph.audit.totalDestinations, 100)
-  assert.equal(graph.audit.equationDifference, 0)
-  assert.equal(graph.audit.positiveSavingsMovement, 10)
-  assert.equal(graph.audit.negativeSavingsMovement, 0)
   assert.equal(graph.isBalanced, true)
-  assert.deepEqual(graph.meta, { savingsView: 'combined' })
 })
 
-test('sets each pool node to its reconciled incoming and outgoing link total', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('income', [split({ amount: 100, date: '2026-08-01', source: flowAccounts.revenue, destination: flowAccounts.checking, categoryId: 'salary' })]),
-      transaction('expense-available', [split({ amount: 60, date: '2026-08-02', source: flowAccounts.checking, destination: flowAccounts.expense, categoryId: 'food' })]),
-      transaction('save', [split({ amount: 20, date: '2026-08-03', source: flowAccounts.checking, destination: flowAccounts.savings })]),
-      transaction('expense-savings', [split({ amount: 10, date: '2026-08-04', source: flowAccounts.savings, destination: flowAccounts.expense, categoryId: 'food' })]),
-    ],
-  })
+test('returns an empty ledger flow as balanced without a balancing node', () => {
+  const graph = buildLedgerFlow([])
 
-  for (const pool of ['available', 'savings']) {
-    assert.equal(nodeValue(graph, pool), linkTotal(graph, pool, 'target'))
-    assert.equal(linkTotal(graph, pool, 'target'), linkTotal(graph, pool, 'source'))
-  }
-})
-
-test('withholds unknown, unsupported, and missing-rate transactions from a balanced graph', () => {
-  const graph = buildMonthlyMoneyFlow({
-    ...flowArgs,
-    transactions: [
-      transaction('unknown-liability', [split({ amount: 25, date: '2026-08-01', source: flowAccounts.unknownLiability, destination: flowAccounts.checking })]),
-      transaction('unsupported', [split({ amount: 15, date: '2026-08-02', source: flowAccounts.other, destination: flowAccounts.checking })]),
-      transaction('missing-rate', [split({ amount: 10, date: '2026-08-03', source: flowAccounts.revenue, destination: flowAccounts.checking, currencyCode: 'EUR' })]),
-    ],
-  })
-
-  assert.deepEqual(graph.unclassified, { value: 40, transactionIds: ['unknown-liability', 'unsupported'] })
-  assert.deepEqual(graph.missingCurrencies, ['EUR'])
-  assert.equal(graph.isBalanced, false)
-})
-
-test('returns an empty layered graph as balanced', () => {
-  const graph = buildMonthlyMoneyFlow({ ...flowArgs, savingsView: 'split', transactions: [] })
-
-  assert.deepEqual(graph.pools, {
+  assert.deepEqual(graph.nodes, [])
+  assert.deepEqual(graph.links, [])
+  assert.equal(
+    graph.nodes.some(({ id }) => /balanc/i.test(id)),
+    false,
+  )
+  assert.deepEqual(graph.audit.pools, {
     available: { incoming: 0, outgoing: 0, net: 0 },
     savings: { incoming: 0, outgoing: 0, net: 0 },
+    savingsAccessible: { incoming: 0, outgoing: 0, net: 0 },
+    savingsRestricted: { incoming: 0, outgoing: 0, net: 0 },
   })
-  assert.deepEqual(graph.unclassified, { value: 0, transactionIds: [] })
   assert.equal(graph.audit.equationDifference, 0)
-  assert.deepEqual(graph.meta, { savingsView: 'split' })
   assert.equal(graph.isBalanced, true)
 })
 
@@ -1399,9 +1400,9 @@ test('never combines incompatible graph sides, pools, signs, or savings groups i
     otherNodes.map(({ id }) => id),
     [
       'other:existingSavings:savings:negative:included',
+      'other:refunds:available:negative',
       'other:expenses:available:positive',
       'other:expenses:savings:positive',
-      'other:refunds:available:negative',
       'other:savingsDeposited:savings:positive:excluded',
       'other:savingsDeposited:savings:positive:included',
     ],

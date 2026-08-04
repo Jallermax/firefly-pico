@@ -181,6 +181,7 @@ const debitLiability = () => ({
     current_debt: '250',
   },
 })
+const activeExpense = () => ({ id: 'expense', attributes: { active: true, type: { fireflyCode: 'expense' } } })
 const currentExpenseTransaction = (amount, categoryId = 'food') => ({
   id: 'current-' + amount,
   attributes: {
@@ -190,6 +191,8 @@ const currentExpenseTransaction = (amount, categoryId = 'food') => ({
         currency_code: 'USD',
         date: new Date(),
         category_id: categoryId,
+        source_id: 'checking',
+        destination_id: 'expense',
         accountSource: { attributes: { type: { fireflyCode: 'asset' } } },
         accountDestination: { attributes: { type: { fireflyCode: 'expense' } } },
       },
@@ -215,7 +218,7 @@ beforeEach(() => {
   now = new Date()
   setActivePinia(createPinia())
   dashboardStore.dashboardCurrency = usd
-  accountStore.accountList = [activeAsset()]
+  accountStore.accountList = [activeAsset(), activeExpense()]
   currencyStore.defaultCurrency = usd
   currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.9 } }
   transactionRequests.length = 0
@@ -272,7 +275,7 @@ test('builds one coherent ledger and feeds the same entries to every balance pro
   now = new Date('2026-08-10T12:00:00')
   const linkTypes = [{ id: 'refund', attributes: { outward: 'refund' } }]
   const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '125', current_balance_date: '2026-08-10' } }
-  freshAccountResult = async () => ({ ok: true, data: [checking] })
+  freshAccountResult = async () => ({ ok: true, data: [checking, activeExpense()] })
   transactionLinkTypeResult = async () => ({ ok: true, data: linkTypes })
   transactionResult = [
     {
@@ -309,6 +312,34 @@ test('builds one coherent ledger and feeds the same entries to every balance pro
   )
   assert.equal(store.categorySummary.series[0].currentActual, 25)
   assert.equal(store.selectedFlow.audit.totalDestinations, 25)
+})
+
+test('feeds linked refund metadata from the shared ledger directly into Money flow', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
+  const expense = { id: 'expense', attributes: { active: true, type: { fireflyCode: 'expense' } } }
+  const split = ({ journalId, amount, sourceId, destinationId, categoryId }) => ({
+    transaction_journal_id: journalId,
+    amount: String(amount),
+    currency_code: 'USD',
+    date: now,
+    source_id: sourceId,
+    destination_id: destinationId,
+    category_id: categoryId,
+  })
+  freshAccountResult = async () => ({ ok: true, data: [checking, expense] })
+  transactionLinkTypeResult = async () => ({ ok: true, data: [{ id: 'refund-type', attributes: { outward: 'refund' } }] })
+  transactionLinkResult = async () => ({ ok: true, data: [{ id: 'refund-link', attributes: { link_type_id: 'refund-type', inward_id: 'purchase-journal', outward_id: 'refund-journal' } }] })
+  transactionResult = [
+    { id: 'purchase', attributes: { transactions: [split({ journalId: 'purchase-journal', amount: 100, sourceId: 'checking', destinationId: 'expense', categoryId: 'tech' })] } },
+    { id: 'refund', attributes: { transactions: [split({ journalId: 'refund-journal', amount: 40, sourceId: 'expense', destinationId: 'checking', categoryId: 'misc' })] } },
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.selectedFlow.links.find(({ sourceId, targetId }) => sourceId === 'refund:tech' && targetId === 'available').value, 40)
+  assert.deepEqual(store.selectedFlow.nodes.find(({ id }) => id === 'expense:tech').refundCoverage, { value: 40, transactionIds: ['refund'] })
 })
 
 test('reconstructs balance metrics from fresh accounts with explicit transaction-fetch coverage', async () => {
