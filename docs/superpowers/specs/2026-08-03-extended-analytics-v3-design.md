@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03
 
-**Status:** Approved section by section in conversation; awaiting approval of this written specification
+**Status:** Approved written specification
 
 **Branch:** personal/extended-analytics
 
