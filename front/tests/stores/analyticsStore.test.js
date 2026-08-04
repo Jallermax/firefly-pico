@@ -18,12 +18,9 @@ const dashboardStore = reactive({
 })
 const accountStore = reactive({ accountList: [] })
 const currencyStore = reactive({ defaultCurrency: usd, exchangeRates: { rates: { USD: 1, EUR: 0.9 } } })
-const appStore = { syncEverythingIfOld: async () => {} }
-const accountRequests = []
 const transactionRequests = []
 const snapshotRequests = []
 const storageOverrides = new Map()
-let accountResponse = async () => ({ status: 200, data: [] })
 let transactionResult = []
 let transactionResponse = async () => ({ ok: true, data: transactionResult })
 let freshAccountResult = async () => ({ ok: true, data: structuredClone(accountStore.accountList) })
@@ -78,11 +75,6 @@ class AccountRepository {
     snapshotRequests.push({ input: 'accounts', options })
     return freshAccountResult(options)
   }
-
-  async getChartOverview(options) {
-    accountRequests.push(options)
-    return accountResponse(options)
-  }
 }
 
 class TransactionRepository {
@@ -128,16 +120,6 @@ class RecurringTransactionRepository {
   }
 }
 
-class Account {
-  static getBalance(account) {
-    return account?.attributes?.current_balance
-  }
-
-  static getCurrencyCode(account) {
-    return account?.attributes?.currency_code
-  }
-}
-
 class Currency {
   static getCode(value) {
     return value?.attributes?.code
@@ -149,7 +131,6 @@ class Currency {
 }
 
 const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
-  appStore,
   dashboardStore,
   accountStore,
   currencyStore,
@@ -160,15 +141,10 @@ const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   transactionLinkTypeRepository: new TransactionLinkTypeRepository(),
   subscriptionRepository: new SubscriptionRepository(),
   recurringTransactionRepository: new RecurringTransactionRepository(),
-  createAccountRepository: () => new AccountRepository(),
-  createTransactionRepository: () => new TransactionRepository(),
   transformTransactions: (transactions) => transactions,
-  getAccountBalance: (account) => Account.getBalance(account),
-  getAccountCurrencyCode: (account) => Account.getCurrencyCode(account),
   getCurrencyCode: (value) => Currency.getCode(value),
   getCurrencyDecimalPlaces: (value) => Currency.getDecimalPlaces(value),
   getExcludedTransactionFilters: () => [],
-  isResponseSuccess: (response) => [200, 204].includes(response?.status),
   buildLedger: (options) => {
     ledgerBuilds.push(options)
     return buildAnalyticsLedger(options)
@@ -205,7 +181,6 @@ const debitLiability = () => ({
     current_debt: '250',
   },
 })
-const chartResponse = (value, date = format(new Date(), 'yyyy-MM-dd')) => ({ status: 200, data: [{ currency_code: 'USD', entries: { [date]: String(value) } }] })
 const currentExpenseTransaction = (amount, categoryId = 'food') => ({
   id: 'current-' + amount,
   attributes: {
@@ -243,13 +218,11 @@ beforeEach(() => {
   accountStore.accountList = [activeAsset()]
   currencyStore.defaultCurrency = usd
   currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.9 } }
-  accountRequests.length = 0
   transactionRequests.length = 0
   snapshotRequests.length = 0
   ledgerBuilds.length = 0
   balanceReconstructions.length = 0
   storageOverrides.clear()
-  accountResponse = async () => chartResponse(100)
   transactionResult = []
   transactionResponse = async () => ({ ok: true, data: transactionResult })
   freshAccountResult = async () => ({ ok: true, data: [...accountStore.accountList] })
@@ -328,10 +301,8 @@ test('builds one coherent ledger and feeds the same entries to every balance pro
   assert.equal(ledgerBuilds.length, 1)
   assert.deepEqual(ledgerBuilds[0].linkTypes, linkTypes)
   assert.equal(store.ledger.entries.length, 1)
-  assert.deepEqual(
-    balanceReconstructions.map(({ metric }) => metric),
-    ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt', 'expenses'],
-  )
+  assert.ok(balanceReconstructions.some(({ metric }) => metric === 'savings'))
+  assert.equal(store.balanceSeriesByMetric.savings.id, 'savings')
   assert.equal(
     balanceReconstructions.every(({ entries }) => entries === store.ledger.entries),
     true,
@@ -414,7 +385,7 @@ test('dedupes one reconciliation warning across affected balance metrics', async
   assert.deepEqual(store.analyticsAudit.warnings, [
     {
       code: 'current-balance-mismatch',
-      metricIds: ['netWorth', 'savingsIncluded'],
+      metricIds: ['netWorth', 'savings'],
       accountIds: [savings.id],
       transactionIds: ['saving-expense'],
     },
@@ -484,6 +455,42 @@ test('publishes one FX disclosure only when conversion is used or incomplete', a
   analyticsStore = useAnalyticsStore()
   await analyticsStore.init()
   assert.equal(analyticsStore.fxDisclosure, null)
+})
+
+test('keeps valid category values when another ledger entry has unavailable FX', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
+  const expenseAccount = { id: 'expense', attributes: { active: true, type: { fireflyCode: 'expense' } } }
+  freshAccountResult = async () => ({ ok: true, data: [checking, expenseAccount] })
+  transactionResult = [
+    currentExpenseTransaction(25, 'food'),
+    {
+      id: 'missing-fx-expense',
+      attributes: {
+        transactions: [
+          {
+            transaction_journal_id: 'missing-fx-journal',
+            amount: '500',
+            currency_code: 'JPY',
+            date: now,
+            source_id: checking.id,
+            destination_id: expenseAccount.id,
+            category_id: 'travel',
+          },
+        ],
+      },
+    },
+  ]
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.categorySummary.series[0].currentActual, 25)
+  assert.deepEqual(store.categorySummary.unclassified.transactionIds, [])
+  assert.deepEqual(store.categorySummary.missingCurrencies, ['JPY'])
+  assert.deepEqual(store.ledger.fx.transactionIds, ['missing-fx-expense'])
+  assert.deepEqual(store.analyticsAudit.fx.transactionIds, ['missing-fx-expense'])
 })
 
 test('defaults and repairs graph detail while accepting every supported level', () => {
@@ -581,9 +588,12 @@ test('combines included and excluded savings without refetching when the view ch
 
   await store.init()
 
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').points.at(-1), { x: '2026-07-31', value: 140 })
-  assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'savings').currentPoint, { x: '2026-08-10', value: 140 })
-  const requestCount = accountRequests.length
+  const combinedSavings = store.balanceSeries.find(({ id }) => id === 'savings')
+  assert.deepEqual(combinedSavings.points.at(-1), { x: '2026-07-31', value: 140, transactionIds: [] })
+  assert.deepEqual(combinedSavings.currentPoint, { x: '2026-08-10', value: 140, transactionIds: [] })
+  assert.equal(combinedSavings.accountBreakdown.length, 2)
+  assert.equal(combinedSavings.reconciliation.status, 'ok')
+  const requestCount = snapshotRequests.filter(({ input }) => input === 'accounts').length
 
   store.savingsView = 'split'
   await nextTick()
@@ -592,7 +602,7 @@ test('combines included and excluded savings without refetching when the view ch
     store.balanceSeries.map(({ id }) => id),
     ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'],
   )
-  assert.equal(accountRequests.length, requestCount)
+  assert.equal(snapshotRequests.filter(({ input }) => input === 'accounts').length, requestCount)
 })
 
 test('withholds public combined savings when a non-empty group contains convertible and missing-rate data', async () => {
@@ -604,22 +614,15 @@ test('withholds public combined savings when a non-empty group contains converti
     { ...excluded, attributes: { ...excluded.attributes, current_balance: '40' } },
     { ...excluded, id: 'saving-excluded-jpy', attributes: { ...excluded.attributes, currency_code: 'JPY', current_balance: '500' } },
   ]
-  accountResponse = async ({ accountIds }) =>
-    accountIds.includes('saving-excluded-jpy')
-      ? {
-          status: 200,
-          data: [
-            { currency_code: 'USD', entries: { '2026-08-10': '40' } },
-            { currency_code: 'JPY', entries: { '2026-08-10': '500' } },
-          ],
-        }
-      : chartResponse(100, '2026-08-10')
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
 
   const savings = store.balanceSeries.find(({ id }) => id === 'savings')
-  assert.deepEqual(savings.points, [])
+  assert.equal(
+    savings.points.every(({ value }) => value === null),
+    true,
+  )
   assert.equal(savings.currentPoint, null)
   assert.deepEqual(savings.missingCurrencies, ['JPY'])
 })
@@ -633,8 +636,8 @@ test('uses included savings as the complete combined series when the excluded gr
   await store.init()
 
   const savings = store.balanceSeries.find(({ id }) => id === 'savings')
-  assert.deepEqual(savings.points.at(-1), { x: '2026-07-31', value: 100 })
-  assert.deepEqual(savings.currentPoint, { x: '2026-08-10', value: 100 })
+  assert.deepEqual(savings.points.at(-1), { x: '2026-07-31', value: 100, transactionIds: [] })
+  assert.deepEqual(savings.currentPoint, { x: '2026-08-10', value: 100, transactionIds: [] })
 })
 
 test('defaults to all financial metrics and preserves valid legacy selections', () => {
@@ -712,7 +715,6 @@ test('derives financial trends from the shared ledger and reconstructed balances
 
   await store.init()
 
-  assert.equal(accountRequests.length, 0)
   assert.deepEqual(balanceReconstructions[0].monthKeys, ['2026-04', '2026-05', '2026-06', '2026-07'])
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint, { x: format(today, 'yyyy-MM-dd'), value: 300, transactionIds: [] })
   assert.equal(store.financialTrend.series.find(({ id }) => id === 'netWorth').currentTotal, 300)
@@ -736,6 +738,7 @@ test('withholds partial category and expense calculations while retaining balanc
   await store.init()
 
   assert.deepEqual(store.categorySummary.unclassified, { value: null, transactionIds: ['invalid-a', 'invalid-z'] })
+  assert.deepEqual(store.selectedFlow.unclassified, { value: null, transactionIds: ['invalid-a', 'invalid-z'] })
   assert.deepEqual(store.categorySummary.series, [])
   assert.equal(
     store.categoryRankingItems.every(({ amount }) => amount === null),
@@ -888,7 +891,6 @@ test('uses fresh analytics accounts without replacing the global account store',
   const freshAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance: '125' } }
   accountStore.accountList = [staleAccount]
   freshAccountResult = async () => ({ ok: true, data: [freshAccount] })
-  accountResponse = async () => chartResponse(125)
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
@@ -1002,9 +1004,7 @@ test('retains failure metadata for each ancillary snapshot input', async () => {
 
 test('keeps a completed snapshot on its captured exchange rates', async () => {
   const euroAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, currency_code: 'EUR', current_balance: '100' } }
-  const today = format(now, 'yyyy-MM-dd')
   freshAccountResult = async () => ({ ok: true, data: [euroAccount] })
-  accountResponse = async () => ({ status: 200, data: [{ currency_code: 'EUR', entries: { [today]: '100' } }] })
   currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.5 } }
   const store = (analyticsStore = useAnalyticsStore())
 

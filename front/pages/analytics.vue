@@ -5,7 +5,7 @@
 
     <van-pull-refresh v-model="isRefreshing" @refresh="onRefresh">
       <analytics-savings-view-control v-model="analyticsStore.savingsView" />
-      <analytics-fx-disclosure v-if="analyticsStore.fxDisclosure" :disclosure="analyticsStore.fxDisclosure" />
+      <analytics-fx-disclosure v-for="item in fxDisclosurePlacements" :key="item.surface" :disclosure="item.disclosure" />
       <div class="analytics-layout">
         <analytics-balance-trends class="analytics-layout-balance" />
         <analytics-category-spending v-if="profileStore.categoriesEnabled" class="analytics-layout-category" />
@@ -18,11 +18,13 @@
 <script setup>
 import { useToolbar } from '~/composables/useToolbar'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
+import { resolveAnalyticsFxDisclosurePlacements } from '~/utils/AnalyticsUtils.js'
 
 const analyticsStore = useAnalyticsStore()
 const profileStore = useProfileStore()
 const isRefreshing = ref(false)
 const { t } = useI18n()
+const fxDisclosurePlacements = computed(() => resolveAnalyticsFxDisclosurePlacements(analyticsStore.fxDisclosure))
 
 const onRefresh = async () => {
   isRefreshing.value = true

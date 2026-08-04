@@ -1463,3 +1463,10 @@ test('All graph detail preserves every original node and link', () => {
   assert.deepEqual(limited.nodes, manyCategoryGraph.nodes)
   assert.deepEqual(limited.links, manyCategoryGraph.links)
 })
+
+test('places conditional FX disclosure once at page level and never on cards', () => {
+  const disclosure = { displayCurrencyCode: 'USD', usesCurrentRates: true, missingCurrencies: ['JPY'], metricIds: ['expenses'] }
+
+  assert.deepEqual(AnalyticsUtils.resolveAnalyticsFxDisclosurePlacements(null), [])
+  assert.deepEqual(AnalyticsUtils.resolveAnalyticsFxDisclosurePlacements(disclosure), [{ surface: 'page', disclosure }])
+})

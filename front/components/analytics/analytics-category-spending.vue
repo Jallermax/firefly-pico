@@ -4,7 +4,6 @@
       <div class="flex-1">
         <div class="flex-center-vertical gap-2">
           <span>{{ $t('analytics.category.title') }}</span>
-          <span v-if="summary.isEstimated" class="analytics-fx-badge">{{ $t('analytics.common.fx_current_rates') }}</span>
         </div>
         <div class="analytics-card-subtitle">{{ $t('analytics.category.subtitle') }}</div>
       </div>
@@ -74,13 +73,6 @@
         <p>{{ $t('analytics.category.definition') }}</p>
         <p>{{ $t('analytics.category.current_month_separate') }}</p>
       </details>
-      <div v-if="readyPresentation.showMissingRates" class="analytics-warning">
-        {{ $t('analytics.common.missing_rates', { currencies: readyPresentation.missingCurrencies.join(', ') }) }}
-      </div>
-    </template>
-
-    <template v-if="analyticsStore.categoryState.status !== 'loading' && (analyticsStore.categoryState.status === 'empty' || chartSeries.length === 0)">
-      <div v-if="summary.missingCurrencies?.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: summary.missingCurrencies.join(', ') }) }}</div>
     </template>
 
     <app-popup v-model:show="forecastDetailsVisible" popup-style="max-width: 520px">
@@ -229,7 +221,6 @@ const readyPresentation = computed(() =>
   buildCategoryReadyPresentation({
     usedMonths: summary.value.usedMonths,
     requestedMonths: summary.value.requestedMonths,
-    missingCurrencies: summary.value.missingCurrencies ?? [],
     unclassified: summary.value.unclassified,
   }),
 )

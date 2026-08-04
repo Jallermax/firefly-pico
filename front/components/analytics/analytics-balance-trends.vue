@@ -4,7 +4,6 @@
       <div class="flex-1 analytics-balance-heading">
         <div class="analytics-balance-heading-row">
           <div>{{ $t('analytics.balance.title') }}</div>
-          <span v-if="isEstimated" class="analytics-fx-badge">{{ $t('analytics.common.fx_current_rates') }}</span>
         </div>
         <div class="analytics-card-subtitle">{{ $t('analytics.balance.subtitle') }}</div>
       </div>
@@ -81,7 +80,6 @@
       <div v-if="expensesSelected && hasUnavailableExpenses" class="analytics-warning" role="alert">
         {{ $t('analytics.common.unavailable_amounts', { ids: unavailableExpenseTransactionIds.join(', ') }) }}
       </div>
-      <div v-if="missingCurrencies.length" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: missingCurrencies.join(', ') }) }}</div>
       <div v-for="warning in validationWarnings" :key="warning.type + warning.sampleDate" class="analytics-warning analytics-grouped-warning">{{ validationWarningLabel(warning) }}</div>
     </template>
   </van-cell-group>
@@ -256,17 +254,6 @@ const expenseSummary = computed(() => {
 const summaries = computed(() => [...accountSummaries.value, ...(expenseSummary.value ? [expenseSummary.value] : [])])
 const isSplitSavingsMetric = (id) => ['savingsIncluded', 'savingsExcluded'].includes(id)
 
-const selectedAccountSourceSeries = computed(() =>
-  selectedAccountMetrics.value.map((metric) => analyticsStore.balanceSeries.find((series) => series.id === metric.id) ?? { isEstimated: false, missingCurrencies: [], warnings: [] }),
-)
-const isEstimated = computed(
-  () =>
-    selectedAccountSourceSeries.value.some((series) => series.isEstimated || series.currentPoint?.isEstimated) ||
-    (expensesSelected.value && !hasUnavailableExpenses.value && analyticsStore.categorySummary.isEstimated),
-)
-const missingCurrencies = computed(() => [
-  ...new Set([...selectedAccountSourceSeries.value.flatMap((series) => series.missingCurrencies), ...(expensesSelected.value ? (analyticsStore.categorySummary.missingCurrencies ?? []) : [])]),
-])
 const validationWarnings = computed(() => projectSelectedBalanceWarnings({ warnings: analyticsStore.balanceWarnings, selectedMetrics: selectedAccountMetrics.value }))
 const warningMetricFormatter = computed(() => new Intl.ListFormat(profileStore.language, { style: 'long', type: 'conjunction' }))
 const validationWarningLabel = (warning) => {

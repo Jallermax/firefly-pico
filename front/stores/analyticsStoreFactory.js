@@ -5,8 +5,6 @@ import DateUtils from '../utils/DateUtils.js'
 import {
   buildCategoryLedger,
   buildMonthlyMoneyFlow,
-  combineSavingsBalanceSeries,
-  getAnalyticsAccountGroups,
   limitMoneyFlowGraphDetail,
   rankCategoryIds,
   summarizeBalanceMovements,
@@ -15,6 +13,7 @@ import {
 } from '../utils/AnalyticsUtils.js'
 
 const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt']
+const RECONSTRUCTED_METRICS = ['netWorth', 'savings', 'savingsIncluded', 'savingsExcluded', 'debt', 'expenses']
 const SAVINGS_VIEWS = ['combined', 'split']
 const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
 const MONEY_FLOW_DETAIL_LEVELS = [5, 10, 'all']
@@ -22,7 +21,6 @@ const CATEGORY_SERIES_LIMIT = 6
 
 const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
 const financialMetricIdsForSavingsView = (view) => [...balanceMetricIdsForSavingsView(view), 'expenses']
-const emptyBalanceSeries = (id) => ({ id, points: [], isEstimated: false, missingCurrencies: [], warnings: [] })
 
 export function createAnalyticsStore(id, useDependencies) {
   return defineStore(id, () => {
@@ -143,7 +141,6 @@ export function createAnalyticsStore(id, useDependencies) {
       return decimalPlaces === null || decimalPlaces === undefined ? 2 : Number(decimalPlaces)
     })
     const rates = computed(() => rawSnapshot.value.rates)
-    const accountGroups = computed(() => getAnalyticsAccountGroups(accounts.value))
     const ledger = computed(() =>
       buildLedger({
         transactions: transactions.value,
@@ -157,21 +154,33 @@ export function createAnalyticsStore(id, useDependencies) {
     )
     const legacyTransactions = computed(() => {
       const grouped = new Map()
-      ledger.value.entries.forEach((entry) => {
-        const transaction = grouped.get(entry.transactionId) ?? { id: entry.transactionId, attributes: { transactions: [] } }
-        transaction.attributes.transactions.push({
-          amount: entry.value,
-          currency_code: displayCurrencyCode.value,
-          date: parseISO(entry.date),
-          category_id: entry.categoryId,
-          tags: entry.tags,
-          accountSource: entry.sourceAccount,
-          accountDestination: entry.destinationAccount,
+      ledger.value.entries
+        .filter(({ value }) => Number.isFinite(value))
+        .forEach((entry) => {
+          const transaction = grouped.get(entry.transactionId) ?? { id: entry.transactionId, attributes: { transactions: [] } }
+          transaction.attributes.transactions.push({
+            amount: entry.value,
+            currency_code: displayCurrencyCode.value,
+            date: parseISO(entry.date),
+            category_id: entry.categoryId,
+            tags: entry.tags,
+            accountSource: entry.sourceAccount,
+            accountDestination: entry.destinationAccount,
+          })
+          grouped.set(entry.transactionId, transaction)
         })
-        grouped.set(entry.transactionId, transaction)
-      })
       return [...grouped.values()]
     })
+    const legacyUnavailableTransactionIds = computed(() =>
+      [
+        ...new Set(
+          ledger.value.entries
+            .filter(({ value, conversion }) => !Number.isFinite(value) && !conversion.missingCurrency)
+            .map(({ transactionId }) => transactionId)
+            .filter(Boolean),
+        ),
+      ].sort(),
+    )
     const categoryLedger = computed(() => {
       const projection = buildCategoryLedger({
         transactions: legacyTransactions.value,
@@ -179,7 +188,13 @@ export function createAnalyticsStore(id, useDependencies) {
         primaryCurrencyCode: displayCurrencyCode.value,
         rates: { [displayCurrencyCode.value]: 1 },
       })
-      return { ...projection, isEstimated: ledger.value.fx.isEstimated, missingCurrencies: ledger.value.fx.missingCurrencies }
+      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...legacyUnavailableTransactionIds.value])].sort()
+      return {
+        ...projection,
+        isEstimated: ledger.value.fx.isEstimated,
+        missingCurrencies: ledger.value.fx.missingCurrencies,
+        unclassified: { value: unclassifiedTransactionIds.length ? null : projection.unclassified.value, transactionIds: unclassifiedTransactionIds },
+      }
     })
     const categoryUnavailableTransactionIds = computed(() => categoryLedger.value.unclassified?.transactionIds ?? [])
     const categoryRanking = computed(() =>
@@ -235,7 +250,13 @@ export function createAnalyticsStore(id, useDependencies) {
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
         savingsView: savingsView.value,
       })
-      return { ...projection, isEstimated: ledger.value.fx.isEstimated, missingCurrencies: ledger.value.fx.missingCurrencies }
+      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...legacyUnavailableTransactionIds.value])].sort()
+      return {
+        ...projection,
+        isEstimated: ledger.value.fx.isEstimated,
+        missingCurrencies: ledger.value.fx.missingCurrencies,
+        unclassified: { value: unclassifiedTransactionIds.length ? null : projection.unclassified.value, transactionIds: unclassifiedTransactionIds },
+      }
     })
     const selectedFlow = computed(() => {
       const fullGraph = selectedFullFlow.value
@@ -256,7 +277,7 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const balanceSeriesByMetric = computed(() =>
       Object.fromEntries(
-        [...BALANCE_GROUPS, 'expenses'].map((metric) => [
+        RECONSTRUCTED_METRICS.map((metric) => [
           metric,
           reconstructBalances({
             accounts: accounts.value,
@@ -274,26 +295,13 @@ export function createAnalyticsStore(id, useDependencies) {
       ),
     )
     const toLegacyBalanceSeries = (result) => ({
-      id: result.id,
-      points: result.points,
-      currentPoint: result.currentPoint,
+      ...result,
       isEstimated: result.fx.isEstimated,
       missingCurrencies: result.fx.missingCurrencies,
       warnings: result.reconciliation.status === 'mismatch' ? [{ type: 'current-balance-mismatch' }] : [],
     })
     const currentFourGroupSeries = computed(() => Object.fromEntries(BALANCE_GROUPS.map((metric) => [metric, toLegacyBalanceSeries(balanceSeriesByMetric.value[metric])])))
-    const combinedSavingsSeries = computed(() => {
-      const includedIsEmpty = accountGroups.value.savingsIncluded.length === 0
-      const excludedIsEmpty = accountGroups.value.savingsExcluded.length === 0
-      if (includedIsEmpty && excludedIsEmpty) return emptyBalanceSeries('savings')
-      const combined = combineSavingsBalanceSeries({
-        includedSeries: currentFourGroupSeries.value.savingsIncluded,
-        excludedSeries: currentFourGroupSeries.value.savingsExcluded,
-        includedIsEmpty,
-        excludedIsEmpty,
-      })
-      return combined ? { id: 'savings', ...combined } : emptyBalanceSeries('savings')
-    })
+    const combinedSavingsSeries = computed(() => toLegacyBalanceSeries(balanceSeriesByMetric.value.savings))
     const balanceSeries = computed(() => {
       const base = currentFourGroupSeries.value
       if (savingsView.value === 'split') return [base.netWorth, base.savingsIncluded, base.savingsExcluded, base.debt]
@@ -301,7 +309,7 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const analyticsAudit = computed(() => {
       const groupedWarnings = new Map()
-      BALANCE_GROUPS.forEach((metricId) => {
+      balanceMetricIdsForSavingsView(savingsView.value).forEach((metricId) => {
         const reconciliation = balanceSeriesByMetric.value[metricId].reconciliation
         if (reconciliation.status !== 'mismatch') return
         const code = 'current-balance-mismatch'
@@ -315,6 +323,7 @@ export function createAnalyticsStore(id, useDependencies) {
       })
       return {
         ...ledger.value.audit,
+        fx: ledger.value.fx,
         warnings: [...groupedWarnings.values()].map((warning) => ({
           code: warning.code,
           metricIds: warning.metricIds,
@@ -333,7 +342,7 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const fxDisclosure = computed(() => {
       const affectedMetrics = new Set(
-        [...BALANCE_GROUPS, 'expenses'].filter((metric) => {
+        financialMetricIdsForSavingsView(savingsView.value).filter((metric) => {
           const fx = balanceSeriesByMetric.value[metric].fx
           return fx.isEstimated || fx.missingCurrencies.length > 0
         }),

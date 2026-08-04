@@ -4,7 +4,6 @@
       <div class="analytics-flow-heading flex-1">
         <div class="flex-center-vertical gap-2">
           <span>{{ $t('analytics.flow.title') }}</span>
-          <span v-if="flow.isEstimated" class="analytics-fx-badge">{{ $t('analytics.common.fx_current_rates') }}</span>
         </div>
         <div class="analytics-card-subtitle">{{ $t('analytics.flow.subtitle') }}</div>
       </div>
@@ -41,7 +40,7 @@
 
       <div v-if="presentation.showAudit" class="analytics-flow-unbalanced" role="alert">
         <strong>{{ stateLabel }}</strong>
-        <span>{{ stateDescription }}</span>
+        <span v-if="presentation.reason !== 'missing_rates'">{{ stateDescription }}</span>
         <div v-if="hasUnclassified" class="analytics-flow-audit-row">
           <span>{{ $t('analytics.flow.audit.unclassified') }}</span
           ><strong>{{ formatCurrency(flow.unclassified.value) }}</strong>
@@ -49,7 +48,6 @@
         <div v-if="flow.unclassified?.transactionIds?.length" class="analytics-flow-transaction-ids">
           {{ $t('analytics.flow.transaction_ids', { ids: flow.unclassified.transactionIds.join(', ') }) }}
         </div>
-        <div v-if="hasMissingRates" class="analytics-warning">{{ $t('analytics.common.missing_rates', { currencies: flow.missingCurrencies.join(', ') }) }}</div>
         <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
       </div>
       <div v-else-if="presentation.showEmpty" class="analytics-card-state analytics-flow-empty">{{ $t('analytics.flow.empty') }}</div>
@@ -155,7 +153,6 @@ const emptyFlow = {
   details: { nodes: [], links: [] },
   audit: { pools: { available: { incoming: 0, outgoing: 0, net: 0 }, savings: { incoming: 0, outgoing: 0, net: 0 } }, liabilityReallocations: [] },
   unclassified: { value: 0, transactionIds: [] },
-  isEstimated: false,
   missingCurrencies: [],
   isBalanced: true,
 }

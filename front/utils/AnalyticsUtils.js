@@ -3,6 +3,8 @@ import { format, startOfMonth, subMonths } from 'date-fns'
 const codeOf = (value) => value?.fireflyCode ?? value ?? null
 const unique = (values) => [...new Set(values.filter(Boolean))]
 
+export const resolveAnalyticsFxDisclosurePlacements = (disclosure) => (disclosure ? [{ surface: 'page', disclosure }] : [])
+
 export const ANALYTICS_UNCATEGORIZED_ID = 'uncategorized'
 
 export function getAnalyticsAccountGroups(accounts) {

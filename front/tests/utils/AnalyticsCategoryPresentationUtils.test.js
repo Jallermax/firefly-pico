@@ -134,11 +134,10 @@ test('category forecast details expose every input and both forecast values', ()
   ])
 })
 
-test('category ready presentation keeps calculation disclosure and missing-rate warnings independently visible', () => {
+test('category ready presentation keeps unavailable amounts blocking without owning FX disclosure', () => {
   const presentation = buildCategoryReadyPresentation({
     usedMonths: 2,
     requestedMonths: 6,
-    missingCurrencies: ['EUR'],
     unclassified: { value: null, transactionIds: ['invalid-z', 'invalid-a'] },
   })
 
@@ -147,27 +146,14 @@ test('category ready presentation keeps calculation disclosure and missing-rate 
     unavailableTransactionIds: ['invalid-z', 'invalid-a'],
     showShortHistory: true,
     showCalculation: true,
-    showMissingRates: true,
-    missingCurrencies: ['EUR'],
   })
 
-  assert.deepEqual(buildCategoryReadyPresentation({ usedMonths: 6, requestedMonths: 6, missingCurrencies: [] }), {
+  assert.deepEqual(buildCategoryReadyPresentation({ usedMonths: 6, requestedMonths: 6 }), {
     isBlocked: false,
     unavailableTransactionIds: [],
     showShortHistory: false,
     showCalculation: true,
-    showMissingRates: false,
-    missingCurrencies: [],
   })
-})
-
-test('category card renders estimated FX only as a compact title badge', () => {
-  const component = readFileSync(new URL('../../components/analytics/analytics-category-spending.vue', import.meta.url), 'utf8')
-  const template = component.slice(0, component.indexOf('<script setup>'))
-
-  assert.match(template, /v-if="summary\.isEstimated" class="analytics-fx-badge"[\s\S]*analytics\.common\.fx_current_rates/)
-  assert.doesNotMatch(template, /analytics\.common\.estimated_current_rates/)
-  assert.equal(template.match(/analytics\.common\.missing_rates/g)?.length, 2)
 })
 
 test('category card renders unavailable amounts as a blocking warning before empty results', () => {

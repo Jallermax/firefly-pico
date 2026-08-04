@@ -35,14 +35,12 @@ export const buildCategoryForecastDetailsPresentation = ({ point, labels, format
   { id: 'usedMonths', label: labels.usedMonths, value: point.usedMonths },
 ]
 
-export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, missingCurrencies, unclassified = { transactionIds: [] } }) => {
+export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, unclassified = { transactionIds: [] } }) => {
   const unavailableTransactionIds = unclassified.transactionIds ?? []
   return {
     isBlocked: unavailableTransactionIds.length > 0,
     unavailableTransactionIds,
     showShortHistory: usedMonths !== requestedMonths,
     showCalculation: true,
-    showMissingRates: missingCurrencies.length > 0,
-    missingCurrencies,
   }
 }
