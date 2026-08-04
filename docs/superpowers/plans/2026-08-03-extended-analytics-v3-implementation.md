@@ -208,7 +208,7 @@ assert.equal(subscriptionRequest.params.start, '2026-07-01')
 assert.equal(subscriptionRequest.params.end, '2026-08-31')
 ```
 
-Run: `cd front; node --test tests/repository/BaseRepository.test.js`  
+Run: `cd front; node --test tests/repository/BaseRepository.test.js`
 Expected: FAIL because the repositories do not exist.
 
 - [ ] **Step 2: Implement the two repositories**
@@ -225,7 +225,7 @@ Prove that:
 - `refresh()` refetches all snapshot inputs;
 - one init generation cannot combine accounts from one refresh with transactions from another.
 
-Run: `cd front; node --test tests/stores/analyticsStore.test.js`  
+Run: `cd front; node --test tests/stores/analyticsStore.test.js`
 Expected: FAIL on missing dependencies and snapshot behavior.
 
 - [ ] **Step 4: Implement snapshot loading and generation guards**
@@ -278,7 +278,7 @@ Create hand-derived fixtures for:
 
 Assert both numeric values and exact contributing IDs.
 
-Run: `cd front; node --test tests/utils/AnalyticsLedgerUtils.test.js`  
+Run: `cd front; node --test tests/utils/AnalyticsLedgerUtils.test.js`
 Expected: FAIL because the module does not exist.
 
 - [ ] **Step 2: Implement account and split normalization**
@@ -342,7 +342,7 @@ Fixtures must prove:
 - partial data coverage produces `unavailable` rather than a fabricated zero;
 - reconciliation produces one `mismatch` object with account evidence, not repeated strings.
 
-Run: `cd front; node --test tests/utils/AnalyticsBalanceUtils.test.js`  
+Run: `cd front; node --test tests/utils/AnalyticsBalanceUtils.test.js`
 Expected: FAIL because the module does not exist.
 
 - [ ] **Step 2: Implement per-account backward reconstruction**
@@ -395,7 +395,7 @@ git commit -m "feat: reconstruct analytics balances"
 
 Assert one ledger build feeds all projections, balance series use fresh accounts, refresh invalidates the complete generation, identical reconciliation warnings dedupe, and one broken optional Firefly input does not blank unrelated cards.
 
-Run: `cd front; node --test tests/stores/analyticsStore.test.js`  
+Run: `cd front; node --test tests/stores/analyticsStore.test.js`
 Expected: FAIL on the new public store contract.
 
 - [ ] **Step 2: Replace legacy parallel projections**
@@ -460,7 +460,7 @@ Add exact tests for:
 - shortfall/existing-funds source when uses exceed sources;
 - no ribbon emitted for unclassified nonzero value.
 
-Run: `cd front; node --test tests/utils/AnalyticsUtils.test.js tests/utils/AnalyticsCategoryPresentationUtils.test.js`  
+Run: `cd front; node --test tests/utils/AnalyticsUtils.test.js tests/utils/AnalyticsCategoryPresentationUtils.test.js`
 Expected: FAIL on legacy ordering and routing.
 
 - [ ] **Step 2: Implement sequential flow aggregation**
@@ -527,7 +527,7 @@ Prove:
 - interactive targets are at least 44 by 44 CSS pixels;
 - mobile condensation retains pools and uses while hiding only outer categories.
 
-Run: `cd front; node --test tests/utils/ChartUtils.test.js`  
+Run: `cd front; node --test tests/utils/ChartUtils.test.js`
 Expected: FAIL against the current same-axis/barycentric layout.
 
 - [ ] **Step 2: Implement stage-aware layout**
@@ -589,7 +589,7 @@ Include:
 - already-observed current occurrence matched and suppressed;
 - deterministic output for shuffled ledger input.
 
-Run: `cd front; node --test tests/utils/AnalyticsRecurringUtils.test.js`  
+Run: `cd front; node --test tests/utils/AnalyticsRecurringUtils.test.js`
 Expected: FAIL because the detector does not exist.
 
 - [ ] **Step 2: Implement normalization and signatures**
@@ -652,7 +652,7 @@ Cover:
 - missing FX inputs remain unavailable;
 - projected entries retain candidate/source IDs but never pretend to be actual transaction IDs.
 
-Run: `cd front; node --test tests/utils/AnalyticsForecastUtils.test.js`  
+Run: `cd front; node --test tests/utils/AnalyticsForecastUtils.test.js`
 Expected: FAIL because the module does not exist.
 
 - [ ] **Step 2: Implement historical remainder profiles**
@@ -720,7 +720,7 @@ Assert:
 - forecast detail exposes final, actual, remaining, and progress state;
 - historical point IDs and current actual IDs are exact.
 
-Run: `cd front; node --test tests/utils/AnalyticsUtils.test.js tests/stores/analyticsStore.test.js`  
+Run: `cd front; node --test tests/utils/AnalyticsUtils.test.js tests/stores/analyticsStore.test.js`
 Expected: FAIL on present partial-point and forecast metadata behavior.
 
 - [ ] **Step 2: Update store projections**
@@ -791,7 +791,7 @@ Cover:
 - current forecast actual/projected split;
 - exact IDs per layer/month.
 
-Run: `cd front; node --test tests/utils/AnalyticsCashUseUtils.test.js`  
+Run: `cd front; node --test tests/utils/AnalyticsCashUseUtils.test.js`
 Expected: FAIL because the module does not exist.
 
 - [ ] **Step 2: Implement the pure presenter**
@@ -852,7 +852,7 @@ Assert:
 - cumulative Available line equals prior value plus income minus Available-funded outflow and transfers;
 - actual IDs and forecast source IDs remain distinct.
 
-Run: `cd front; node --test tests/stores/analyticsStore.test.js`  
+Run: `cd front; node --test tests/stores/analyticsStore.test.js`
 Expected: FAIL because no daily card projection exists.
 
 - [ ] **Step 2: Add daily presenter output to the store**
