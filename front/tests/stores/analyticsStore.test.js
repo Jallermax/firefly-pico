@@ -338,7 +338,8 @@ test('feeds linked refund metadata from the shared ledger directly into Money fl
 
   await store.init()
 
-  assert.equal(store.selectedFlow.links.find(({ sourceId, targetId }) => sourceId === 'refund:tech' && targetId === 'available').value, 40)
+  assert.equal(store.selectedFlow.links.find(({ sourceId, targetId }) => sourceId === 'refund:tech' && targetId === 'refundIncome').value, 40)
+  assert.equal(store.selectedFlow.links.find(({ sourceId, targetId }) => sourceId === 'refundIncome' && targetId === 'available').value, 40)
   assert.deepEqual(store.selectedFlow.nodes.find(({ id }) => id === 'expense:tech').refundCoverage, { value: 40, transactionIds: ['refund'] })
 })
 
@@ -356,6 +357,19 @@ test('reconstructs balance metrics from fresh accounts with explicit transaction
   assert.deepEqual(balanceReconstructions[0].accounts[0], freshAccount)
   assert.deepEqual(balanceReconstructions[0].coverage, { startMonth: '2024-08', endDate: '2026-08-10' })
   assert.equal(accountStore.accountList[0].attributes.current_balance, '900')
+})
+
+test('uses transaction fetch coverage for the earliest selectable Money flow month', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const invalid = currentExpenseTransaction(null)
+  invalid.id = 'unavailable-at-coverage-start'
+  invalid.attributes.transactions[0].date = new Date('2024-08-15T12:00:00')
+  transactionResult = [invalid]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(format(store.flowMonthMin, 'yyyy-MM'), '2024-08')
 })
 
 test('refresh publishes only the newest complete ledger generation', async () => {

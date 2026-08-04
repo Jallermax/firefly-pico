@@ -268,7 +268,7 @@ export function createAnalyticsStore(id, useDependencies) {
         meta: { ...fullGraph.meta, detailLevel: graphDetail.value },
       }
     })
-    const flowMonthMin = computed(() => (categoryLedger.value.ledgerStartMonth ? startOfMonth(parseISO(categoryLedger.value.ledgerStartMonth + '-01')) : null))
+    const flowMonthMin = computed(() => (rawSnapshot.value.transactionCoverage?.startMonth ? startOfMonth(parseISO(rawSnapshot.value.transactionCoverage.startMonth + '-01')) : null))
     const flowMonthMax = computed(() => startOfMonth(getNow()))
 
     const balanceMonthKeys = computed(() => {

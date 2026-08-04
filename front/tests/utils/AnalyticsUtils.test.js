@@ -1044,7 +1044,7 @@ test('sorts income and expense categories by amount descending with stable ID ti
   ])
 
   assert.deepEqual(
-    graph.nodes.filter(({ kind }) => kind === 'income').map(({ id }) => id),
+    graph.nodes.filter(({ kind, refId }) => kind === 'income' && refId).map(({ id }) => id),
     ['income:salary', 'income:a-art', 'income:z-art'],
   )
   assert.deepEqual(
@@ -1060,7 +1060,8 @@ test('keeps ordinary Art income and Art expense as distinct cash paths', () => {
   ])
 
   assert.equal(nodeValue(graph, 'income:art'), 80)
-  assert.equal(linkValue(graph, 'income:art', 'available'), 80)
+  assert.equal(linkValue(graph, 'income:art', 'income'), 80)
+  assert.equal(linkValue(graph, 'income', 'available'), 80)
   assert.equal(nodeValue(graph, 'expense:art'), 30)
   assert.equal(linkValue(graph, 'expenses', 'expense:art'), 30)
 })
@@ -1087,7 +1088,8 @@ test('keeps a linked Tech refund receipt and annotates gross Tech expense covera
     }),
   ])
 
-  assert.equal(linkValue(graph, 'refund:tech', 'available'), 40)
+  assert.equal(linkValue(graph, 'refund:tech', 'refundIncome'), 40)
+  assert.equal(linkValue(graph, 'refundIncome', 'available'), 40)
   assert.equal(nodeValue(graph, 'expense:tech'), 100)
   assert.deepEqual(graph.nodes.find(({ id }) => id === 'expense:tech').refundCoverage, { value: 40, transactionIds: ['tech-refund'] })
   assert.equal(graph.audit.totalSources, 100)
@@ -1106,7 +1108,8 @@ test('attaches a tag-only refund to its category in the receipt month', () => {
     }),
   ])
 
-  assert.equal(linkValue(graph, 'refund:books', 'available'), 25)
+  assert.equal(linkValue(graph, 'refund:books', 'refundIncome'), 25)
+  assert.equal(linkValue(graph, 'refundIncome', 'available'), 25)
   assert.deepEqual(graph.nodes.find(({ id }) => id === 'expense:books').refundCoverage, { value: 25, transactionIds: ['tag-refund'] })
   assert.equal(graph.nodes.find(({ id }) => id === 'expense:books').value, 0)
 })
@@ -1125,6 +1128,100 @@ test('routes Available deposits through accessible and restricted Savings with e
   assert.equal(linkValue(graph, 'savingsDeposited:restricted', 'savingsDeposit:hsa'), 30)
 })
 
+test('renders an acyclic net Available-to-Savings bridge after separate income grouping stages', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'salary', value: 100, sourceKind: 'revenue', destinationKind: 'available', categoryId: 'salary' }),
+    ledgerEntry({
+      id: 'refund',
+      value: 20,
+      sourceKind: 'expense',
+      destinationKind: 'available',
+      categoryId: 'tech',
+      refund: { isRefund: true, coverageCategoryId: 'tech', coverageMonthKey: '2026-08', coverageValue: 20 },
+    }),
+    ledgerEntry({ id: 'deposit', value: 70, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'hysa' }),
+    ledgerEntry({ id: 'withdraw', value: 30, sourceKind: 'savingsAccessible', destinationKind: 'available', sourceAccountId: 'hysa' }),
+  ])
+
+  assert.deepEqual(
+    ['income:salary', 'income', 'refund:tech', 'refundIncome', 'available', 'savingsAccessible', 'savingsDeposited:accessible', 'savingsDeposit:hysa'].map((id) => [
+      id,
+      graph.nodes.find((node) => node.id === id)?.layer,
+    ]),
+    [
+      ['income:salary', 0],
+      ['income', 1],
+      ['refund:tech', 0],
+      ['refundIncome', 1],
+      ['available', 2],
+      ['savingsAccessible', 3],
+      ['savingsDeposited:accessible', 4],
+      ['savingsDeposit:hysa', 5],
+    ],
+  )
+  assert.equal(linkValue(graph, 'income:salary', 'income'), 100)
+  assert.equal(linkValue(graph, 'income', 'available'), 100)
+  assert.equal(linkValue(graph, 'refund:tech', 'refundIncome'), 20)
+  assert.equal(linkValue(graph, 'refundIncome', 'available'), 20)
+  assert.equal(linkValue(graph, 'available', 'savingsAccessible'), 40)
+  assert.equal(linkValue(graph, 'savingsAccessible', 'available'), 0)
+  assert.deepEqual(graph.links.find(({ sourceId, targetId }) => sourceId === 'available' && targetId === 'savingsAccessible').details, {
+    availableToSavings: { value: 70, transactionIds: ['deposit'] },
+    savingsToAvailable: { value: 30, transactionIds: ['withdraw'] },
+    net: 40,
+  })
+  assert.equal(
+    graph.links.every((link) => graph.nodes.find(({ id }) => id === link.sourceId).layer < graph.nodes.find(({ id }) => id === link.targetId).layer),
+    true,
+  )
+  assert.equal(graph.isBalanced, true)
+})
+
+test('renders a negative net Savings bridge as existing Savings feeding Available', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'deposit', value: 20, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'hysa' }),
+    ledgerEntry({ id: 'withdraw', value: 50, sourceKind: 'savingsAccessible', destinationKind: 'available', sourceAccountId: 'hysa' }),
+  ])
+
+  assert.equal(linkValue(graph, 'savingsAccessible', 'available'), 0)
+  assert.equal(linkValue(graph, 'savingsWithdrawal:hysa', 'available'), 30)
+  assert.deepEqual(graph.links.find(({ sourceId, targetId }) => sourceId === 'savingsWithdrawal:hysa' && targetId === 'available').details, {
+    availableToSavings: { value: 20, transactionIds: ['deposit'] },
+    savingsToAvailable: { value: 50, transactionIds: ['withdraw'] },
+    net: -30,
+  })
+  assert.equal(graph.isBalanced, true)
+})
+
+test('represents same-group and cross-group Savings reallocations without pool self-loops', () => {
+  const sameGroup = buildLedgerFlow([
+    ledgerEntry({ id: 'same-group', value: 50, sourceKind: 'savingsAccessible', destinationKind: 'savingsAccessible', sourceAccountId: 'old-hysa', destinationAccountId: 'new-hysa' }),
+  ])
+
+  assert.equal(
+    sameGroup.links.some(({ sourceId, targetId }) => sourceId === targetId),
+    false,
+  )
+  assert.equal(linkValue(sameGroup, 'savingsWithdrawal:old-hysa', 'savingsAccessible'), 50)
+  assert.equal(linkValue(sameGroup, 'savingsAccessible', 'savingsDeposited:accessible'), 50)
+  assert.equal(linkValue(sameGroup, 'savingsDeposited:accessible', 'savingsDeposit:new-hysa'), 50)
+  assert.deepEqual(sameGroup.audit.pools.savingsAccessible, { incoming: 50, outgoing: 50, net: 0 })
+  assert.equal(sameGroup.isBalanced, true)
+
+  const crossGroup = buildLedgerFlow([
+    ledgerEntry({ id: 'cross-group', value: 35, sourceKind: 'savingsAccessible', destinationKind: 'savingsRestricted', sourceAccountId: 'hysa', destinationAccountId: 'hsa' }),
+  ])
+
+  assert.equal(
+    crossGroup.links.some(({ sourceId, targetId }) => sourceId === targetId),
+    false,
+  )
+  assert.equal(linkValue(crossGroup, 'savingsWithdrawal:hysa', 'savingsRestricted'), 35)
+  assert.equal(linkValue(crossGroup, 'savingsRestricted', 'savingsDeposited:restricted'), 35)
+  assert.deepEqual(crossGroup.audit.pools.savingsRestricted, { incoming: 35, outgoing: 35, net: 0 })
+  assert.equal(crossGroup.isBalanced, true)
+})
+
 test('routes a Savings-originated expense through its savings pool', () => {
   const graph = buildLedgerFlow([ledgerEntry({ id: 'savings-medical', value: 45, sourceKind: 'savingsAccessible', destinationKind: 'expense', sourceAccountId: 'hysa', categoryId: 'medical' })])
 
@@ -1140,15 +1237,48 @@ test('shows net negative Savings as a left-side withdrawal source', () => {
     ledgerEntry({ id: 'withdraw', value: 50, sourceKind: 'savingsAccessible', destinationKind: 'available', sourceAccountId: 'hysa' }),
   ])
 
-  assert.equal(nodeValue(graph, 'savingsWithdrawal:hysa'), 30)
+  assert.equal(nodeValue(graph, 'savingsWithdrawal:hysa'), 50)
   assert.deepEqual((({ kind, movementKind, savingsGroup }) => ({ kind, movementKind, savingsGroup }))(graph.nodes.find(({ id }) => id === 'savingsWithdrawal:hysa')), {
     kind: 'existingSavings',
     movementKind: 'savingsWithdrawal',
     savingsGroup: 'accessible',
   })
-  assert.equal(linkValue(graph, 'savingsWithdrawal:hysa', 'savingsAccessible'), 30)
-  assert.equal(linkValue(graph, 'savingsAccessible', 'available'), 50)
+  assert.equal(linkValue(graph, 'savingsWithdrawal:hysa', 'savingsAccessible'), 20)
+  assert.equal(linkValue(graph, 'savingsWithdrawal:hysa', 'available'), 30)
+  assert.equal(linkValue(graph, 'savingsAccessible', 'available'), 0)
   assert.equal(graph.audit.netSavings, -30)
+})
+
+test('keeps refund coverage IDs out of multi-pool cash expense paths and aggregates coverage separately in Other', () => {
+  const coveredExpense = (categoryId, prefix, availableValue, savingsValue, refundValue) => [
+    ledgerEntry({ id: `${prefix}-available`, value: availableValue, sourceKind: 'available', destinationKind: 'expense', categoryId }),
+    ledgerEntry({ id: `${prefix}-savings`, value: savingsValue, sourceKind: 'savingsAccessible', destinationKind: 'expense', sourceAccountId: 'hysa', categoryId }),
+    ledgerEntry({
+      id: `${prefix}-refund`,
+      value: refundValue,
+      sourceKind: 'expense',
+      destinationKind: 'available',
+      categoryId,
+      refund: { isRefund: true, coverageCategoryId: categoryId, coverageMonthKey: '2026-08', coverageValue: refundValue },
+    }),
+  ]
+  const graph = buildLedgerFlow([...coveredExpense('tech', 'tech', 60, 40, 25), ...coveredExpense('travel', 'travel', 30, 20, 10)])
+
+  assert.deepEqual(nodeTransactions(graph, 'expense:tech'), ['tech-available', 'tech-savings'])
+  assert.deepEqual(graph.nodes.find(({ id }) => id === 'expense:tech').refundCoverage, { value: 25, transactionIds: ['tech-refund'] })
+  assert.deepEqual(
+    graph.links.filter(({ targetId }) => targetId === 'expense:tech').map(({ fundingPool, transactionIds }) => ({ fundingPool, transactionIds })),
+    [
+      { fundingPool: 'available', transactionIds: ['tech-available'] },
+      { fundingPool: 'savingsAccessible', transactionIds: ['tech-savings'] },
+    ],
+  )
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 0 })
+  const other = limited.nodes.find(({ kind }) => kind === 'otherExpenseCategory')
+  assert.equal(other.value, 150)
+  assert.deepEqual(other.transactionIds, ['tech-available', 'tech-savings', 'travel-available', 'travel-savings'])
+  assert.deepEqual(other.refundCoverage, { value: 35, transactionIds: ['tech-refund', 'travel-refund'] })
 })
 
 test('adds existing Available funds when uses exceed new sources', () => {
@@ -1178,7 +1308,7 @@ test('groups Top 5 detail from ledger values, leaves Top 10 expanded, and preser
   const topTen = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 10 })
 
   assert.deepEqual(
-    topFive.nodes.filter(({ layer }) => layer === 3).map(({ id }) => id),
+    topFive.nodes.filter(({ layer }) => layer === 5).map(({ id }) => id),
     ['expense:category-1', 'expense:category-2', 'expense:category-3', 'expense:category-4', 'expense:category-5', 'other:expenses:available:positive'],
   )
   assert.equal(nodeValue(topFive, 'other:expenses:available:positive'), 30)
