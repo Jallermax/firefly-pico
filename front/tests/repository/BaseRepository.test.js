@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import axios from 'axios'
 import BaseRepository from '../../repository/BaseRepository.js'
 import SubscriptionRepository from '../../repository/SubscriptionRepository.js'
 import TransactionLinkRepository from '../../repository/TransactionLinkRepository.js'
@@ -29,17 +30,40 @@ test('merged result discards partial pages when any page is invalid', async () =
   assert.deepEqual(result, { ok: false, data: [] })
 })
 
-test('transaction links use the Firefly transaction-links endpoint with the first pagination page', async () => {
-  const repository = new TransactionLinkRepository()
-  const request = { url: repository.endpoint, params: { page: 1 } }
+const captureRequests = async (run) => {
+  const requests = []
+  const originalGet = axios.get
+  const originalUseAppStore = globalThis.useAppStore
+  globalThis.useAppStore = () => ({ picoBackendURL: 'https://pico.test' })
+  axios.get = async (url) => {
+    requests.push(new URL(url))
+    return { data: { data: [], meta: { pagination: { total_pages: 1 } } } }
+  }
+
+  try {
+    await run()
+    return requests
+  } finally {
+    axios.get = originalGet
+    if (originalUseAppStore) globalThis.useAppStore = originalUseAppStore
+    else delete globalThis.useAppStore
+  }
+}
+
+test('transaction links request the Firefly transaction-links endpoint with the first pagination page', async () => {
+  const [url] = await captureRequests(() => new TransactionLinkRepository().getAll())
+  const request = { url: url.pathname.slice(1), params: { page: Number(url.searchParams.get('page')) } }
 
   assert.equal(request.url, 'transaction-links')
   assert.deepEqual(request.params, { page: 1 })
 })
 
-test('subscriptions include the requested date window', async () => {
-  const repository = new SubscriptionRepository()
-  const subscriptionRequest = { url: repository.endpoint, params: repository.getParams('2026-07-01', '2026-08-31') }
+test('subscriptions request the supplied date window', async () => {
+  const [url] = await captureRequests(() => new SubscriptionRepository().getAll('2026-07-01', '2026-08-31'))
+  const subscriptionRequest = {
+    url: url.pathname.slice(1),
+    params: { start: url.searchParams.get('start'), end: url.searchParams.get('end') },
+  }
 
   assert.equal(subscriptionRequest.url, 'subscriptions')
   assert.equal(subscriptionRequest.params.start, '2026-07-01')

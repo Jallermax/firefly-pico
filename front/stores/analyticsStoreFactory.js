@@ -111,6 +111,11 @@ export function createAnalyticsStore(id, useDependencies) {
     const balanceState = reactive({ status: 'idle', error: null, isStale: false })
     const categoryState = reactive({ status: 'idle', error: null, isStale: false })
     const flowState = reactive({ status: 'idle', error: null, isStale: false })
+    const ancillaryState = reactive({
+      transactionLinks: { status: 'idle', error: null },
+      subscriptions: { status: 'idle', error: null },
+      recurringTransactions: { status: 'idle', error: null },
+    })
     const balanceCache = ref({})
     const accounts = ref([])
     const transactions = ref([])
@@ -351,7 +356,7 @@ export function createAnalyticsStore(id, useDependencies) {
 
       const hasExistingData = Boolean(cached?.some(({ points }) => points.length > 0))
       const existingRequest = balanceRequests.get(snapshot.cacheKey)
-      if (existingRequest) {
+      if (existingRequest && !force && existingRequest.generation === generation) {
         activeBalanceRequestToken = existingRequest.token
         Object.assign(balanceState, { status: 'loading', error: null, isStale: hasExistingData })
         return existingRequest.promise
@@ -444,10 +449,11 @@ export function createAnalyticsStore(id, useDependencies) {
           }
         })
 
+        if (!ownsCurrentState()) return
         balanceCache.value = { ...balanceCache.value, [snapshot.cacheKey]: normalized }
-        if (ownsCurrentState()) Object.assign(balanceState, { status: normalized.some(({ points }) => points.length > 0) ? 'ready' : 'empty', error: null, isStale: false })
+        Object.assign(balanceState, { status: normalized.some(({ points }) => points.length > 0) ? 'ready' : 'empty', error: null, isStale: false })
       })()
-      balanceRequests.set(snapshot.cacheKey, { token: requestToken, promise: request })
+      balanceRequests.set(snapshot.cacheKey, { token: requestToken, generation, promise: request })
       try {
         return await request
       } finally {
@@ -456,7 +462,7 @@ export function createAnalyticsStore(id, useDependencies) {
     }
 
     async function loadSnapshot({ force = false } = {}) {
-      if (!force && snapshotRequest) return snapshotRequest
+      if (!force && snapshotRequest) return snapshotRequest.promise
 
       const generation = ++snapshotGeneration
       activeSnapshotGeneration = generation
@@ -464,6 +470,7 @@ export function createAnalyticsStore(id, useDependencies) {
       const startDate = DateUtils.dateToString(startOfMonth(subMonths(today, 24)))
       const endDate = DateUtils.dateToString(today)
       const ownsCurrentSnapshot = () => activeSnapshotGeneration === generation
+      Object.values(ancillaryState).forEach((state) => Object.assign(state, { status: 'loading', error: null }))
 
       const request = (async () => {
         const [accountResult, transactionLinkResult, subscriptionResult, recurringTransactionResult, rateResult] = await Promise.all([
@@ -480,9 +487,20 @@ export function createAnalyticsStore(id, useDependencies) {
         if (!ownsCurrentSnapshot()) return
 
         snapshotRates.value = rateResult
-        transactionLinks.value = transactionLinkResult?.ok ? transactionLinkResult.data : []
-        subscriptions.value = subscriptionResult?.ok ? subscriptionResult.data : []
-        recurringTransactions.value = recurringTransactionResult?.ok ? recurringTransactionResult.data : []
+        const ancillaryInputs = [
+          ['transactionLinks', transactionLinks, transactionLinkResult, 'transaction link'],
+          ['subscriptions', subscriptions, subscriptionResult, 'subscription'],
+          ['recurringTransactions', recurringTransactions, recurringTransactionResult, 'recurring transaction'],
+        ]
+        ancillaryInputs.forEach(([name, input, result, label]) => {
+          if (result?.ok) {
+            input.value = result.data
+            Object.assign(ancillaryState[name], { status: result.data.length > 0 ? 'ready' : 'empty', error: null })
+          } else {
+            input.value = []
+            Object.assign(ancillaryState[name], { status: 'error', error: new Error(`Analytics ${label} request failed`) })
+          }
+        })
 
         if (!accountResult?.ok) {
           accounts.value = []
@@ -540,6 +558,7 @@ export function createAnalyticsStore(id, useDependencies) {
       balanceState,
       categoryState,
       flowState,
+      ancillaryState,
       accounts,
       transactions,
       transactionLinks,

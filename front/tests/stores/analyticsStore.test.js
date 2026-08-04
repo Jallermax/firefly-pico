@@ -29,6 +29,7 @@ let freshAccountResult = async () => ({ ok: true, data: structuredClone(accountS
 let transactionLinkResult = async () => ({ ok: true, data: [] })
 let subscriptionResult = async () => ({ ok: true, data: [] })
 let recurringTransactionResult = async () => ({ ok: true, data: [] })
+let exchangeRateResponse = async () => {}
 let analyticsStore = null
 let now = new Date()
 
@@ -246,6 +247,8 @@ beforeEach(() => {
   transactionLinkResult = async () => ({ ok: true, data: [] })
   subscriptionResult = async () => ({ ok: true, data: [] })
   recurringTransactionResult = async () => ({ ok: true, data: [] })
+  exchangeRateResponse = async () => {}
+  currencyStore.fetchExchangeRate = async () => exchangeRateResponse()
 })
 
 afterEach(() => analyticsStore?.$dispose())
@@ -285,7 +288,8 @@ test('provides the unavailable-amount calculation warning in every supported loc
 test('keeps overlapping balance requests isolated to their captured currency and current state', async () => {
   const usdRequest = deferred()
   const eurRequest = deferred()
-  const responses = [usdRequest, eurRequest]
+  const usdRetryRequest = deferred()
+  const responses = [usdRequest, eurRequest, usdRetryRequest]
   accountResponse = () => responses.shift().promise
   const store = (analyticsStore = useAnalyticsStore())
 
@@ -304,8 +308,10 @@ test('keeps overlapping balance requests isolated to their captured currency and
   assert.equal(store.balanceState.status, 'error')
   dashboardStore.dashboardCurrency = usd
   await nextTick()
+  await waitFor(() => accountRequests.length === 3)
+  usdRetryRequest.resolve(chartResponse(100))
   await waitFor(() => store.balanceState.status === 'ready')
-  assert.equal(accountRequests.length, 2)
+  assert.equal(accountRequests.length, 3)
   assert.deepEqual(store.balanceSeries.find(({ id }) => id === 'netWorth').points, [{ x: format(new Date(), 'yyyy-MM-dd'), value: 100 }])
 })
 
@@ -1133,4 +1139,77 @@ test('publishes only one generation when an older snapshot resolves after refres
 
   assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint.value, 250)
   assert.equal(store.categorySummary.series[0].currentActual, 25)
+})
+
+test('waits for an in-flight non-forced snapshot before resolving a second init', async () => {
+  const accountRequest = deferred()
+  freshAccountResult = () => accountRequest.promise
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const firstInit = store.init()
+  await waitFor(() => snapshotRequests.filter(({ input }) => input === 'accounts').length === 1)
+  let secondInitResolved = false
+  const secondInit = store.init().then(() => {
+    secondInitResolved = true
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(secondInitResolved, false)
+
+  accountRequest.resolve({ ok: true, data: [activeAsset()] })
+  await Promise.all([firstInit, secondInit])
+  assert.equal(secondInitResolved, true)
+})
+
+test('refresh replaces an in-flight same-key balance request and keeps its newer result', async () => {
+  const olderBalance = deferred()
+  const newerBalance = deferred()
+  const balanceResponses = [olderBalance, newerBalance]
+  accountResponse = () => balanceResponses.shift().promise
+  const store = (analyticsStore = useAnalyticsStore())
+
+  const initialLoad = store.init()
+  await waitFor(() => accountRequests.length === 1)
+  const refreshedLoad = store.refresh()
+  await waitFor(() => accountRequests.length === 2)
+
+  newerBalance.resolve(chartResponse(250))
+  await refreshedLoad
+  assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').points.at(-1).value, 250)
+
+  olderBalance.resolve(chartResponse(100))
+  await initialLoad
+  assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').points.at(-1).value, 250)
+  assert.equal(store.balanceState.status, 'ready')
+})
+
+test('retains failure metadata for each ancillary snapshot input', async () => {
+  transactionLinkResult = async () => ({ ok: false, data: [] })
+  subscriptionResult = async () => ({ ok: false, data: [] })
+  recurringTransactionResult = async () => ({ ok: false, data: [] })
+  transactionResult = [currentExpenseTransaction(25)]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  for (const input of ['transactionLinks', 'subscriptions', 'recurringTransactions']) {
+    assert.equal(store.ancillaryState[input].status, 'error', input)
+    assert.match(store.ancillaryState[input].error.message, /Analytics .* request failed/)
+  }
+  assert.equal(store.categoryState.status, 'ready')
+})
+
+test('keeps a completed snapshot on its captured exchange rates', async () => {
+  const euroAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, currency_code: 'EUR', current_balance: '100' } }
+  const today = format(now, 'yyyy-MM-dd')
+  freshAccountResult = async () => ({ ok: true, data: [euroAccount] })
+  accountResponse = async () => ({ status: 200, data: [{ currency_code: 'EUR', entries: { [today]: '100' } }] })
+  currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.5 } }
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+  currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.25 } }
+  await nextTick()
+
+  assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint.value, 200)
 })
