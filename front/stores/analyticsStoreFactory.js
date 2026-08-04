@@ -5,6 +5,7 @@ import DateUtils from '../utils/DateUtils.js'
 import {
   buildCategoryLedger,
   buildMonthlyMoneyFlow,
+  getAnalyticsAccountKind,
   limitMoneyFlowGraphDetail,
   rankCategoryIds,
   summarizeBalanceMovements,
@@ -171,11 +172,21 @@ export function createAnalyticsStore(id, useDependencies) {
         })
       return [...grouped.values()]
     })
-    const legacyUnavailableTransactionIds = computed(() =>
+    const legacyUnavailableEntries = computed(() => ledger.value.entries.filter(({ value, conversion }) => !Number.isFinite(value) && !conversion.missingCurrency))
+    const categoryWindowMonthKeys = computed(() => {
+      const currentMonth = startOfMonth(getNow())
+      return new Set([format(currentMonth, 'yyyy-MM'), ...Array.from({ length: Number(categoryAverageMonths.value) }, (_, index) => format(subMonths(currentMonth, index + 1), 'yyyy-MM'))])
+    })
+    const categoryUnavailableTransactionIds = computed(() =>
       [
         ...new Set(
-          ledger.value.entries
-            .filter(({ value, conversion }) => !Number.isFinite(value) && !conversion.missingCurrency)
+          legacyUnavailableEntries.value
+            .filter(({ monthKey, sourceAccount, destinationAccount }) => {
+              if (!categoryWindowMonthKeys.value.has(monthKey)) return false
+              const sourceKind = getAnalyticsAccountKind(sourceAccount)
+              const destinationKind = getAnalyticsAccountKind(destinationAccount)
+              return sourceKind === 'expense' || destinationKind === 'expense'
+            })
             .map(({ transactionId }) => transactionId)
             .filter(Boolean),
         ),
@@ -188,7 +199,7 @@ export function createAnalyticsStore(id, useDependencies) {
         primaryCurrencyCode: displayCurrencyCode.value,
         rates: { [displayCurrencyCode.value]: 1 },
       })
-      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...legacyUnavailableTransactionIds.value])].sort()
+      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...categoryUnavailableTransactionIds.value])].sort()
       return {
         ...projection,
         isEstimated: ledger.value.fx.isEstimated,
@@ -196,7 +207,7 @@ export function createAnalyticsStore(id, useDependencies) {
         unclassified: { value: unclassifiedTransactionIds.length ? null : projection.unclassified.value, transactionIds: unclassifiedTransactionIds },
       }
     })
-    const categoryUnavailableTransactionIds = computed(() => categoryLedger.value.unclassified?.transactionIds ?? [])
+    const categoryBlockingTransactionIds = computed(() => categoryLedger.value.unclassified?.transactionIds ?? [])
     const categoryRanking = computed(() =>
       rankCategoryIds({
         ledger: categoryLedger.value,
@@ -220,7 +231,7 @@ export function createAnalyticsStore(id, useDependencies) {
       })
       return {
         ...summary,
-        ...(categoryUnavailableTransactionIds.value.length ? { series: [] } : {}),
+        ...(categoryBlockingTransactionIds.value.length ? { series: [] } : {}),
         isEstimated: categoryLedger.value.isEstimated,
         missingCurrencies: categoryLedger.value.missingCurrencies,
         unclassified: categoryLedger.value.unclassified,
@@ -229,15 +240,15 @@ export function createAnalyticsStore(id, useDependencies) {
     const categoryRankingItems = computed(() => {
       const rankedItems = categoryRanking.value.map((id) => ({
         id,
-        amount: categoryUnavailableTransactionIds.value.length
+        amount: categoryBlockingTransactionIds.value.length
           ? null
           : categorySummary.value.monthKeys.reduce((total, key) => total + (categoryLedger.value.months?.[key]?.categories?.[id]?.amount ?? 0), 0),
       }))
       const candidateIds = new Set([...categoryRanking.value, ...currentMonthCategoryIds.value])
       return [
         ...rankedItems,
-        ...currentMonthCategoryIds.value.map((id) => ({ id, amount: categoryUnavailableTransactionIds.value.length ? null : 0 })),
-        ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: categoryUnavailableTransactionIds.value.length ? null : 0 })),
+        ...currentMonthCategoryIds.value.map((id) => ({ id, amount: categoryBlockingTransactionIds.value.length ? null : 0 })),
+        ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: categoryBlockingTransactionIds.value.length ? null : 0 })),
       ]
     })
     const selectedFullFlow = computed(() => {
@@ -250,7 +261,16 @@ export function createAnalyticsStore(id, useDependencies) {
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
         savingsView: savingsView.value,
       })
-      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...legacyUnavailableTransactionIds.value])].sort()
+      const selectedMonthKey = format(selectedFlowMonth.value, 'yyyy-MM')
+      const unavailableTransactionIds = legacyUnavailableEntries.value
+        .filter(({ monthKey, sourceAccount, destinationAccount }) => {
+          if (monthKey !== selectedMonthKey) return false
+          const sourceKind = getAnalyticsAccountKind(sourceAccount)
+          const destinationKind = getAnalyticsAccountKind(destinationAccount)
+          return sourceKind !== 'available' || destinationKind !== 'available'
+        })
+        .map(({ transactionId }) => transactionId)
+      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...unavailableTransactionIds].filter(Boolean))].sort()
       return {
         ...projection,
         isEstimated: ledger.value.fx.isEstimated,

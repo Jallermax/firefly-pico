@@ -748,6 +748,80 @@ test('withholds partial category and expense calculations while retaining balanc
   assert.equal(store.financialTrend.series.find(({ id }) => id === 'netWorth').currentTotal, 100)
 })
 
+test('blocks Money flow only for relevant unavailable entries in the selected month', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
+  const expenseAccount = { id: 'expense', attributes: { active: true, type: { fireflyCode: 'expense' } } }
+  const unavailableExpense = (id, date) => ({
+    id,
+    attributes: {
+      transactions: [
+        {
+          transaction_journal_id: `${id}-journal`,
+          amount: null,
+          currency_code: 'USD',
+          date,
+          source_id: checking.id,
+          destination_id: expenseAccount.id,
+          category_id: 'food',
+        },
+      ],
+    },
+  })
+  freshAccountResult = async () => ({ ok: true, data: [checking, expenseAccount] })
+  transactionResult = [currentExpenseTransaction(25), unavailableExpense('invalid-july-expense', new Date('2026-07-15T12:00:00'))]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.selectedFlow.unclassified.transactionIds, [])
+  assert.equal(store.selectedFlow.audit.totalDestinations, 25)
+
+  store.selectedFlowMonth = new Date('2026-07-01T12:00:00')
+  await nextTick()
+
+  assert.deepEqual(store.selectedFlow.unclassified.transactionIds, ['invalid-july-expense'])
+})
+
+test('blocks category summaries only for relevant unavailable spending inside the selected window', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsCategoryAverageMonths', 3)
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
+  const cash = { ...activeAsset(), id: 'cash', attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
+  const expenseAccount = { id: 'expense', attributes: { active: true, type: { fireflyCode: 'expense' } } }
+  const unavailable = (id, date, source, destination) => ({
+    id,
+    attributes: {
+      transactions: [
+        {
+          transaction_journal_id: `${id}-journal`,
+          amount: null,
+          currency_code: 'USD',
+          date,
+          source_id: source.id,
+          destination_id: destination.id,
+          category_id: 'food',
+        },
+      ],
+    },
+  })
+  freshAccountResult = async () => ({ ok: true, data: [checking, cash, expenseAccount] })
+  transactionResult = [
+    currentExpenseTransaction(25),
+    unavailable('invalid-current-internal', new Date('2026-08-05T12:00:00'), checking, cash),
+    unavailable('invalid-april-expense', new Date('2026-04-15T12:00:00'), checking, expenseAccount),
+    unavailable('invalid-june-expense', new Date('2026-06-15T12:00:00'), checking, expenseAccount),
+    unavailable('invalid-july-refund', new Date('2026-07-15T12:00:00'), expenseAccount, checking),
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.categorySummary.unclassified, { value: null, transactionIds: ['invalid-july-refund', 'invalid-june-expense'] })
+  assert.deepEqual(store.categorySummary.series, [])
+})
+
 test('exposes ranked category items with completed-window net totals', async () => {
   const checking = { attributes: { type: { fireflyCode: 'asset' } } }
   const expense = { attributes: { type: { fireflyCode: 'expense' } } }
