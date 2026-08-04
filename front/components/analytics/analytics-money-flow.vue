@@ -125,7 +125,6 @@
 </template>
 
 <script setup>
-import { addMonths, startOfMonth } from 'date-fns'
 import Account from '~/models/Account.js'
 import Category from '~/models/Category.js'
 import RouteConstants from '~/constants/RouteConstants.js'
@@ -162,11 +161,9 @@ const detailItems = computed(() => [
   { label: t('analytics.flow.all'), value: 'all' },
 ])
 const flow = computed(() => analyticsStore.selectedFlow ?? emptyFlow)
-const selectedMonth = computed(() => startOfMonth(analyticsStore.selectedFlowMonth ?? new Date()))
-const monthMin = computed(() => (analyticsStore.flowMonthMin ? startOfMonth(analyticsStore.flowMonthMin) : null))
-const monthMax = computed(() => startOfMonth(analyticsStore.flowMonthMax ?? new Date()))
-const canPrevious = computed(() => monthMin.value !== null && selectedMonth.value.getTime() > monthMin.value.getTime())
-const canNext = computed(() => selectedMonth.value.getTime() < monthMax.value.getTime())
+const selectedMonth = computed(() => analyticsStore.selectedFlowMonth ?? new Date())
+const canPrevious = computed(() => analyticsStore.canMoveFlowMonth(-1))
+const canNext = computed(() => analyticsStore.canMoveFlowMonth(1))
 const selectedMonthLabel = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(selectedMonth.value))
 const hasNodes = computed(() => flow.value.nodes.length > 0)
 const hasUnclassified = computed(() => !Number.isFinite(flow.value.unclassified?.value) || Math.abs(flow.value.unclassified.value) > 0)
@@ -274,10 +271,7 @@ const selectedRows = computed(() => {
 const selectedItemLabel = computed(() => itemLabel(selectedItem.value))
 const selectedTransactionIds = computed(() => [...new Set(selectedRows.value.flatMap(({ transactionIds }) => transactionIds))].sort())
 
-const moveMonth = (amount) => {
-  if ((amount < 0 && !canPrevious.value) || (amount > 0 && !canNext.value)) return
-  analyticsStore.selectedFlowMonth = startOfMonth(addMonths(selectedMonth.value, amount))
-}
+const moveMonth = (amount) => analyticsStore.moveFlowMonth(amount)
 const openDetails = (item) => {
   selectedItem.value = item
   detailsVisible.value = true

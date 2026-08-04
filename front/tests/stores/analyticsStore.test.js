@@ -359,7 +359,7 @@ test('reconstructs balance metrics from fresh accounts with explicit transaction
   assert.equal(accountStore.accountList[0].attributes.current_balance, '900')
 })
 
-test('uses transaction fetch coverage for the earliest selectable Money flow month', async () => {
+test('navigates Money flow across exact fetch-coverage boundaries with unavailable earliest-month evidence', async () => {
   now = new Date('2026-08-10T12:00:00')
   const invalid = currentExpenseTransaction(null)
   invalid.id = 'unavailable-at-coverage-start'
@@ -370,6 +370,23 @@ test('uses transaction fetch coverage for the earliest selectable Money flow mon
   await store.init()
 
   assert.equal(format(store.flowMonthMin, 'yyyy-MM'), '2024-08')
+  for (let index = 0; index < 24; index++) assert.equal(store.moveFlowMonth(-1), true)
+  await nextTick()
+
+  assert.equal(format(store.selectedFlowMonth, 'yyyy-MM-dd HH:mm:ss'), '2024-08-01 00:00:00')
+  assert.deepEqual(store.selectedFlow.unclassified, { value: null, transactionIds: ['unavailable-at-coverage-start'] })
+  assert.equal(store.canMoveFlowMonth(-1), false)
+  assert.equal(store.moveFlowMonth(-1), false)
+  assert.equal(format(store.selectedFlowMonth, 'yyyy-MM-dd HH:mm:ss'), '2024-08-01 00:00:00')
+
+  for (let index = 0; index < 24; index++) assert.equal(store.moveFlowMonth(1), true)
+  await nextTick()
+
+  assert.equal(format(store.selectedFlowMonth, 'yyyy-MM-dd HH:mm:ss'), '2026-08-01 00:00:00')
+  assert.deepEqual(store.selectedFlow.unclassified, { value: 0, transactionIds: [] })
+  assert.equal(store.canMoveFlowMonth(1), false)
+  assert.equal(store.moveFlowMonth(1), false)
+  assert.equal(format(store.selectedFlowMonth, 'yyyy-MM-dd HH:mm:ss'), '2026-08-01 00:00:00')
 })
 
 test('refresh publishes only the newest complete ledger generation', async () => {

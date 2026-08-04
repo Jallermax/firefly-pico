@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { format, parseISO, startOfMonth, subMonths } from 'date-fns'
+import { addMonths, format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import DateUtils from '../utils/DateUtils.js'
 import {
   buildCategoryLedger,
@@ -270,6 +270,19 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const flowMonthMin = computed(() => (rawSnapshot.value.transactionCoverage?.startMonth ? startOfMonth(parseISO(rawSnapshot.value.transactionCoverage.startMonth + '-01')) : null))
     const flowMonthMax = computed(() => startOfMonth(getNow()))
+    const getFlowMonthTarget = (amount) => {
+      if (![-1, 1].includes(amount) || !flowMonthMin.value) return null
+      const target = startOfMonth(addMonths(selectedFlowMonth.value, amount))
+      if (target < flowMonthMin.value || target > flowMonthMax.value) return null
+      return target
+    }
+    const canMoveFlowMonth = (amount) => getFlowMonthTarget(amount) !== null
+    const moveFlowMonth = (amount) => {
+      const target = getFlowMonthTarget(amount)
+      if (!target) return false
+      selectedFlowMonth.value = target
+      return true
+    }
 
     const balanceMonthKeys = computed(() => {
       const currentMonth = startOfMonth(rawSnapshot.value.asOfDate ? parseISO(rawSnapshot.value.asOfDate) : getNow())
@@ -517,6 +530,8 @@ export function createAnalyticsStore(id, useDependencies) {
       retryBalance,
       retryCategory,
       retryFlow,
+      canMoveFlowMonth,
+      moveFlowMonth,
     }
   })
 }
