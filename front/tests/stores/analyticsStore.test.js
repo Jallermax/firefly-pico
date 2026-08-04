@@ -27,6 +27,7 @@ let transactionResult = []
 let transactionResponse = async () => ({ ok: true, data: transactionResult })
 let freshAccountResult = async () => ({ ok: true, data: structuredClone(accountStore.accountList) })
 let transactionLinkResult = async () => ({ ok: true, data: [] })
+let transactionLinkTypeResult = async () => ({ ok: true, data: [] })
 let subscriptionResult = async () => ({ ok: true, data: [] })
 let recurringTransactionResult = async () => ({ ok: true, data: [] })
 let exchangeRateResponse = async () => {}
@@ -103,6 +104,13 @@ class TransactionLinkRepository {
   }
 }
 
+class TransactionLinkTypeRepository {
+  async getAll() {
+    snapshotRequests.push({ input: 'link-types' })
+    return transactionLinkTypeResult()
+  }
+}
+
 class SubscriptionRepository {
   async getAll(startDate, endDate) {
     snapshotRequests.push({ input: 'subscriptions', startDate, endDate })
@@ -146,6 +154,7 @@ const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   accountRepository: new AccountRepository(),
   transactionRepository: new TransactionRepository(),
   transactionLinkRepository: new TransactionLinkRepository(),
+  transactionLinkTypeRepository: new TransactionLinkTypeRepository(),
   subscriptionRepository: new SubscriptionRepository(),
   recurringTransactionRepository: new RecurringTransactionRepository(),
   createAccountRepository: () => new AccountRepository(),
@@ -245,6 +254,7 @@ beforeEach(() => {
   transactionResponse = async () => ({ ok: true, data: transactionResult })
   freshAccountResult = async () => ({ ok: true, data: [...accountStore.accountList] })
   transactionLinkResult = async () => ({ ok: true, data: [] })
+  transactionLinkTypeResult = async () => ({ ok: true, data: [] })
   subscriptionResult = async () => ({ ok: true, data: [] })
   recurringTransactionResult = async () => ({ ok: true, data: [] })
   exchangeRateResponse = async () => {}
@@ -1106,10 +1116,22 @@ test('refresh reloads every analytics snapshot input', async () => {
   await store.init()
   await store.refresh()
 
-  for (const input of ['accounts', 'transaction-links', 'subscriptions', 'recurrences']) {
+  for (const input of ['accounts', 'transaction-links', 'link-types', 'subscriptions', 'recurrences']) {
     assert.equal(snapshotRequests.filter(({ input: requestedInput }) => requestedInput === input).length, 2, input)
   }
   assert.equal(transactionRequests.length, 2)
+})
+
+test('loads human-readable transaction link types as an independent analytics snapshot input', async () => {
+  const linkTypes = [{ id: 'refund-type', attributes: { name: 'Refund', inward: 'refunded', outward: 'refund' } }]
+  transactionLinkTypeResult = async () => ({ ok: true, data: linkTypes })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.transactionLinkTypes, linkTypes)
+  assert.equal(store.ancillaryState.transactionLinkTypes.status, 'ready')
+  assert.equal(snapshotRequests.filter(({ input }) => input === 'link-types').length, 1)
 })
 
 test('publishes only one generation when an older snapshot resolves after refresh', async () => {
@@ -1185,6 +1207,7 @@ test('refresh replaces an in-flight same-key balance request and keeps its newer
 
 test('retains failure metadata for each ancillary snapshot input', async () => {
   transactionLinkResult = async () => ({ ok: false, data: [] })
+  transactionLinkTypeResult = async () => ({ ok: false, data: [] })
   subscriptionResult = async () => ({ ok: false, data: [] })
   recurringTransactionResult = async () => ({ ok: false, data: [] })
   transactionResult = [currentExpenseTransaction(25)]
@@ -1192,7 +1215,7 @@ test('retains failure metadata for each ancillary snapshot input', async () => {
 
   await store.init()
 
-  for (const input of ['transactionLinks', 'subscriptions', 'recurringTransactions']) {
+  for (const input of ['transactionLinks', 'transactionLinkTypes', 'subscriptions', 'recurringTransactions']) {
     assert.equal(store.ancillaryState[input].status, 'error', input)
     assert.match(store.ancillaryState[input].error.message, /Analytics .* request failed/)
   }

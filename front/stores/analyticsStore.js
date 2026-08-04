@@ -5,6 +5,7 @@ import { useCurrencyStore } from '~/stores/currencyStore.js'
 import AccountRepository from '~/repository/AccountRepository.js'
 import TransactionRepository from '~/repository/TransactionRepository.js'
 import TransactionLinkRepository from '~/repository/TransactionLinkRepository.js'
+import TransactionLinkTypeRepository from '~/repository/TransactionLinkTypeRepository.js'
 import SubscriptionRepository from '~/repository/SubscriptionRepository.js'
 import RecurringTransactionRepository from '~/repository/RecurringTransactionRepository.js'
 import TransactionTransformer from '~/transformers/TransactionTransformer.js'
@@ -22,6 +23,7 @@ export const useAnalyticsStore = createAnalyticsStore('analytics', () => ({
   accountRepository: new AccountRepository(),
   transactionRepository: new TransactionRepository(),
   transactionLinkRepository: new TransactionLinkRepository(),
+  transactionLinkTypeRepository: new TransactionLinkTypeRepository(),
   subscriptionRepository: new SubscriptionRepository(),
   recurringTransactionRepository: new RecurringTransactionRepository(),
   transformTransactions: (transactions) => TransactionTransformer.transformFromApiList(transactions),

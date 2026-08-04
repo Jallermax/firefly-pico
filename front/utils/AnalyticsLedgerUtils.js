@@ -1,4 +1,5 @@
 import { ANALYTICS_UNCATEGORIZED_ID, convertAnalyticsAmount, getAnalyticsAccountKind } from './AnalyticsUtils.js'
+import { format } from 'date-fns'
 
 const unique = (values) => [...new Set(values.filter(Boolean))]
 const valuePresent = (value) => value !== null && value !== undefined && (typeof value !== 'string' || value.trim() !== '')
@@ -20,7 +21,7 @@ const ledgerAccountKind = (account) => {
 }
 
 const dateKey = (value) => {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10)
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : format(value, 'yyyy-MM-dd')
   const match = String(value ?? '').match(/^\d{4}-\d{2}-\d{2}/)
   return match?.[0] ?? null
 }
@@ -37,10 +38,23 @@ const isRefundTag = (tags) => tags.some((tag) => tag.trim().toLowerCase() === '#
 
 const linkValue = (attributes, key) => idOf(attributes?.[key] ?? attributes?.[key.replace('_id', 'Id')])
 
-const isRefundLink = (link) => {
+const isRefundLink = ({ link, linkType }) => {
   const attributes = link?.attributes ?? link ?? {}
-  const type = attributes.link_type ?? attributes.linkType ?? attributes.type ?? null
-  const values = [attributes.link_type_name, attributes.linkTypeName, attributes.name, typeof type === 'string' ? type : null, type?.name, type?.type, type?.attributes?.name, type?.attributes?.type]
+  const type = linkType?.attributes ?? linkType ?? attributes.link_type ?? attributes.linkType ?? attributes.type ?? null
+  const values = [
+    attributes.link_type_name,
+    attributes.linkTypeName,
+    attributes.name,
+    typeof type === 'string' ? type : null,
+    type?.name,
+    type?.type,
+    type?.inward,
+    type?.outward,
+    type?.attributes?.name,
+    type?.attributes?.type,
+    type?.attributes?.inward,
+    type?.attributes?.outward,
+  ]
   return values.some((value) =>
     String(value ?? '')
       .toLowerCase()
@@ -100,8 +114,9 @@ const markRefund = ({ entry, signal, purchase = null }) => {
   entry.refund.coverageValue = Number.isFinite(entry.value) ? Math.abs(entry.value) : null
 }
 
-export function buildAnalyticsLedger({ transactions = [], transactionLinks = [], accounts = [], displayCurrencyCode, primaryCurrencyCode, rates }) {
+export function buildAnalyticsLedger({ transactions = [], transactionLinks = [], linkTypes = [], accounts = [], displayCurrencyCode, primaryCurrencyCode, rates }) {
   const accountsById = new Map(accounts.map((account) => [idOf(account?.id), account]).filter(([id]) => id))
+  const linkTypesById = new Map(linkTypes.map((linkType) => [idOf(linkType?.id), linkType]).filter(([id]) => id))
   const entries = []
   const months = {}
   const journalEntries = new Map()
@@ -175,8 +190,9 @@ export function buildAnalyticsLedger({ transactions = [], transactionLinks = [],
   }
 
   for (const link of transactionLinks) {
-    if (!isRefundLink(link)) continue
     const attributes = link?.attributes ?? link ?? {}
+    const linkType = linkTypesById.get(idOf(attributes.link_type_id ?? attributes.linkTypeId))
+    if (!isRefundLink({ link, linkType })) continue
     const purchaseEntries = journalEntries.get(linkValue(attributes, 'inward_id')) ?? []
     const refundEntries = journalEntries.get(linkValue(attributes, 'outward_id')) ?? []
     if (purchaseEntries.length === 0 || refundEntries.length === 0) {

@@ -36,6 +36,7 @@ export function createAnalyticsStore(id, useDependencies) {
       accountRepository,
       transactionRepository,
       transactionLinkRepository,
+      transactionLinkTypeRepository,
       subscriptionRepository,
       recurringTransactionRepository,
       transformTransactions,
@@ -113,6 +114,7 @@ export function createAnalyticsStore(id, useDependencies) {
     const flowState = reactive({ status: 'idle', error: null, isStale: false })
     const ancillaryState = reactive({
       transactionLinks: { status: 'idle', error: null },
+      transactionLinkTypes: { status: 'idle', error: null },
       subscriptions: { status: 'idle', error: null },
       recurringTransactions: { status: 'idle', error: null },
     })
@@ -120,6 +122,7 @@ export function createAnalyticsStore(id, useDependencies) {
     const accounts = ref([])
     const transactions = ref([])
     const transactionLinks = ref([])
+    const transactionLinkTypes = ref([])
     const subscriptions = ref([])
     const recurringTransactions = ref([])
     const snapshotRates = ref({ ...currencyStore.exchangeRates?.rates })
@@ -473,9 +476,10 @@ export function createAnalyticsStore(id, useDependencies) {
       Object.values(ancillaryState).forEach((state) => Object.assign(state, { status: 'loading', error: null }))
 
       const request = (async () => {
-        const [accountResult, transactionLinkResult, subscriptionResult, recurringTransactionResult, rateResult] = await Promise.all([
+        const [accountResult, transactionLinkResult, transactionLinkTypeResult, subscriptionResult, recurringTransactionResult, rateResult] = await Promise.all([
           accountRepository.getAllWithMergeResult({ pageSize: 200 }),
           transactionLinkRepository.getAll(),
+          transactionLinkTypeRepository.getAll(),
           subscriptionRepository.getAll(startDate, endDate),
           recurringTransactionRepository.getAllWithMergeResult({ pageSize: 200 }),
           (async () => {
@@ -489,6 +493,7 @@ export function createAnalyticsStore(id, useDependencies) {
         snapshotRates.value = rateResult
         const ancillaryInputs = [
           ['transactionLinks', transactionLinks, transactionLinkResult, 'transaction link'],
+          ['transactionLinkTypes', transactionLinkTypes, transactionLinkTypeResult, 'transaction link type'],
           ['subscriptions', subscriptions, subscriptionResult, 'subscription'],
           ['recurringTransactions', recurringTransactions, recurringTransactionResult, 'recurring transaction'],
         ]
@@ -562,6 +567,7 @@ export function createAnalyticsStore(id, useDependencies) {
       accounts,
       transactions,
       transactionLinks,
+      transactionLinkTypes,
       subscriptions,
       recurringTransactions,
       balanceSeries,

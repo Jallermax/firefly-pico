@@ -4,6 +4,7 @@ import axios from 'axios'
 import BaseRepository from '../../repository/BaseRepository.js'
 import SubscriptionRepository from '../../repository/SubscriptionRepository.js'
 import TransactionLinkRepository from '../../repository/TransactionLinkRepository.js'
+import TransactionLinkTypeRepository from '../../repository/TransactionLinkTypeRepository.js'
 
 test('merged result forwards page size to every sequential page', async () => {
   const calls = []
@@ -55,6 +56,14 @@ test('transaction links request the Firefly transaction-links endpoint with the 
   const request = { url: url.pathname.slice(1), params: { page: Number(url.searchParams.get('page')) } }
 
   assert.equal(request.url, 'transaction-links')
+  assert.deepEqual(request.params, { page: 1 })
+})
+
+test('transaction link types request the Firefly link-types endpoint with the first pagination page', async () => {
+  const [url] = await captureRequests(() => new TransactionLinkTypeRepository().getAll())
+  const request = { url: url.pathname.slice(1), params: { page: Number(url.searchParams.get('page')) } }
+
+  assert.equal(request.url, 'link-types')
   assert.deepEqual(request.params, { page: 1 })
 })
 

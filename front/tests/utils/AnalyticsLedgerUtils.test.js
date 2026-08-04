@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 
@@ -34,9 +35,11 @@ const loan = account({ id: 'loan', type: 'liabilities' })
 const revenue = account({ id: 'revenue', type: 'revenue' })
 const expense = account({ id: 'expense', type: 'expense' })
 const accounts = [checking, creditCard, savingsAccessible, savingsRestricted, loan, revenue, expense]
+const refundLinkType = { id: 'refund-type', attributes: { name: 'Refund', inward: 'refunded', outward: 'refund' } }
+const refundLinkTypeByOutward = { id: 'refund-type-by-outward', attributes: { name: 'Transaction relationship', inward: 'refunded', outward: 'refund' } }
 
-const build = ({ transactions, transactionLinks = [], ledgerAccounts = accounts, rates = { USD: 1, EUR: 0.9 } }) =>
-  buildAnalyticsLedger({ transactions, transactionLinks, accounts: ledgerAccounts, displayCurrencyCode: 'USD', primaryCurrencyCode: 'USD', rates })
+const build = ({ transactions, transactionLinks = [], linkTypes = [], ledgerAccounts = accounts, rates = { USD: 1, EUR: 0.9 } }) =>
+  buildAnalyticsLedger({ transactions, transactionLinks, linkTypes, accounts: ledgerAccounts, displayCurrencyCode: 'USD', primaryCurrencyCode: 'USD', rates })
 
 test('normalizes each split with stable provenance and fresh account roles', () => {
   const ledger = build({
@@ -45,6 +48,7 @@ test('normalizes each split with stable provenance and fresh account roles', () 
       transaction('income-group', [split({ journalId: 'income-journal', amount: 200, date: '2026-01-16', source: revenue, destination: checking, categoryId: 'salary' })]),
       transaction('transfer-group', [split({ journalId: 'transfer-journal', amount: 30, date: '2026-01-17', source: checking, destination: creditCard })]),
       transaction('saving-group', [split({ journalId: 'saving-journal', amount: 40, date: '2026-01-18', source: checking, destination: savingsAccessible })]),
+      transaction('restricted-saving-group', [split({ journalId: 'restricted-saving-journal', amount: 60, date: '2026-01-18', source: checking, destination: savingsRestricted })]),
       transaction('liability-group', [split({ journalId: 'loan-journal', amount: 50, date: '2026-01-19', source: checking, destination: loan })]),
       transaction('multi-group', [
         split({ journalId: 'multi-one', amount: 10, date: '2026-01-20', source: checking, destination: expense, categoryId: 'food' }),
@@ -53,7 +57,7 @@ test('normalizes each split with stable provenance and fresh account roles', () 
     ],
   })
 
-  assert.equal(ledger.entries.length, 7)
+  assert.equal(ledger.entries.length, 8)
   assert.deepEqual(
     ledger.entries.map(({ id, transactionId, journalId, splitIndex }) => ({ id, transactionId, journalId, splitIndex })),
     [
@@ -61,10 +65,15 @@ test('normalizes each split with stable provenance and fresh account roles', () 
       { id: 'income-group:income-journal:0', transactionId: 'income-group', journalId: 'income-journal', splitIndex: 0 },
       { id: 'transfer-group:transfer-journal:0', transactionId: 'transfer-group', journalId: 'transfer-journal', splitIndex: 0 },
       { id: 'saving-group:saving-journal:0', transactionId: 'saving-group', journalId: 'saving-journal', splitIndex: 0 },
+      { id: 'restricted-saving-group:restricted-saving-journal:0', transactionId: 'restricted-saving-group', journalId: 'restricted-saving-journal', splitIndex: 0 },
       { id: 'liability-group:loan-journal:0', transactionId: 'liability-group', journalId: 'loan-journal', splitIndex: 0 },
       { id: 'multi-group:multi-one:0', transactionId: 'multi-group', journalId: 'multi-one', splitIndex: 0 },
       { id: 'multi-group:multi-two:1', transactionId: 'multi-group', journalId: 'multi-two', splitIndex: 1 },
     ],
+  )
+  assert.deepEqual(
+    ledger.entries.map(({ value }) => value),
+    [100, 200, 30, 40, 60, 50, 10, 20],
   )
   assert.deepEqual(
     ledger.entries.map(({ sourceKind, destinationKind }) => [sourceKind, destinationKind]),
@@ -73,6 +82,7 @@ test('normalizes each split with stable provenance and fresh account roles', () 
       ['revenue', 'available'],
       ['available', 'available'],
       ['available', 'savingsAccessible'],
+      ['available', 'savingsRestricted'],
       ['available', 'liability'],
       ['available', 'expense'],
       ['available', 'expense'],
@@ -82,7 +92,7 @@ test('normalizes each split with stable provenance and fresh account roles', () 
   assert.equal(ledger.entries[2].destinationKind, 'available')
   assert.deepEqual(ledger.months['2026-01'], {
     entryIds: ledger.entries.map(({ id }) => id),
-    transactionIds: ['expense-group', 'income-group', 'liability-group', 'multi-group', 'saving-group', 'transfer-group'],
+    transactionIds: ['expense-group', 'income-group', 'liability-group', 'multi-group', 'restricted-saving-group', 'saving-group', 'transfer-group'],
   })
 })
 
@@ -91,21 +101,25 @@ test('deduplicates linked and tagged refunds while preserving cash and coverage 
     transactions: [
       transaction('purchase-group', [split({ journalId: 'purchase-journal', amount: 100, date: '2026-01-15', source: checking, destination: expense, categoryId: 'food' })]),
       transaction('linked-refund-group', [split({ journalId: 'refund-journal', amount: 40, date: '2026-02-04', source: expense, destination: checking, categoryId: 'misc', tags: ['#refund'] })]),
+      transaction('link-only-refund-group', [split({ journalId: 'link-only-refund-journal', amount: 15, date: '2026-02-06', source: expense, destination: checking, categoryId: 'misc' })]),
       transaction('tag-refund-group', [split({ journalId: 'tag-refund-journal', amount: 12, date: '2026-02-05', source: expense, destination: checking, categoryId: 'books', tags: ['#refund'] })]),
     ],
     transactionLinks: [
       {
         id: 'refund-link',
         attributes: {
-          link_type: { name: 'Refund', inward: 'refunded', outward: 'refund' },
+          link_type_id: 'refund-type',
           inward_id: 'purchase-journal',
           outward_id: 'refund-journal',
         },
       },
+      { id: 'link-only-refund-link', attributes: { link_type_id: 'refund-type-by-outward', inward_id: 'purchase-journal', outward_id: 'link-only-refund-journal' } },
     ],
+    linkTypes: [refundLinkType, refundLinkTypeByOutward],
   })
 
   const linked = ledger.entries.find(({ transactionId }) => transactionId === 'linked-refund-group')
+  const linkOnly = ledger.entries.find(({ transactionId }) => transactionId === 'link-only-refund-group')
   const tagOnly = ledger.entries.find(({ transactionId }) => transactionId === 'tag-refund-group')
   assert.equal(linked.value, 40)
   assert.equal(linked.date, '2026-02-04')
@@ -118,6 +132,17 @@ test('deduplicates linked and tagged refunds while preserving cash and coverage 
     coverageCategoryId: 'food',
     coverageMonthKey: '2026-01',
     coverageValue: 40,
+    isLinked: true,
+  })
+  assert.equal(linkOnly.date, '2026-02-06')
+  assert.deepEqual(linkOnly.refund, {
+    isRefund: true,
+    signals: ['link'],
+    linkedPurchaseTransactionId: 'purchase-group',
+    linkedPurchaseMonthKey: '2026-01',
+    coverageCategoryId: 'food',
+    coverageMonthKey: '2026-01',
+    coverageValue: 15,
     isLinked: true,
   })
   assert.equal(tagOnly.value, 12)
@@ -145,12 +170,13 @@ test('reports unavailable FX and unknown endpoints without inventing zero values
       {
         id: 'unmatched-refund-link',
         attributes: {
-          link_type: { name: 'Refund' },
+          link_type_id: 'refund-type',
           inward_id: 'not-in-ledger',
           outward_id: 'also-not-in-ledger',
         },
       },
     ],
+    linkTypes: [refundLinkType],
     rates: { USD: 1 },
   })
 
@@ -160,4 +186,36 @@ test('reports unavailable FX and unknown endpoints without inventing zero values
   assert.deepEqual(ledger.fx, { isEstimated: false, missingCurrencies: ['EUR'], transactionIds: ['missing-fx-group'] })
   assert.equal(ledger.entries.find(({ transactionId }) => transactionId === 'unknown-group').sourceKind, 'unknown')
   assert.deepEqual(ledger.audit, { unclassifiedValue: 15, transactionIds: ['unknown-group'], unmatchedRefundLinkIds: ['unmatched-refund-link'] })
+})
+
+test('keeps transformed local purchase and refund calendar dates in a UTC-positive timezone', () => {
+  const ledgerUrl = new URL('../../utils/AnalyticsLedgerUtils.js', import.meta.url).href
+  const script = `
+    import { buildAnalyticsLedger } from ${JSON.stringify(ledgerUrl)}
+
+    const account = (id, type) => ({ id, attributes: { type: { fireflyCode: type }, account_role: null, include_net_worth: true } })
+    const checking = account('checking', 'asset')
+    const expense = account('expense', 'expense')
+    const split = (journalId, amount, date, source, destination, categoryId) => ({ transaction_journal_id: journalId, amount: String(amount), currency_code: 'USD', date, source_id: source.id, destination_id: destination.id, category_id: categoryId, tags: [] })
+    const ledger = buildAnalyticsLedger({
+      accounts: [checking, expense],
+      displayCurrencyCode: 'USD',
+      primaryCurrencyCode: 'USD',
+      rates: { USD: 1 },
+      linkTypes: [{ id: 'refund-type', attributes: { name: 'Refund', inward: 'refunded', outward: 'refund' } }],
+      transactionLinks: [{ id: 'refund-link', attributes: { link_type_id: 'refund-type', inward_id: 'purchase-journal', outward_id: 'refund-journal' } }],
+      transactions: [
+        { id: 'purchase-group', attributes: { transactions: [split('purchase-journal', 100, new Date(2026, 0, 31, 23, 45), checking, expense, 'food')] } },
+        { id: 'refund-group', attributes: { transactions: [split('refund-journal', 40, new Date(2026, 1, 1, 0, 15), expense, checking, 'misc')] } },
+      ],
+    })
+    console.log(JSON.stringify(ledger.entries.map(({ date, monthKey, refund }) => ({ date, monthKey, coverageMonthKey: refund.coverageMonthKey }))))
+  `
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { encoding: 'utf8', env: { ...process.env, TZ: 'Pacific/Kiritimati' } })
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout), [
+    { date: '2026-01-31', monthKey: '2026-01', coverageMonthKey: null },
+    { date: '2026-02-01', monthKey: '2026-02', coverageMonthKey: '2026-01' },
+  ])
 })
