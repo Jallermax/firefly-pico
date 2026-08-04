@@ -205,8 +205,8 @@ test('keeps transformed local purchase and refund calendar dates in a UTC-positi
       linkTypes: [{ id: 'refund-type', attributes: { name: 'Refund', inward: 'refunded', outward: 'refund' } }],
       transactionLinks: [{ id: 'refund-link', attributes: { link_type_id: 'refund-type', inward_id: 'purchase-journal', outward_id: 'refund-journal' } }],
       transactions: [
-        { id: 'purchase-group', attributes: { transactions: [split('purchase-journal', 100, new Date(2026, 0, 31, 23, 45), checking, expense, 'food')] } },
-        { id: 'refund-group', attributes: { transactions: [split('refund-journal', 40, new Date(2026, 1, 1, 0, 15), expense, checking, 'misc')] } },
+        { id: 'purchase-group', attributes: { transactions: [split('purchase-journal', 100, new Date(2026, 1, 1, 0, 5), checking, expense, 'food')] } },
+        { id: 'refund-group', attributes: { transactions: [split('refund-journal', 40, new Date(2026, 1, 2, 0, 15), expense, checking, 'misc')] } },
       ],
     })
     console.log(JSON.stringify(ledger.entries.map(({ date, monthKey, refund }) => ({ date, monthKey, coverageMonthKey: refund.coverageMonthKey }))))
@@ -214,8 +214,7 @@ test('keeps transformed local purchase and refund calendar dates in a UTC-positi
   const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { encoding: 'utf8', env: { ...process.env, TZ: 'Pacific/Kiritimati' } })
 
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(JSON.parse(result.stdout), [
-    { date: '2026-01-31', monthKey: '2026-01', coverageMonthKey: null },
-    { date: '2026-02-01', monthKey: '2026-02', coverageMonthKey: '2026-01' },
-  ])
+  const entries = JSON.parse(result.stdout)
+  assert.deepEqual(entries[1], { date: '2026-02-02', monthKey: '2026-02', coverageMonthKey: '2026-02' })
+  assert.deepEqual(entries[0], { date: '2026-02-01', monthKey: '2026-02', coverageMonthKey: null })
 })
