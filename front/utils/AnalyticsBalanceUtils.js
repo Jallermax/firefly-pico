@@ -1,0 +1,188 @@
+import { format } from 'date-fns'
+
+import { convertAnalyticsAmount, getAnalyticsAccountGroups, getAnalyticsAccountKind } from './AnalyticsUtils.js'
+
+const unique = (values) => [...new Set(values.filter(Boolean))].sort()
+const idOf = (value) => (value === null || value === undefined || value === '' ? null : String(value))
+const codeOf = (value) => value?.fireflyCode ?? value ?? null
+
+const dateKey = (value) => {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : format(value, 'yyyy-MM-dd')
+  return String(value ?? '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null
+}
+
+const monthEnd = (monthKey) => {
+  const match = String(monthKey ?? '').match(/^(\d{4})-(\d{2})$/)
+  if (!match) return null
+  return format(new Date(Number(match[1]), Number(match[2]), 0), 'yyyy-MM-dd')
+}
+
+const cleanNumber = (value) => {
+  if (!Number.isFinite(value)) return null
+  const factor = 10 ** 12
+  return Math.round((value + Number.EPSILON) * factor) / factor
+}
+
+const eligibleAccounts = (accounts, metric) => {
+  const groups = getAnalyticsAccountGroups(accounts)
+  if (metric === 'savings') return [...groups.savingsIncluded, ...groups.savingsExcluded]
+  return groups[metric] ?? []
+}
+
+const movementFor = (entry, accountId) => {
+  const sourceId = idOf(entry?.sourceAccount?.id)
+  const destinationId = idOf(entry?.destinationAccount?.id)
+  if (sourceId !== accountId && destinationId !== accountId) return null
+  if (!Number.isFinite(entry?.value)) return { entry, delta: null }
+  return { entry, delta: (destinationId === accountId ? entry.value : 0) - (sourceId === accountId ? entry.value : 0) }
+}
+
+const pointForAccount = ({ account, anchorValue, entries, pointDate, upperDate = null, covered }) => {
+  const movements = entries
+    .map((entry) => movementFor(entry, idOf(account.id)))
+    .filter(Boolean)
+    .filter(({ entry }) => entry.date > pointDate && (!upperDate || entry.date <= upperDate))
+  const transactionIds = unique(movements.map(({ entry }) => entry.transactionId))
+  if (!covered || !Number.isFinite(anchorValue) || movements.some(({ delta }) => !Number.isFinite(delta))) return { x: pointDate, value: null, transactionIds }
+  const value = cleanNumber(anchorValue - movements.reduce((total, { delta }) => total + delta, 0))
+  return { x: pointDate, value, transactionIds, ...(movements.some(({ entry }) => entry.isEstimated) ? { isEstimated: true } : {}) }
+}
+
+const aggregateAccountPoints = ({ metric, accountBreakdown, monthKeys, coverage }) =>
+  monthKeys.map((monthKey) => {
+    const x = monthEnd(monthKey)
+    const accountPoints = accountBreakdown.map(({ points }) => points.find((point) => point.x === x))
+    const transactionIds = unique(accountPoints.flatMap((point) => point?.transactionIds ?? []))
+    if (!coverage.completeMonths.includes(monthKey) || accountPoints.some((point) => !Number.isFinite(point?.value))) return { x, value: null, transactionIds }
+    const value = cleanNumber(accountPoints.reduce((total, point) => total + (metric === 'debt' ? Math.abs(point.value) : point.value), 0))
+    return { x, value, transactionIds, ...(accountPoints.some((point) => point.isEstimated) ? { isEstimated: true } : {}) }
+  })
+
+const relevantEntries = (entries, accountIds, metric) => {
+  if (metric === 'expenses') return entries.filter(({ destinationKind }) => destinationKind === 'expense')
+  return entries.filter((entry) => accountIds.has(idOf(entry?.sourceAccount?.id)) || accountIds.has(idOf(entry?.destinationAccount?.id)))
+}
+
+const expensePoint = ({ entries, monthKey, covered }) => {
+  const x = monthEnd(monthKey)
+  const qualifying = entries.filter((entry) => entry.monthKey === monthKey && entry.destinationKind === 'expense')
+  const transactionIds = unique(qualifying.map(({ transactionId }) => transactionId))
+  if (!covered || qualifying.some(({ value }) => !Number.isFinite(value))) return { x, value: null, transactionIds }
+  const value = cleanNumber(qualifying.reduce((total, { value }) => total + Math.abs(value), 0))
+  return { x, value, transactionIds, ...(qualifying.some(({ isEstimated }) => isEstimated) ? { isEstimated: true } : {}) }
+}
+
+const aggregateAccounts = ({ metric, accounts, field }) => {
+  const values = accounts.map((account) => account[field])
+  if (values.some((value) => !Number.isFinite(value))) return null
+  return cleanNumber(values.reduce((total, value) => total + (metric === 'debt' ? Math.abs(value) : value), 0))
+}
+
+const reconcile = ({ metric, accountBreakdown, asOfDate, entries, currencyDecimalPlaces }) => {
+  if (metric === 'expenses') return { status: 'unavailable', anchorValue: null, reconstructedValue: null, delta: null, accounts: [] }
+
+  const reconstructedAccounts = accountBreakdown.map((account) => {
+    const point = pointForAccount({ account, anchorValue: account.anchorValue, entries, pointDate: asOfDate, covered: true })
+    const delta = Number.isFinite(point.value) && Number.isFinite(account.anchorValue) ? cleanNumber(point.value - account.anchorValue) : null
+    return {
+      id: account.id,
+      anchorValue: account.anchorValue,
+      reconstructedValue: point.value,
+      delta,
+      transactionIds: point.transactionIds,
+    }
+  })
+  const anchorValue = aggregateAccounts({ metric, accounts: accountBreakdown, field: 'anchorValue' })
+  const reconstructedValue = aggregateAccounts({ metric, accounts: reconstructedAccounts, field: 'reconstructedValue' })
+  if (!Number.isFinite(anchorValue) || !Number.isFinite(reconstructedValue)) {
+    return { status: 'unavailable', anchorValue, reconstructedValue, delta: null, accounts: reconstructedAccounts.filter(({ reconstructedValue }) => !Number.isFinite(reconstructedValue)) }
+  }
+
+  const delta = cleanNumber(reconstructedValue - anchorValue)
+  const tolerance = 10 ** -currencyDecimalPlaces
+  const status = Math.abs(delta) <= tolerance ? 'ok' : 'mismatch'
+  return {
+    status,
+    anchorValue,
+    reconstructedValue,
+    delta,
+    accounts: status === 'mismatch' ? reconstructedAccounts.filter(({ delta: accountDelta }) => accountDelta !== 0) : [],
+  }
+}
+
+export function reconstructBalanceSeries({ accounts = [], entries = [], metric, monthKeys = [], asOfDate, displayCurrencyCode, primaryCurrencyCode, rates, currencyDecimalPlaces = 2 }) {
+  const normalizedAsOfDate = dateKey(asOfDate)
+  const normalizedEntries = entries.map((entry) => ({ ...entry, date: dateKey(entry?.date), monthKey: entry?.monthKey ?? dateKey(entry?.date)?.slice(0, 7) })).filter(({ date }) => date)
+  const startMonth =
+    normalizedEntries
+      .map(({ monthKey }) => monthKey)
+      .filter(Boolean)
+      .sort()[0] ?? null
+  const asOfMonth = normalizedAsOfDate?.slice(0, 7) ?? null
+  const completeMonths = monthKeys.filter((monthKey) => startMonth && monthKey >= startMonth && asOfMonth && monthKey < asOfMonth)
+  const coverage = { startMonth, endDate: normalizedAsOfDate, completeMonths, unavailableMonths: monthKeys.filter((monthKey) => !completeMonths.includes(monthKey)) }
+  const selectedAccounts = metric === 'expenses' ? [] : eligibleAccounts(accounts, metric)
+  const accountIds = new Set(selectedAccounts.map(({ id }) => idOf(id)).filter(Boolean))
+  const metricEntries = relevantEntries(normalizedEntries, accountIds, metric)
+
+  const accountBreakdown = selectedAccounts.map((account) => {
+    const converted = convertAnalyticsAmount({
+      amount: account?.attributes?.current_balance,
+      currencyCode: codeOf(account?.attributes?.currency_code),
+      primaryAmount: null,
+      primaryCurrencyCode,
+      displayCurrencyCode,
+      rates,
+    })
+    const anchorValue = cleanNumber(converted.value)
+    const points = monthKeys.map((monthKey) =>
+      pointForAccount({
+        account,
+        anchorValue,
+        entries: metricEntries,
+        pointDate: monthEnd(monthKey),
+        upperDate: normalizedAsOfDate,
+        covered: completeMonths.includes(monthKey),
+      }),
+    )
+    return {
+      id: idOf(account.id),
+      kind: getAnalyticsAccountKind(account),
+      anchorValue,
+      points,
+      currentPoint: Number.isFinite(anchorValue) ? { x: normalizedAsOfDate, value: anchorValue, transactionIds: [], ...(converted.isEstimated ? { isEstimated: true } : {}) } : null,
+      isEstimated: converted.isEstimated,
+      missingCurrency: converted.missingCurrency,
+    }
+  })
+
+  const points =
+    metric === 'expenses'
+      ? monthKeys.map((monthKey) => expensePoint({ entries: normalizedEntries, monthKey, covered: completeMonths.includes(monthKey) }))
+      : aggregateAccountPoints({ metric, accountBreakdown, monthKeys, coverage })
+  const currentMonthEntries = normalizedEntries.filter(({ date }) => asOfMonth && date <= normalizedAsOfDate && date.startsWith(asOfMonth))
+  const currentPoint =
+    metric === 'expenses'
+      ? startMonth && asOfMonth && asOfMonth >= startMonth
+        ? { ...expensePoint({ entries: currentMonthEntries, monthKey: asOfMonth, covered: true }), x: normalizedAsOfDate }
+        : null
+      : (() => {
+          const value = aggregateAccounts({ metric, accounts: accountBreakdown, field: 'anchorValue' })
+          if (!Number.isFinite(value)) return null
+          return { x: normalizedAsOfDate, value, transactionIds: [], ...(accountBreakdown.some(({ isEstimated }) => isEstimated) ? { isEstimated: true } : {}) }
+        })()
+
+  const missingCurrencies = unique([...accountBreakdown.map(({ missingCurrency }) => missingCurrency), ...metricEntries.map(({ conversion }) => conversion?.missingCurrency)])
+  const fxTransactionIds = unique(metricEntries.filter(({ isEstimated, conversion }) => isEstimated || conversion?.missingCurrency).map(({ transactionId }) => transactionId))
+  const fx = { isEstimated: accountBreakdown.some(({ isEstimated }) => isEstimated) || metricEntries.some(({ isEstimated }) => isEstimated), missingCurrencies, transactionIds: fxTransactionIds }
+
+  return {
+    id: metric,
+    points,
+    currentPoint,
+    accountBreakdown,
+    coverage,
+    fx,
+    reconciliation: reconcile({ metric, accountBreakdown, asOfDate: normalizedAsOfDate, entries: metricEntries, currencyDecimalPlaces }),
+  }
+}
