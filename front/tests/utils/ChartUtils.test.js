@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import RouteConstants from '../../constants/RouteConstants.js'
 import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../utils/ChartUtils.js'
 import * as ChartUtils from '../../utils/ChartUtils.js'
 import { buildFinancialTrendChartSeries, limitMoneyFlowGraphDetail } from '../../utils/AnalyticsUtils.js'
@@ -1008,6 +1009,64 @@ test('mobile full mode truncates unremovable CJK labels and never renders a sele
   )
 })
 
+test('dense mobile condensation expands an intrinsic canvas for eleven unremovable targets without clipping or scaling', () => {
+  const debtNodes = Array.from({ length: 11 }, (_, index) => ({ id: `debt:${index + 1}`, layer: 0, kind: 'newDebt', label: `Debt ${index + 1}`, valueLabel: '10.00 USD', value: 10 }))
+  const nodes = [
+    { id: 'income:outer', layer: 0, kind: 'income', label: 'Removable income category', valueLabel: '10.00 USD', value: 10 },
+    ...debtNodes,
+    { id: 'sources', layer: 1, kind: 'liabilityExtended', label: 'Sources', valueLabel: '110.00 USD', value: 110 },
+    { id: 'available', layer: 2, kind: 'available', label: 'Available', valueLabel: '110.00 USD', value: 110 },
+    { id: 'savings', layer: 3, kind: 'savings', label: 'Savings', valueLabel: '110.00 USD', value: 110 },
+    { id: 'expenses', layer: 4, kind: 'expenses', label: 'Expenses', valueLabel: '110.00 USD', value: 110 },
+    { id: 'debt-paid', layer: 5, kind: 'debtPaid', label: 'Debt paid', valueLabel: '110.00 USD', value: 110 },
+  ]
+  const links = [
+    ...debtNodes.map((node) => ({ id: `${node.id}->sources`, sourceId: node.id, targetId: 'sources', kind: 'newDebt', value: 10 })),
+    { id: 'sources->available', sourceId: 'sources', targetId: 'available', kind: 'newDebt', value: 110 },
+    { id: 'available->savings', sourceId: 'available', targetId: 'savings', kind: 'bridge', value: 110 },
+    { id: 'savings->expenses', sourceId: 'savings', targetId: 'expenses', kind: 'expense', value: 110 },
+    { id: 'expenses->debt-paid', sourceId: 'expenses', targetId: 'debt-paid', kind: 'debtPaid', value: 110 },
+  ]
+  const intersects = (left, right) => left.x < right.x + right.width && left.x + left.width > right.x && left.y < right.y + right.height && left.y + left.height > right.y
+
+  assert.equal(ChartUtils.resolveMoneyFlowGraphMode({ nodes, isDesktop: false, renderedWidth: 390 }), 'condensed')
+  const geometry = ChartUtils.buildMoneyFlowGraphGeometry({ nodes, links, isDesktop: false, renderedWidth: 390, mode: 'condensed' })
+
+  assert.equal(geometry.viewportWidth, 390)
+  assert.equal(geometry.width, 596)
+  assert.equal(geometry.responsive.selected.fits, true)
+  assert.deepEqual(
+    geometry.nodes.filter(({ kind }) => kind === 'newDebt').map(({ id }) => id),
+    debtNodes.map(({ id }) => id),
+  )
+  assert.equal(
+    geometry.nodes.every(
+      ({ hitBox, contentBox }) =>
+        hitBox.width >= 44 && hitBox.height >= 44 && hitBox.x >= 0 && hitBox.x + hitBox.width <= geometry.width && contentBox.x >= 0 && contentBox.x + contentBox.width <= geometry.width,
+    ),
+    true,
+  )
+  for (let leftIndex = 0; leftIndex < geometry.nodes.length; leftIndex++) {
+    for (let rightIndex = leftIndex + 1; rightIndex < geometry.nodes.length; rightIndex++) {
+      assert.equal(intersects(geometry.nodes[leftIndex].hitBox, geometry.nodes[rightIndex].hitBox), false)
+    }
+  }
+
+  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  assert.match(component, /width: `\$\{layout\.width\}px`/)
+  assert.match(whiteCss, /\.analytics-flow-viewport\s*\{[^}]*overflow-x:\s*auto/s)
+  assert.match(whiteCss, /\.analytics-flow-mobile \.analytics-flow-svg\s*\{[^}]*max-width:\s*none/s)
+})
+
+test('fallback grapheme splitter preserves marks, variation, modifiers, ZWJ emoji, and regional pairs', () => {
+  assert.deepEqual(ChartUtils.splitMoneyFlowGraphemes('e\u0301', null), ['e\u0301'])
+  assert.deepEqual(ChartUtils.splitMoneyFlowGraphemes('✈️', null), ['✈️'])
+  assert.deepEqual(ChartUtils.splitMoneyFlowGraphemes('👍🏽', null), ['👍🏽'])
+  assert.deepEqual(ChartUtils.splitMoneyFlowGraphemes('👩‍💻', null), ['👩‍💻'])
+  assert.deepEqual(ChartUtils.splitMoneyFlowGraphemes('🇺🇸🇨🇦', null), ['🇺🇸', '🇨🇦'])
+})
+
 test('crowded 390px flow condenses outer details without discarding their selection metadata', () => {
   const detailNodes = Array.from({ length: 7 }, (_, index) => ({
     id: `expense:${index + 1}`,
@@ -1068,9 +1127,41 @@ test('layered flow renderer uses filled ribbons and accessible patterns', () => 
   assert.match(component, /id="analytics-flow-savings-accessible-pattern"/)
   assert.match(component, /id="analytics-flow-savings-restricted-pattern"/)
   assert.match(component, /@pointermove\.self="previewPointerRibbon"/)
-  assert.match(component, /resolveNearestMoneyFlowRibbon\(\{ ribbons: layout\.value\.ribbons, point \}\)/)
+  assert.match(component, /resolveMoneyFlowPointerAction/)
   assert.match(whiteCss, /\.analytics-flow-ribbon-corridor\s*\{[^}]*pointer-events:\s*none/s)
   assert.doesNotMatch(component, /<details[\s\S]*analytics-flow-values/)
+})
+
+test('scrolled SVG pointer move and down preview the same ribbon before click selects it', () => {
+  const ribbons = [
+    {
+      id: 'selected-ribbon',
+      width: 8,
+      corridor: { start: { x: 100, y: 90 }, control1: { x: 200, y: 90 }, control2: { x: 300, y: 110 }, end: { x: 400, y: 110 } },
+    },
+    {
+      id: 'other-ribbon',
+      width: 8,
+      corridor: { start: { x: 100, y: 150 }, control1: { x: 200, y: 150 }, control2: { x: 300, y: 150 }, end: { x: 400, y: 150 } },
+    },
+  ]
+  const bounds = { left: -120, top: 40, width: 596, height: 300 }
+  const clientPoint = { x: 80, y: 140 }
+  const targets = ribbons.map(({ id }) => ({ type: 'link', id }))
+  let state = ChartUtils.resolveMoneyFlowInteraction({ action: { type: 'dismiss' }, targets })
+
+  for (const eventType of ['pointermove', 'pointerdown']) {
+    const resolved = ChartUtils.resolveMoneyFlowPointerAction({ ribbons, clientPoint, bounds, layoutWidth: 596, layoutHeight: 300, eventType })
+    assert.deepEqual(resolved.point, { x: 200, y: 100 })
+    assert.equal(resolved.ribbon.id, 'selected-ribbon')
+    state = ChartUtils.resolveMoneyFlowInteraction({ state, action: resolved.action, targets })
+    assert.deepEqual(state.preview, { type: 'link', id: 'selected-ribbon' })
+  }
+
+  const resolvedClick = ChartUtils.resolveMoneyFlowPointerAction({ ribbons, clientPoint, bounds, layoutWidth: 596, layoutHeight: 300, eventType: 'click' })
+  state = ChartUtils.resolveMoneyFlowInteraction({ state, action: resolvedClick.action, targets })
+  assert.deepEqual(state.pinned, { type: 'link', id: 'selected-ribbon' })
+  assert.deepEqual(state.selection, { type: 'link', id: 'selected-ribbon', contextNodes: [] })
 })
 
 test('money flow interaction controller previews, pins, traverses, and dismisses real targets', () => {
@@ -1133,7 +1224,13 @@ test('limited Other raw detail selection projects popup coverage and the final c
   const rawSelectedItems = graph.links.filter(
     ({ sourceId, targetId, kind, fundingPool }) => sourceId === otherLink.sourceId && targetIds.has(targetId) && kind === otherLink.kind && fundingPool === otherLink.fundingPool,
   )
-  const selection = ChartUtils.projectMoneyFlowTransactionSelection({ item: otherLink, rows: rawSelectedItems, nodes: graph.nodes, toUrl: (value) => `id=${value}` })
+  const selection = ChartUtils.projectMoneyFlowTransactionSelection({
+    item: otherLink,
+    rows: rawSelectedItems,
+    nodes: graph.nodes,
+    toUrl: (value) => `id=${value}`,
+    route: RouteConstants.ROUTE_TRANSACTION_LIST,
+  })
 
   assert.equal(details.sourcePercent, 0.4)
   assert.equal(details.destinationPercent, 1)
@@ -1142,6 +1239,7 @@ test('limited Other raw detail selection projects popup coverage and the final c
     transactionIds: ['home', 'refund', 'travel'],
     queryValue: 'home,refund,travel',
     query: 'id=home,refund,travel',
+    route: '/transactions/list?id=home,refund,travel',
   })
 })
 
@@ -1168,10 +1266,10 @@ test('money flow card uses the layered graph, persisted detail control, and one 
   assert.match(component, /const selectedItems = computed/)
   assert.match(
     component,
-    /projectMoneyFlowTransactionSelection\(\{ item: selectedItem\.value \?\? \{\}, rows: selectedItems\.value, nodes: fullNodes\.value, toUrl: TransactionFilterUtils\.filters\.id\.toUrl \}\)/,
+    /projectMoneyFlowTransactionSelection\(\{[\s\S]*?item: selectedItem\.value \?\? \{\},[\s\S]*?rows: selectedItems\.value,[\s\S]*?nodes: fullNodes\.value,[\s\S]*?toUrl: TransactionFilterUtils\.filters\.id\.toUrl,[\s\S]*?route: RouteConstants\.ROUTE_TRANSACTION_LIST,[\s\S]*?\}\)/,
   )
   assert.match(component, /selectedTransactionSelection\.value\.refundCoverage/)
-  assert.match(component, /navigateTo\(RouteConstants\.ROUTE_TRANSACTION_LIST \+ '\?' \+ selectedTransactionSelection\.value\.query\)/)
+  assert.match(component, /navigateTo\(selectedTransactionSelection\.value\.route\)/)
   assert.doesNotMatch(component, /analytics-flow-fx|flow\.meta\.displayCurrencyCode/)
 })
 

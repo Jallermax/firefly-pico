@@ -3185,7 +3185,7 @@ body {
 }
 
 .analytics-flow-mobile .analytics-flow-svg {
-    max-width: 100%;
+    max-width: none;
 }
 
 .analytics-page-switch {

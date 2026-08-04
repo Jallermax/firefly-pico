@@ -320,7 +320,13 @@ const selectedNodeDictionary = computed(() => new Map(selectedContextNodes.value
 const selectedItemLabel = computed(() => itemLabel(selectedItem.value, selectedNodeDictionary.value))
 const selectedItemDetails = computed(() => resolveMoneyFlowItemDetails({ item: selectedItem.value ?? {}, nodes: selectedContextNodes.value }))
 const selectedTransactionSelection = computed(() =>
-  projectMoneyFlowTransactionSelection({ item: selectedItem.value ?? {}, rows: selectedItems.value, nodes: fullNodes.value, toUrl: TransactionFilterUtils.filters.id.toUrl }),
+  projectMoneyFlowTransactionSelection({
+    item: selectedItem.value ?? {},
+    rows: selectedItems.value,
+    nodes: fullNodes.value,
+    toUrl: TransactionFilterUtils.filters.id.toUrl,
+    route: RouteConstants.ROUTE_TRANSACTION_LIST,
+  }),
 )
 const selectedRefundCoverage = computed(() => selectedTransactionSelection.value.refundCoverage)
 const selectedTransactionIds = computed(() => selectedTransactionSelection.value.transactionIds)
@@ -333,6 +339,6 @@ const openDetails = (item, contextNodes = flow.value.nodes) => {
 }
 const openTransactions = async () => {
   detailsVisible.value = false
-  await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + selectedTransactionSelection.value.query)
+  await navigateTo(selectedTransactionSelection.value.route)
 }
 </script>

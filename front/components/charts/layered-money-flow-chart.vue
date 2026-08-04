@@ -124,7 +124,7 @@ import {
   resolveMoneyFlowGraphMode,
   resolveMoneyFlowInteraction,
   resolveMoneyFlowItemDetails,
-  resolveNearestMoneyFlowRibbon,
+  resolveMoneyFlowPointerAction,
 } from '~/utils/ChartUtils.js'
 
 const props = defineProps({
@@ -242,21 +242,22 @@ const activateNode = ({ id }, type) => dispatchInteraction({ type, target: { typ
 const activateLink = ({ id }, type) => dispatchInteraction({ type, target: { type: 'link', id } })
 const deactivate = (type) => dispatchInteraction({ type })
 const dismiss = (type) => dispatchInteraction({ type })
-const pointerRibbon = (event) => {
-  const bounds = svg.value?.getBoundingClientRect()
-  if (!bounds?.width || !bounds.height) return null
-  const point = { x: ((event.clientX - bounds.left) / bounds.width) * layout.value.width, y: ((event.clientY - bounds.top) / bounds.height) * layout.value.height }
-  return resolveNearestMoneyFlowRibbon({ ribbons: layout.value.ribbons, point })
-}
+const pointerAction = (event, eventType) =>
+  resolveMoneyFlowPointerAction({
+    ribbons: layout.value.ribbons,
+    clientPoint: { x: event.clientX, y: event.clientY },
+    bounds: svg.value?.getBoundingClientRect(),
+    layoutWidth: layout.value.width,
+    layoutHeight: layout.value.height,
+    eventType,
+  })
 const previewPointerRibbon = (event) => {
-  const ribbon = pointerRibbon(event)
-  if (ribbon) activateLink(ribbon, 'pointer-enter')
-  else deactivate('pointer-leave')
+  dispatchInteraction(pointerAction(event, event.type).action)
 }
 const selectPointerRibbon = (event) => {
-  const ribbon = pointerRibbon(event)
-  if (ribbon) selectLink(ribbon)
-  else dismiss('outside')
+  const result = pointerAction(event, 'click')
+  const nextInteraction = dispatchInteraction({ ...result.action, ...(result.ribbon ? { contextNodes: displayedGraph.value.nodes } : {}) })
+  if (result.ribbon) emit('select-link', result.ribbon.link, nextInteraction.selection.contextNodes)
 }
 const focusRelative = (event, amount) => {
   const targets = [...root.value.querySelectorAll('[data-flow-target]')]

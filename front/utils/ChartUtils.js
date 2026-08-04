@@ -165,11 +165,57 @@ const moneyFlowGraphVisibleNodes = (nodes, mode) => {
   return nodes.filter((node) => !moneyFlowGraphOuterCategory(node, layers[0], layers.at(-1)))
 }
 
-const moneyFlowGraphGraphemes = (value) => {
+const moneyFlowGraphMark = /\p{Mark}/u
+const moneyFlowGraphInRange = (value, start, end) => value >= start && value <= end
+const moneyFlowGraphExtend = (symbol) => {
+  const point = symbol.codePointAt(0)
+  return moneyFlowGraphMark.test(symbol) || moneyFlowGraphInRange(point, 0xfe00, 0xfe0f) || moneyFlowGraphInRange(point, 0xe0100, 0xe01ef) || moneyFlowGraphInRange(point, 0x1f3fb, 0x1f3ff)
+}
+const moneyFlowGraphRegionalIndicator = (symbol) => moneyFlowGraphInRange(symbol.codePointAt(0), 0x1f1e6, 0x1f1ff)
+
+export function splitMoneyFlowGraphemes(value, Segmenter = globalThis.Intl?.Segmenter) {
   const text = String(value ?? '')
   if (!text) return []
-  if (typeof Intl.Segmenter !== 'function') return Array.from(text)
-  return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map(({ segment }) => segment)
+  if (typeof Segmenter === 'function') return [...new Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map(({ segment }) => segment)
+
+  const graphemes = []
+  let current = ''
+  let joinNext = false
+  let regionalCount = 0
+  for (const symbol of Array.from(text)) {
+    const isRegional = moneyFlowGraphRegionalIndicator(symbol)
+    if (!current) {
+      current = symbol
+      regionalCount = isRegional ? 1 : 0
+      continue
+    }
+    if (joinNext) {
+      current += symbol
+      joinNext = false
+      regionalCount = 0
+      continue
+    }
+    if (symbol === '\u200d') {
+      current += symbol
+      joinNext = true
+      regionalCount = 0
+      continue
+    }
+    if (moneyFlowGraphExtend(symbol)) {
+      current += symbol
+      continue
+    }
+    if (isRegional && regionalCount % 2 === 1) {
+      current += symbol
+      regionalCount++
+      continue
+    }
+    graphemes.push(current)
+    current = symbol
+    regionalCount = isRegional ? 1 : 0
+  }
+  graphemes.push(current)
+  return graphemes
 }
 const moneyFlowGraphGraphemeWidth = (value, fontSize) => {
   if (/\s/u.test(value)) return fontSize * 0.4
@@ -179,7 +225,7 @@ const moneyFlowGraphGraphemeWidth = (value, fontSize) => {
   return fontSize * 0.72
 }
 const moneyFlowGraphTextWidth = (value, fontSize) => {
-  const graphemes = moneyFlowGraphGraphemes(value)
+  const graphemes = splitMoneyFlowGraphemes(value)
   return graphemes.length ? graphemes.reduce((total, grapheme) => total + moneyFlowGraphGraphemeWidth(grapheme, fontSize), 8) : 0
 }
 const truncateMoneyFlowGraphText = (value, maximumWidth, fontSize) => {
@@ -189,7 +235,7 @@ const truncateMoneyFlowGraphText = (value, maximumWidth, fontSize) => {
   const available = Math.max(0, maximumWidth - 8 - moneyFlowGraphGraphemeWidth(ellipsis, fontSize))
   const retained = []
   let width = 0
-  for (const grapheme of moneyFlowGraphGraphemes(text)) {
+  for (const grapheme of splitMoneyFlowGraphemes(text)) {
     const graphemeWidth = moneyFlowGraphGraphemeWidth(grapheme, fontSize)
     if (width + graphemeWidth > available) break
     retained.push(grapheme)
@@ -349,6 +395,18 @@ export function resolveNearestMoneyFlowRibbon({ ribbons, point }) {
   return candidates[0]?.ribbon ?? null
 }
 
+export function resolveMoneyFlowPointerAction({ ribbons, clientPoint, bounds, layoutWidth, layoutHeight, eventType }) {
+  if (!bounds?.width || !bounds.height) return { point: null, ribbon: null, action: { type: eventType === 'click' ? 'outside' : 'pointer-leave' } }
+  const point = {
+    x: ((clientPoint.x - bounds.left) / bounds.width) * layoutWidth,
+    y: ((clientPoint.y - bounds.top) / bounds.height) * layoutHeight,
+  }
+  const ribbon = resolveNearestMoneyFlowRibbon({ ribbons, point })
+  const target = ribbon ? { type: 'link', id: ribbon.id } : null
+  const action = eventType === 'click' ? (target ? { type: 'select', target } : { type: 'outside' }) : target ? { type: 'pointer-enter', target } : { type: 'pointer-leave' }
+  return { point, ribbon, action }
+}
+
 export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedWidth, mode }) {
   const viewportWidth = moneyFlowGraphWidth(renderedWidth, isDesktop)
   const resolvedMode = mode ?? resolveMoneyFlowGraphMode({ nodes, isDesktop, renderedWidth: viewportWidth })
@@ -357,11 +415,11 @@ export function buildMoneyFlowGraphGeometry({ nodes, links, isDesktop, renderedW
   const orientation = resolveMoneyFlowGraphOrientation({ isDesktop, width: viewportWidth, layerCount: layers.length })
   const isHorizontal = orientation === 'horizontal'
   const naturalSelectedFit = resolvedMode === 'full' ? fullFit : resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: viewportWidth, mode: resolvedMode })
-  let selectedFit =
-    !isDesktop && !naturalSelectedFit.fits ? resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: viewportWidth, mode: resolvedMode, allowTruncation: true }) : naturalSelectedFit
-  const width = isDesktop && !isHorizontal ? Math.max(viewportWidth, selectedFit.requiredWidth) : viewportWidth
+  const usesTruncation = !isDesktop && !naturalSelectedFit.fits
+  let selectedFit = usesTruncation ? resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: viewportWidth, mode: resolvedMode, allowTruncation: true }) : naturalSelectedFit
+  const width = !isHorizontal && !selectedFit.fits ? Math.max(viewportWidth, selectedFit.requiredWidth) : viewportWidth
   if (isHorizontal) selectedFit = { ...selectedFit, fits: true, overflowingNodeIds: [] }
-  else if (isDesktop && width > viewportWidth) selectedFit = resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: width, mode: resolvedMode })
+  else if (width > viewportWidth) selectedFit = resolveMoneyFlowGraphFit({ nodes, isDesktop, renderedWidth: width, mode: resolvedMode, allowTruncation: usesTruncation })
   const firstLayer = layers[0]
   const lastLayer = layers.at(-1)
   const hiddenNodes = resolvedMode === 'condensed' ? nodes.filter((node) => moneyFlowGraphOuterCategory(node, firstLayer, lastLayer)) : []
@@ -540,7 +598,7 @@ export function resolveMoneyFlowInteraction({ state = {}, action, targets = [] }
   return { preview, pinned, active: preview ?? pinned, selection, focusTarget }
 }
 
-export function projectMoneyFlowTransactionSelection({ item = {}, rows = [], nodes = [], toUrl }) {
+export function projectMoneyFlowTransactionSelection({ item = {}, rows = [], nodes = [], toUrl, route }) {
   const evidence = [item, ...rows]
   const nodeDictionary = new Map(nodes.map((node) => [node.id, node]))
   const refundEvidence = [...evidence.flatMap((entry) => [entry.refundCoverage, nodeDictionary.get(entry.sourceId)?.refundCoverage, nodeDictionary.get(entry.targetId)?.refundCoverage])].filter(
@@ -566,7 +624,8 @@ export function projectMoneyFlowTransactionSelection({ item = {}, rows = [], nod
   ].sort()
   const uniqueTransactionIds = [...new Set(transactionIds)]
   const queryValue = uniqueTransactionIds.join(',')
-  return { refundCoverage, transactionIds: uniqueTransactionIds, queryValue, ...(toUrl ? { query: toUrl(queryValue) } : {}) }
+  const query = toUrl ? toUrl(queryValue) : null
+  return { refundCoverage, transactionIds: uniqueTransactionIds, queryValue, ...(query ? { query } : {}), ...(query && route ? { route: `${route}?${query}` } : {}) }
 }
 
 export function formatMoneyFlowValue({ value, language, currencyCode, showAccountAmounts = true, showDecimal = true }) {
