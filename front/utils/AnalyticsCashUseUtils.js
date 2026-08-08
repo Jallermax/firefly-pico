@@ -369,8 +369,8 @@ const cumulative = (layers, monthKeys, startFor = () => 0) => {
   }
 }
 
-const bucketForSavingsUse = (bucket) => ({ ...bucket, value: Number.isFinite(bucket?.value) ? Math.max(0, bucket.value) : null })
-const bucketForSavingsSource = (bucket) => ({ ...bucket, value: Number.isFinite(bucket?.value) ? Math.max(0, -bucket.value) : null })
+const bucketForSavingsUse = (bucket) => ({ ...bucket, value: Number.isFinite(bucket?.value) ? Math.max(0, bucket.value) : null, transactionIds: bucket?.value > 0 ? bucket.transactionIds : [] })
+const bucketForSavingsSource = (bucket) => ({ ...bucket, value: Number.isFinite(bucket?.value) ? Math.max(0, -bucket.value) : null, transactionIds: bucket?.value < 0 ? bucket.transactionIds : [] })
 const projectedSavingsUse = (projection) => ({
   ...projection,
   value: Number.isFinite(projection.value) ? Math.max(0, projection.value) : null,

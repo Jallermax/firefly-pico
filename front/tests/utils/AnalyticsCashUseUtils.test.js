@@ -223,6 +223,42 @@ test('full mode uses liability-only debt and splits accessible and restricted ne
   )
 })
 
+test('net Savings deposit clears withdrawal-side and zero Total sources transaction IDs', () => {
+  const result = build({
+    entries: [entry({ id: 'deposit-1', value: 50, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'hysa' })],
+    mode: 'full',
+  })
+
+  assert.deepEqual(
+    { value: pointFor(layerFor(result, 'savings:combined'), '2026-06').value, transactionIds: pointFor(layerFor(result, 'savings:combined'), '2026-06').transactionIds },
+    { value: 50, transactionIds: ['deposit-1'] },
+  )
+  assert.deepEqual(
+    { value: pointFor(sourceFor(result, 'savings-withdrawn:combined'), '2026-06').value, transactionIds: pointFor(sourceFor(result, 'savings-withdrawn:combined'), '2026-06').transactionIds },
+    { value: 0, transactionIds: [] },
+  )
+  assert.deepEqual({ value: pointFor(result.totalUses, '2026-06').value, transactionIds: pointFor(result.totalUses, '2026-06').transactionIds }, { value: 50, transactionIds: ['deposit-1'] })
+  assert.deepEqual({ value: pointFor(result.totalSources, '2026-06').value, transactionIds: pointFor(result.totalSources, '2026-06').transactionIds }, { value: 0, transactionIds: [] })
+})
+
+test('net Savings withdrawal clears deposit-side and zero Total uses transaction IDs', () => {
+  const result = build({
+    entries: [entry({ id: 'withdraw-1', value: 50, sourceKind: 'savingsAccessible', destinationKind: 'available', sourceAccountId: 'hysa' })],
+    mode: 'full',
+  })
+
+  assert.deepEqual(
+    { value: pointFor(layerFor(result, 'savings:combined'), '2026-06').value, transactionIds: pointFor(layerFor(result, 'savings:combined'), '2026-06').transactionIds },
+    { value: 0, transactionIds: [] },
+  )
+  assert.deepEqual(
+    { value: pointFor(sourceFor(result, 'savings-withdrawn:combined'), '2026-06').value, transactionIds: pointFor(sourceFor(result, 'savings-withdrawn:combined'), '2026-06').transactionIds },
+    { value: 50, transactionIds: ['withdraw-1'] },
+  )
+  assert.deepEqual({ value: pointFor(result.totalUses, '2026-06').value, transactionIds: pointFor(result.totalUses, '2026-06').transactionIds }, { value: 0, transactionIds: [] })
+  assert.deepEqual({ value: pointFor(result.totalSources, '2026-06').value, transactionIds: pointFor(result.totalSources, '2026-06').transactionIds }, { value: 50, transactionIds: ['withdraw-1'] })
+})
+
 test('full mode keeps a negative shortfall and uses mode-specific gap labels', () => {
   const entries = [
     entry({ id: 'income', value: 40, sourceKind: 'revenue', destinationKind: 'available' }),
