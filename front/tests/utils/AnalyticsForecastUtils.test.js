@@ -496,6 +496,25 @@ test('does not block the selected forecast window for unavailable FX outside tha
   assert.deepEqual(result.audit.missingCurrencies, [])
 })
 
+test('stops current-month actual and FX evidence at today', () => {
+  const actual = entry({ id: 'actual-expense', date: '2026-08-02', value: 50 })
+  const futureUnavailable = entry({ id: 'future-missing-fx', date: '2026-08-20', value: null, missingCurrency: 'EUR' })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([actual, futureUnavailable], { startMonth: '2026-02', endDate: '2026-08-31', missingCurrencies: ['EUR'] }),
+    candidates: [],
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-31' },
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.status, 'ready')
+  assert.equal(result.actualToDate.expenses, 50)
+  assert.equal(result.final.expenses, 50)
+  assert.deepEqual(result.audit.unavailable, { affectedMetricIds: [], missingCurrencies: [], entryIds: [], candidateIds: [] })
+})
+
 test('classifies current cash, savings, and liability movements without treating internal transfers as activity', () => {
   const current = [
     entry({ id: 'income', date: '2026-08-02', value: 1000, direction: 'income' }),
@@ -630,8 +649,72 @@ test('uses normalized authoritative amount evidence and scopes missing candidate
       affectedMetricIds: ['expenses', 'netWorthChange', 'availableCashChange'],
       missingCurrencies: ['EUR'],
       missingAccountIds: [],
+      missingAccountEndpoints: [],
     },
   ])
+})
+
+test('rejects finite candidate values with unavailable conversion evidence and audits conversion provenance deterministically', () => {
+  const projected = definedCandidate({ id: 'audit-a-projected', sourceAccountId: 'checking', destinationAccountId: 'landlord' })
+  const unavailableMode = definedCandidate({ id: 'audit-b-mode', sourceAccountId: 'checking', destinationAccountId: 'landlord' })
+  const missingCurrency = definedCandidate({ id: 'audit-c-currency', sourceAccountId: 'checking', destinationAccountId: 'landlord' })
+  const candidates = [projected, unavailableMode, missingCurrency]
+  const candidateAmounts = {
+    [projected.id]: { value: 100, conversion: { mode: 'rate', sourceCurrency: 'CAD', displayCurrency: 'USD', rate: 0.75, isEstimated: true } },
+    [unavailableMode.id]: { value: 100, conversion: { mode: 'unavailable', sourceCurrency: 'GBP', displayCurrency: 'USD', isEstimated: false } },
+    [missingCurrency.id]: { value: 100, conversion: { mode: 'rate', sourceCurrency: 'EUR', displayCurrency: 'USD', rate: 1.1, isEstimated: true, missingCurrency: 'EUR' } },
+  }
+  const build = (orderedCandidates) =>
+    buildForecastCore({
+      ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+      candidates: orderedCandidates,
+      candidateAmounts,
+      accountContexts,
+      fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+      currencyDecimalPlaces: 2,
+      historyMonths: 6,
+      today: '2026-08-10',
+      endDate: '2026-08-31',
+    })
+  const ordered = build(candidates)
+  const shuffled = build([...candidates].reverse())
+
+  assert.equal(ordered.dailyProjectedEntries.length, 1)
+  assert.equal(ordered.dailyProjectedEntries[0].candidateId, projected.id)
+  assert.equal(ordered.final.expenses, null)
+  assert.deepEqual(ordered.audit.unavailable.candidateIds, [missingCurrency.id, unavailableMode.id].sort())
+  assert.deepEqual(ordered.audit.recurring.candidateConversions, [
+    {
+      candidateId: projected.id,
+      resolution: 'projected',
+      mode: 'rate',
+      sourceCurrency: 'CAD',
+      displayCurrency: 'USD',
+      rate: 0.75,
+      isEstimated: true,
+      missingCurrency: null,
+    },
+    {
+      candidateId: unavailableMode.id,
+      resolution: 'unresolved',
+      mode: 'unavailable',
+      sourceCurrency: 'GBP',
+      displayCurrency: 'USD',
+      isEstimated: false,
+      missingCurrency: null,
+    },
+    {
+      candidateId: missingCurrency.id,
+      resolution: 'unresolved',
+      mode: 'rate',
+      sourceCurrency: 'EUR',
+      displayCurrency: 'USD',
+      rate: 1.1,
+      isEstimated: true,
+      missingCurrency: 'EUR',
+    },
+  ])
+  assert.deepEqual(shuffled.audit.recurring.candidateConversions, ordered.audit.recurring.candidateConversions)
 })
 
 test('keeps authoritative candidates with missing amount or account classification unresolved', () => {
@@ -663,6 +746,31 @@ test('keeps authoritative candidates with missing amount or account classificati
   assert.ok(Object.values(classificationResult.final).every((value) => value === null))
   assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].reasons, ['missingAccountContext'])
   assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].missingAccountIds, ['unknown-account'])
+})
+
+test('rejects authoritative embedded kinds when endpoint IDs are absent', () => {
+  const candidate = definedCandidate({ id: 'missing-endpoints', sourceAccountId: '', destinationAccountId: '' })
+  candidate.identity = { ...candidate.identity, sourceKind: 'available', destinationKind: 'expense' }
+
+  const result = buildForecastCore({
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+    candidates: [candidate],
+    candidateAmounts: {
+      [candidate.id]: { value: 100, conversion: { mode: 'exact', sourceCurrency: 'USD', displayCurrency: 'USD', isEstimated: false } },
+    },
+    accountContexts,
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.status, 'unavailable')
+  assert.deepEqual(result.dailyProjectedEntries, [])
+  assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].reasons, ['missingAccountContext'])
+  assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].missingAccountIds, [])
+  assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].missingAccountEndpoints, ['source', 'destination'])
 })
 
 test('returns partial for defined-only activity and insufficient history when no defensible source exists', () => {

@@ -68,16 +68,20 @@ const projectionContext = (value, accountContexts = null, requireAccountContext 
   const direction = value?.direction ?? (value?.refund?.isRefund ? 'refund' : value?.sourceKind === 'revenue' ? 'income' : value?.destinationKind === 'expense' ? 'expense' : 'transfer')
   const sourceAccountId = endpointId(value, 'source')
   const destinationAccountId = endpointId(value, 'destination')
-  const sourceAccountContext = accountContexts?.[sourceAccountId]
-  const destinationAccountContext = accountContexts?.[destinationAccountId]
-  const missingAccountIds = requireAccountContext ? unique([sourceAccountContext ? null : sourceAccountId, destinationAccountContext ? null : destinationAccountId]).sort() : []
-  const sourceKind =
-    sourceAccountContext?.kind ?? value?.sourceKind ?? value?.identity?.sourceKind ?? (requireAccountContext ? null : direction === 'income' ? 'revenue' : direction === 'expense' ? 'available' : null)
-  const destinationKind =
-    destinationAccountContext?.kind ??
-    value?.destinationKind ??
-    value?.identity?.destinationKind ??
-    (requireAccountContext ? null : direction === 'income' ? 'available' : direction === 'expense' ? 'expense' : null)
+  const sourceAccountContext = sourceAccountId ? accountContexts?.[sourceAccountId] : null
+  const destinationAccountContext = destinationAccountId ? accountContexts?.[destinationAccountId] : null
+  const missingAccountIds = requireAccountContext
+    ? unique([sourceAccountId && !sourceAccountContext ? sourceAccountId : null, destinationAccountId && !destinationAccountContext ? destinationAccountId : null]).sort()
+    : []
+  const missingAccountEndpoints = requireAccountContext
+    ? [...(!sourceAccountId || !sourceAccountContext ? ['source'] : []), ...(!destinationAccountId || !destinationAccountContext ? ['destination'] : [])]
+    : []
+  const sourceKind = requireAccountContext
+    ? (sourceAccountContext?.kind ?? null)
+    : (sourceAccountContext?.kind ?? value?.sourceKind ?? value?.identity?.sourceKind ?? (direction === 'income' ? 'revenue' : direction === 'expense' ? 'available' : null))
+  const destinationKind = requireAccountContext
+    ? (destinationAccountContext?.kind ?? null)
+    : (destinationAccountContext?.kind ?? value?.destinationKind ?? value?.identity?.destinationKind ?? (direction === 'income' ? 'available' : direction === 'expense' ? 'expense' : null))
   const context = {
     direction,
     sourceKind,
@@ -89,7 +93,7 @@ const projectionContext = (value, accountContexts = null, requireAccountContext 
     sourceIncluded: accountIncluded(sourceAccountContext ?? value?.sourceAccount, sourceKind),
     destinationIncluded: accountIncluded(destinationAccountContext ?? value?.destinationAccount, destinationKind),
   }
-  return { context, missingAccountIds }
+  return { context, missingAccountIds, missingAccountEndpoints }
 }
 
 const contextKey = (context) =>
@@ -147,13 +151,14 @@ const candidateEligible = (candidate) => candidate?.source?.authoritative === tr
 
 const candidateProjectionInput = ({ candidate, candidateAmounts, accountContexts }) => {
   const authoritative = candidate?.source?.authoritative === true
-  const { context, missingAccountIds } = projectionContext(candidate, accountContexts, authoritative)
+  const { context, missingAccountIds, missingAccountEndpoints } = projectionContext(candidate, accountContexts, authoritative)
   const amountEvidence = authoritative ? candidateAmounts?.[candidate.id] : (candidateAmounts?.[candidate.id] ?? { value: candidate?.expectedAmount?.value, conversion: null })
   const reasons = []
   const missingCurrencies = unique([amountEvidence?.conversion?.missingCurrency]).sort()
   if (!amountEvidence) reasons.push('missingAmountEvidence')
-  else if (!Number.isFinite(amountEvidence.value) || amountEvidence.value <= 0) reasons.push('unavailableAmount')
-  if (missingAccountIds.length > 0 || !context.sourceKind || !context.destinationKind) reasons.push('missingAccountContext')
+  else if (amountEvidence?.conversion?.mode === 'unavailable' || amountEvidence?.conversion?.missingCurrency || !Number.isFinite(amountEvidence.value) || amountEvidence.value <= 0)
+    reasons.push('unavailableAmount')
+  if (missingAccountEndpoints.length > 0 || !context.sourceKind || !context.destinationKind) reasons.push('missingAccountContext')
   return {
     context,
     amount: Number(amountEvidence?.value),
@@ -161,8 +166,20 @@ const candidateProjectionInput = ({ candidate, candidateAmounts, accountContexts
     reasons: unique(reasons),
     missingCurrencies,
     missingAccountIds,
+    missingAccountEndpoints,
   }
 }
+
+const candidateConversionAudit = ({ candidateId, conversion, resolution }) => ({
+  candidateId: String(candidateId),
+  resolution,
+  mode: conversion?.mode ?? null,
+  sourceCurrency: conversion?.sourceCurrency ?? null,
+  displayCurrency: conversion?.displayCurrency ?? null,
+  ...(Number.isFinite(conversion?.rate) ? { rate: conversion.rate } : {}),
+  isEstimated: conversion?.isEstimated === true,
+  missingCurrency: conversion?.missingCurrency ?? null,
+})
 
 const candidateEvidenceIds = (candidate) =>
   unique(
@@ -336,8 +353,8 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   const entries = [...(ledger?.entries ?? [])]
     .map((entry) => ({ ...entry, date: dateKey(entry?.date), monthKey: dateKey(entry?.date)?.slice(0, 7) ?? entry?.monthKey ?? null }))
     .sort((left, right) => String(left.date ?? '').localeCompare(String(right.date ?? '')) || String(left.id ?? '').localeCompare(String(right.id ?? '')))
-  const relevantMonths = new Set([...months, todayKey?.slice(0, 7)].filter(Boolean))
-  const relevantEntries = entries.filter((entry) => relevantMonths.has(entry.monthKey) && entry.date <= endKey)
+  const currentMonthKey = todayKey?.slice(0, 7)
+  const relevantEntries = entries.filter((entry) => months.includes(entry.monthKey) || (entry.monthKey === currentMonthKey && entry.date <= todayKey))
   const unavailableEntries = relevantEntries.filter((entry) => !Number.isFinite(entry.value))
   if (invalidInput) {
     const values = emptyTotals(null)
@@ -355,7 +372,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
       actualTransactionIds: Object.fromEntries(FLOW_KEYS.map((key) => [key, []])),
       audit: {
         history: { months, coverage: 'unavailable', samples: null, variableRemainderSamples: null },
-        recurring: { fulfilledExpectedIds: [], remainingExpectedIds: [], removedHistoryEntryIds: [], suppressedCandidateIds: [], unresolvedCandidates: [] },
+        recurring: { fulfilledExpectedIds: [], remainingExpectedIds: [], removedHistoryEntryIds: [], suppressedCandidateIds: [], unresolvedCandidates: [], candidateConversions: [] },
         unavailable: { affectedMetricIds: [...FLOW_KEYS], missingCurrencies: [], entryIds: [], candidateIds: [] },
         missingCurrencies: [],
         unavailableEntryIds: [],
@@ -439,11 +456,13 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
 
   const projected = []
   const unresolvedCandidates = []
+  const candidateConversions = new Map()
   for (const occurrence of recurring.remaining.sort((left, right) => left.expectedDate.localeCompare(right.expectedDate) || left.expectedId.localeCompare(right.expectedId))) {
     const candidate = candidateById.get(occurrence.candidateId)
     if (!candidate) continue
     const input = candidateProjectionInput({ candidate, candidateAmounts, accountContexts })
     if (input.reasons.length > 0) {
+      candidateConversions.set(String(candidate.id), candidateConversionAudit({ candidateId: candidate.id, conversion: input.conversion, resolution: 'unresolved' }))
       const candidateAffectedMetrics = input.reasons.includes('missingAccountContext') ? [...FLOW_KEYS] : affectedMetricsFor(input.context, currencyDecimalPlaces)
       for (const key of candidateAffectedMetrics) {
         affectedMetricIds.add(key)
@@ -459,6 +478,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
           affectedMetricIds: candidateAffectedMetrics,
           missingCurrencies: input.missingCurrencies,
           missingAccountIds: input.missingAccountIds,
+          missingAccountEndpoints: input.missingAccountEndpoints,
         })
       }
       continue
@@ -466,6 +486,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     const expectedDate = occurrence.expectedDate > todayKey ? occurrence.expectedDate : nextOverdueDate({ candidate, today: todayKey, endDate: endKey })
     if (!expectedDate || expectedDate <= todayKey || expectedDate > endKey) continue
     const sourceKind = candidate.source.authoritative ? 'defined' : 'inferred'
+    candidateConversions.set(String(candidate.id), candidateConversionAudit({ candidateId: candidate.id, conversion: input.conversion, resolution: 'projected' }))
     projected.push(
       projectedEntry({
         id: `projected:${sourceKind}:${occurrence.expectedId}:${expectedDate}`,
@@ -578,6 +599,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
         removedHistoryEntryIds,
         suppressedCandidateIds,
         unresolvedCandidates: unresolvedCandidates.sort((left, right) => left.candidateId.localeCompare(right.candidateId)),
+        candidateConversions: [...candidateConversions.values()].sort((left, right) => left.candidateId.localeCompare(right.candidateId)),
       },
       unavailable: {
         affectedMetricIds: orderedAffectedMetricIds,
