@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildRemainingActivityForecast, projectMetricForecast } from '../../utils/AnalyticsForecastUtils.js'
+import { buildRemainingActivityForecast as buildForecastCore, projectMetricForecast as projectMetricForecastCore } from '../../utils/AnalyticsForecastUtils.js'
+import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 import { buildDefinedOccurrences, detectRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
 
 const endpoint = (id, kind, includeNetWorth = !['revenue', 'expense'].includes(kind)) => ({ id, attributes: { name: id, include_net_worth: includeNetWorth } })
@@ -46,10 +47,11 @@ const entry = ({
   },
 })
 
-const ledger = (entries, { startMonth = '2026-02', endDate = '2026-08-10', missingCurrencies = [] } = {}) => ({
+const ledger = (entries, { startMonth = '2026-02', endDate = '2026-08-10', missingCurrencies = [], fetchStartMonth = startMonth, fetchEndDate = endDate } = {}) => ({
   entries,
   months: {},
   coverage: { startMonth, endDate },
+  fetchCoverage: fetchStartMonth && fetchEndDate ? { startMonth: fetchStartMonth, endDate: fetchEndDate } : null,
   fx: {
     isEstimated: false,
     missingCurrencies,
@@ -61,8 +63,88 @@ const ledger = (entries, { startMonth = '2026-02', endDate = '2026-08-10', missi
   audit: { unclassifiedValue: 0, transactionIds: [], unmatchedRefundLinkIds: [] },
 })
 
+const buildRemainingActivityForecast = (options) =>
+  buildForecastCore({
+    currencyDecimalPlaces: 2,
+    fetchCoverage: options.fetchCoverage === undefined ? options.ledger?.fetchCoverage : options.fetchCoverage,
+    candidateAmounts: {},
+    accountContexts: {},
+    ...options,
+  })
+
+const projectMetricForecast = (options) => projectMetricForecastCore({ currencyDecimalPlaces: 2, ...options })
+
+const accountContexts = {
+  checking: { kind: 'available', includeNetWorth: true },
+  cash: { kind: 'available', includeNetWorth: true },
+  employer: { kind: 'revenue', includeNetWorth: false },
+  landlord: { kind: 'expense', includeNetWorth: false },
+  merchant: { kind: 'expense', includeNetWorth: false },
+  hysa: { kind: 'savingsAccessible', includeNetWorth: true },
+  retirement: { kind: 'savingsRestricted', includeNetWorth: false },
+  loan: { kind: 'liability', includeNetWorth: true },
+}
+
+const normalizedCandidateInputs = (candidates, contexts = accountContexts) => ({
+  candidateAmounts: Object.fromEntries(
+    candidates.map((candidate) => [candidate.id, { value: candidate.expectedAmount.value, conversion: { mode: 'exact', sourceCurrency: 'USD', displayCurrency: 'USD', isEstimated: false } }]),
+  ),
+  accountContexts: contexts,
+})
+
+const definedCandidate = ({ id, sourceAccountId, destinationAccountId, direction = 'expense', date = '2026-08-20', amount = 100 }) => ({
+  id: `defined:${id}`,
+  signature: id,
+  identity: { direction, sourceAccountId, sourceKind: null, destinationAccountId, destinationKind: null, categoryId: direction === 'expense' ? 'general' : 'salary', payee: id },
+  identityVariants: [],
+  direction,
+  cadence: { type: 'monthly', days: [Number(date.slice(-2))] },
+  expectedAmount: { value: amount, min: amount, max: amount },
+  source: { type: 'recurringTransaction', id, authoritative: true },
+  evidence: { entryIds: [], transactionIds: [], dates: [] },
+  confidence: { score: 1, factors: { authoritative: true }, reasons: ['Authoritative Firefly schedule'] },
+  matching: { dateWindowDays: 4, amountTolerance: 0.25, amountEnvelope: { min: amount, max: amount } },
+  bounds: { start: '2026-08-01', end: null },
+  expectedDates: [date],
+})
+
 const expensesForMonths = (months, value, day = 20, options = {}) =>
   months.map((month, index) => entry({ id: `${options.idPrefix ?? 'expense'}-${index + 1}`, date: `${month}-${String(day).padStart(2, '0')}`, value, ...options }))
+
+const apiAccount = ({ id, type, role = null, includeNetWorth = !['revenue', 'expense'].includes(type) }) => ({
+  id,
+  attributes: { type: { fireflyCode: type }, account_role: role ? { fireflyCode: role } : null, include_net_worth: includeNetWorth },
+})
+
+const buildRealLedger = (transactions = []) => {
+  const checking = apiAccount({ id: 'checking', type: 'asset' })
+  const merchant = apiAccount({ id: 'merchant', type: 'expense' })
+  return buildAnalyticsLedger({
+    transactions: transactions.map(({ id, date, amount = 100 }) => ({
+      id,
+      attributes: {
+        transactions: [
+          {
+            transaction_journal_id: `${id}-journal`,
+            amount: String(amount),
+            currency_code: 'USD',
+            date,
+            source_id: checking.id,
+            destination_id: merchant.id,
+            category_id: 'general',
+            tags: [],
+          },
+        ],
+      },
+    })),
+    transactionLinks: [],
+    linkTypes: [],
+    accounts: [checking, merchant],
+    displayCurrencyCode: 'USD',
+    primaryCurrencyCode: 'USD',
+    rates: { USD: 1 },
+  })
+}
 
 test('excludes the unfinished current month from a six-completed-month historical mean', () => {
   const completed = expensesForMonths(['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'], 600)
@@ -88,6 +170,42 @@ test('keeps covered zero months in the completed-month sample', () => {
   assert.deepEqual(result.audit.history.samples.expenses, [600, 0, 0, 0, 0, 0])
 })
 
+test('uses explicit fetch coverage rather than activity-derived ledger coverage for zero and missing samples', () => {
+  const emptyActivityLedger = buildRealLedger()
+  const activityLedger = buildRealLedger([
+    { id: 'february-activity', date: '2026-02-20' },
+    { id: 'july-activity', date: '2026-07-20' },
+  ])
+  assert.deepEqual(emptyActivityLedger.coverage, { startMonth: null, endDate: null })
+  assert.deepEqual(activityLedger.coverage, { startMonth: '2026-02', endDate: '2026-07-20' })
+
+  const coveredEmpty = buildForecastCore({
+    ledger: emptyActivityLedger,
+    candidates: [],
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+  const missingCoverage = buildForecastCore({
+    ledger: activityLedger,
+    candidates: [],
+    fetchCoverage: null,
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(coveredEmpty.status, 'ready')
+  assert.deepEqual(coveredEmpty.audit.history.samples.expenses, [0, 0, 0, 0, 0, 0])
+  assert.equal(missingCoverage.status, 'insufficientHistory')
+  assert.equal(missingCoverage.historicalBaseline.expenses, null)
+  assert.equal(missingCoverage.audit.history.samples, null)
+  assert.equal(missingCoverage.audit.history.variableRemainderSamples, null)
+})
+
 test('does not invent completed-month zeros when fetch coverage ends before the selected window', () => {
   const result = buildRemainingActivityForecast({
     ledger: ledger([], { startMonth: '2026-02', endDate: '2026-06-15' }),
@@ -100,6 +218,7 @@ test('does not invent completed-month zeros when fetch coverage ends before the 
   assert.equal(result.status, 'insufficientHistory')
   assert.equal(result.historicalBaseline.expenses, null)
   assert.equal(result.audit.history.coverage, 'partial')
+  assert.equal(result.audit.history.samples, null)
 })
 
 test('projects an unpaid inferred rent after its usual weekend-shifted date', () => {
@@ -186,6 +305,25 @@ test('removes recurring history before calculating the variable remainder', () =
   assert.equal(result.audit.recurring.removedHistoryEntryIds.length, 6)
 })
 
+test('removes the union of recurring entry and transaction evidence from historical remainder', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const rent = expensesForMonths(months, 100, 20, { destinationId: 'landlord', categoryId: 'housing', description: 'Rent', idPrefix: 'mixed-rent' })
+  const detected = detectRecurringCandidates({ entries: rent, startDate: '2026-02-01', endDate: '2026-08-10' }).candidates[0]
+  const candidate = {
+    ...detected,
+    evidence: {
+      ...detected.evidence,
+      entryIds: rent.slice(0, 3).map(({ id }) => id),
+      transactionIds: rent.slice(3).map(({ transactionId }) => transactionId),
+    },
+  }
+
+  const result = buildRemainingActivityForecast({ ledger: ledger(rent), candidates: [candidate], historyMonths: 6, today: '2026-08-10', endDate: '2026-08-31' })
+
+  assert.equal(result.remainingFromToday.expenses, 100)
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, rent.map(({ id }) => id).sort())
+})
+
 test('floors cumulative expense at actual and exposes above-average and empty states', () => {
   assert.deepEqual(projectMetricForecast({ metric: 'expenses', actual: 9000, historicalAverage: 7500, remainingActivity: -1200 }), {
     metric: 'expenses',
@@ -204,6 +342,7 @@ test('shows signed progress only for matching nonzero directions', () => {
   const same = projectMetricForecast({ metric: 'savingsChange', actual: 1200, historicalAverage: 2500, remainingActivity: 1300 })
   const opposite = projectMetricForecast({ metric: 'debtChange', actual: 100, historicalAverage: 200, remainingActivity: -250 })
   const zero = projectMetricForecast({ metric: 'netWorthChange', actual: 100, historicalAverage: 100, remainingActivity: -100 })
+  const zeroToNonzero = projectMetricForecast({ metric: 'savingsChange', actual: 0, historicalAverage: 500, remainingActivity: 500 })
 
   assert.equal(same.progress, 0.48)
   assert.equal(same.progressState, 'ready')
@@ -211,6 +350,8 @@ test('shows signed progress only for matching nonzero directions', () => {
   assert.equal(opposite.progressState, 'oppositeDirection')
   assert.equal(zero.progress, null)
   assert.equal(zero.progressState, 'notApplicable')
+  assert.equal(zeroToNonzero.progress, null)
+  assert.equal(zeroToNonzero.progressState, 'notApplicable')
 })
 
 test('distributes variable activity over future days with an exact rounding residual', () => {
@@ -240,6 +381,79 @@ test('distributes variable activity over future days with an exact rounding resi
   assert.equal(result.remainingFromToday.expenses, 10)
 })
 
+test('uses explicit currency precision for projected amounts and exact residual units', () => {
+  const recurring = definedCandidate({ id: 'precision-rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 10.556 })
+  const cases = [
+    { decimalPlaces: 0, expectedRecurring: 11, variableAmount: 10 },
+    { decimalPlaces: 2, expectedRecurring: 10.56, variableAmount: 10 },
+    { decimalPlaces: 3, expectedRecurring: 10.556, variableAmount: 1.001 },
+  ]
+
+  for (const { decimalPlaces, expectedRecurring, variableAmount } of cases) {
+    const recurringResult = buildForecastCore({
+      ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+      candidates: [recurring],
+      candidateAmounts: {
+        [recurring.id]: { value: 10.556, conversion: { mode: 'rate', sourceCurrency: 'EUR', displayCurrency: 'USD', isEstimated: true } },
+      },
+      accountContexts,
+      fetchCoverage: null,
+      currencyDecimalPlaces: decimalPlaces,
+      historyMonths: 3,
+      today: '2026-08-10',
+      endDate: '2026-08-31',
+    })
+    assert.equal(recurringResult.dailyProjectedEntries[0].amount, expectedRecurring)
+    assert.equal(recurringResult.remainingFromToday.expenses, expectedRecurring)
+    assert.deepEqual(recurringResult.dailyProjectedEntries[0].conversion, {
+      mode: 'rate',
+      sourceCurrency: 'EUR',
+      displayCurrency: 'USD',
+      isEstimated: true,
+    })
+
+    const history = [
+      entry({ id: `may-${decimalPlaces}`, date: '2026-05-29', value: variableAmount }),
+      entry({ id: `june-${decimalPlaces}`, date: '2026-06-30', value: variableAmount }),
+      entry({ id: `july-${decimalPlaces}`, date: '2026-07-31', value: variableAmount }),
+    ]
+    const variableResult = buildForecastCore({
+      ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-28' }),
+      candidates: [],
+      fetchCoverage: { startMonth: '2026-05', endDate: '2026-08-28' },
+      currencyDecimalPlaces: decimalPlaces,
+      historyMonths: 3,
+      today: '2026-08-28',
+      endDate: '2026-08-31',
+    })
+    const scale = 10 ** decimalPlaces
+    assert.equal(
+      variableResult.dailyProjectedEntries.reduce((total, item) => total + Math.round(item.amount * scale), 0),
+      Math.round(variableResult.remainingFromToday.expenses * scale),
+    )
+  }
+})
+
+test('labels zero-weight timing fallback as even and low confidence', () => {
+  const history = [entry({ id: 'may-even', date: '2026-05-25', value: 9 }), entry({ id: 'june-even', date: '2026-06-25', value: 9 }), entry({ id: 'july-even', date: '2026-07-25', value: 9 })]
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-10' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-12',
+  })
+  const variable = result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable')
+
+  assert.deepEqual(
+    variable.map(({ profile }) => profile),
+    ['even', 'even'],
+  )
+  assert.ok(variable.every(({ confidence }) => confidence.level === 'low'))
+  assert.ok(variable.every(({ reasons }) => reasons.includes('Even fallback because the timing profile is insufficient')))
+})
+
 test('keeps missing-FX input unavailable instead of coercing it to zero', () => {
   const unavailable = entry({ id: 'missing-fx', date: '2026-08-02', value: null, missingCurrency: 'EUR' })
 
@@ -251,9 +465,18 @@ test('keeps missing-FX input unavailable instead of coercing it to zero', () => 
     endDate: '2026-08-31',
   })
 
-  assert.equal(result.status, 'unavailable')
+  assert.equal(result.status, 'partial')
   assert.equal(result.actualToDate.expenses, null)
   assert.equal(result.final.expenses, null)
+  assert.equal(result.final.income, 0)
+  assert.equal(result.statusByMetric.expenses, 'unavailable')
+  assert.equal(result.statusByMetric.income, 'ready')
+  assert.deepEqual(result.audit.unavailable, {
+    affectedMetricIds: ['expenses', 'netWorthChange', 'availableCashChange'],
+    missingCurrencies: ['EUR'],
+    entryIds: ['missing-fx'],
+    candidateIds: [],
+  })
   assert.deepEqual(result.dailyProjectedEntries, [])
 })
 
@@ -311,6 +534,137 @@ test('classifies current cash, savings, and liability movements without treating
   assert.equal(result.actualTransactionIds.availableCashChange.includes('internal'), false)
 })
 
+test('classifies authoritative account flows and net-worth boundaries from explicit account context', () => {
+  const cases = [
+    {
+      candidate: definedCandidate({ id: 'save-accessible', sourceAccountId: 'checking', destinationAccountId: 'hysa' }),
+      expected: { savingsDeposits: 100, savingsChange: 100, netWorthChange: 0, availableCashChange: -100 },
+    },
+    {
+      candidate: definedCandidate({ id: 'withdraw-accessible', sourceAccountId: 'hysa', destinationAccountId: 'checking' }),
+      expected: { savingsWithdrawals: 100, savingsChange: -100, netWorthChange: 0, availableCashChange: 100 },
+    },
+    {
+      candidate: definedCandidate({ id: 'repay-loan', sourceAccountId: 'checking', destinationAccountId: 'loan' }),
+      expected: { debtRepayments: 100, debtChange: -100, netWorthChange: 0, availableCashChange: -100 },
+    },
+    {
+      candidate: definedCandidate({ id: 'borrow-loan', sourceAccountId: 'loan', destinationAccountId: 'checking' }),
+      expected: { newDebt: 100, debtChange: 100, netWorthChange: 0, availableCashChange: 100 },
+    },
+    {
+      candidate: definedCandidate({ id: 'save-restricted', sourceAccountId: 'checking', destinationAccountId: 'retirement' }),
+      expected: { savingsDeposits: 100, savingsChange: 100, netWorthChange: -100, availableCashChange: -100 },
+    },
+    {
+      candidate: definedCandidate({ id: 'ordinary-expense', sourceAccountId: 'checking', destinationAccountId: 'landlord' }),
+      expected: { expenses: 100, netWorthChange: -100, availableCashChange: -100 },
+    },
+    {
+      candidate: definedCandidate({ id: 'ordinary-income', sourceAccountId: 'employer', destinationAccountId: 'checking', direction: 'income' }),
+      expected: { income: 100, netWorthChange: 100, availableCashChange: 100 },
+    },
+  ]
+
+  for (const { candidate, expected } of cases) {
+    const result = buildForecastCore({
+      ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+      candidates: [candidate],
+      candidateAmounts: {
+        [candidate.id]: { value: 100, conversion: { mode: 'exact', sourceCurrency: 'USD', displayCurrency: 'USD', isEstimated: false } },
+      },
+      accountContexts,
+      fetchCoverage: null,
+      currencyDecimalPlaces: 2,
+      historyMonths: 6,
+      today: '2026-08-10',
+      endDate: '2026-08-31',
+    })
+    for (const [metric, value] of Object.entries(expected)) assert.equal(result.remainingFromToday[metric], value, `${candidate.id} ${metric}`)
+    assert.equal(result.audit.recurring.unresolvedCandidates.length, 0)
+  }
+})
+
+test('uses normalized authoritative amount evidence and scopes missing candidate FX to affected metrics', () => {
+  const candidate = definedCandidate({ id: 'foreign-rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 90 })
+  const base = {
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+    candidates: [candidate],
+    accountContexts,
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+  const converted = buildForecastCore({
+    ...base,
+    candidateAmounts: {
+      [candidate.id]: { value: 100, conversion: { mode: 'rate', sourceCurrency: 'EUR', displayCurrency: 'USD', rate: 1.111111, isEstimated: true } },
+    },
+  })
+  const unavailable = buildForecastCore({
+    ...base,
+    candidateAmounts: {
+      [candidate.id]: { value: null, conversion: { mode: 'unavailable', sourceCurrency: 'EUR', displayCurrency: 'USD', missingCurrency: 'EUR' } },
+    },
+  })
+
+  assert.equal(converted.remainingFromToday.expenses, 100)
+  assert.equal(converted.dailyProjectedEntries[0].amount, 100)
+  assert.equal(converted.dailyProjectedEntries[0].conversion.rate, 1.111111)
+  assert.equal(unavailable.status, 'partial')
+  assert.equal(unavailable.final.expenses, null)
+  assert.equal(unavailable.final.income, 0)
+  assert.deepEqual(unavailable.audit.unavailable, {
+    affectedMetricIds: ['expenses', 'netWorthChange', 'availableCashChange'],
+    missingCurrencies: ['EUR'],
+    entryIds: [],
+    candidateIds: [candidate.id],
+  })
+  assert.deepEqual(unavailable.audit.recurring.unresolvedCandidates, [
+    {
+      candidateId: candidate.id,
+      sourceId: 'foreign-rent',
+      reasons: ['unavailableAmount'],
+      affectedMetricIds: ['expenses', 'netWorthChange', 'availableCashChange'],
+      missingCurrencies: ['EUR'],
+      missingAccountIds: [],
+    },
+  ])
+})
+
+test('keeps authoritative candidates with missing amount or account classification unresolved', () => {
+  const missingAmount = definedCandidate({ id: 'missing-amount', sourceAccountId: 'checking', destinationAccountId: 'landlord' })
+  const missingClassification = definedCandidate({ id: 'missing-classification', sourceAccountId: 'checking', destinationAccountId: 'unknown-account' })
+  const base = {
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+  const amountResult = buildForecastCore({ ...base, candidates: [missingAmount], candidateAmounts: {}, accountContexts })
+  const classificationResult = buildForecastCore({
+    ...base,
+    candidates: [missingClassification],
+    candidateAmounts: {
+      [missingClassification.id]: { value: 100, conversion: { mode: 'exact', sourceCurrency: 'USD', displayCurrency: 'USD' } },
+    },
+    accountContexts,
+  })
+
+  assert.equal(amountResult.status, 'partial')
+  assert.equal(amountResult.final.expenses, null)
+  assert.equal(amountResult.progressState.expenses, 'notApplicable')
+  assert.deepEqual(amountResult.audit.recurring.unresolvedCandidates[0].reasons, ['missingAmountEvidence'])
+  assert.equal(classificationResult.status, 'unavailable')
+  assert.ok(Object.values(classificationResult.final).every((value) => value === null))
+  assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].reasons, ['missingAccountContext'])
+  assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].missingAccountIds, ['unknown-account'])
+})
+
 test('returns partial for defined-only activity and insufficient history when no defensible source exists', () => {
   const defined = buildDefinedOccurrences({
     recurringTransactions: [
@@ -328,7 +682,14 @@ test('returns partial for defined-only activity and insufficient history when no
     startDate: '2026-08-01',
     endDate: '2026-08-31',
   })
-  const partial = buildRemainingActivityForecast({ ledger: ledger([], { startMonth: null, endDate: '2026-08-03' }), candidates: defined, historyMonths: 6, today: '2026-08-03', endDate: '2026-08-31' })
+  const partial = buildRemainingActivityForecast({
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-03', fetchStartMonth: null }),
+    candidates: defined,
+    ...normalizedCandidateInputs(defined),
+    historyMonths: 6,
+    today: '2026-08-03',
+    endDate: '2026-08-31',
+  })
   const insufficient = buildRemainingActivityForecast({ ledger: ledger([], { startMonth: null, endDate: '2026-08-03' }), candidates: [], historyMonths: 6, today: '2026-08-03', endDate: '2026-08-31' })
 
   assert.equal(partial.status, 'partial')
@@ -356,7 +717,14 @@ test('moves an overdue defined occurrence to the next forecast day without losin
     endDate: '2026-08-31',
   })
 
-  const result = buildRemainingActivityForecast({ ledger: ledger([], { startMonth: null, endDate: '2026-08-03' }), candidates: defined, historyMonths: 6, today: '2026-08-03', endDate: '2026-08-31' })
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-03', fetchStartMonth: null }),
+    candidates: defined,
+    ...normalizedCandidateInputs(defined),
+    historyMonths: 6,
+    today: '2026-08-03',
+    endDate: '2026-08-31',
+  })
   const projected = result.dailyProjectedEntries[0]
 
   assert.equal(projected.date, '2026-08-04')
@@ -385,7 +753,14 @@ test('rounds projected occurrences before aggregation so daily rows exactly equa
     endDate: '2026-08-31',
   })
 
-  const result = buildRemainingActivityForecast({ ledger: ledger([], { startMonth: null, endDate: '2026-08-10' }), candidates: defined, historyMonths: 6, today: '2026-08-10', endDate: '2026-08-31' })
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+    candidates: defined,
+    ...normalizedCandidateInputs(defined),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
   const dailyTotal = result.dailyProjectedEntries.reduce((total, item) => Number((total + item.amount).toFixed(2)), 0)
 
   assert.equal(dailyTotal, result.remainingFromToday.expenses)
