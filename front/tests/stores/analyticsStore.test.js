@@ -1310,6 +1310,7 @@ test('projects the shared ledger and monthly forecast into persisted cash-use co
   assert.deepEqual(store.cashUseSeries.completedMonthKeys, ['2026-05', '2026-06', '2026-07'])
   assert.deepEqual(store.cashUseSeries.monthKeys, ['2026-05', '2026-06', '2026-07', '2026-08:forecast'])
   assert.equal(store.cashUseSeries.savingsView, 'split')
+  assert.deepEqual(store.cashUseCategoryRankingItems, [{ id: 'food', amount: 40 }])
   const food = store.cashUseSeries.useLayers.find(({ id }) => id === 'category:food')
   const forecast = food.points.find(({ kind }) => kind === 'forecast')
   assert.deepEqual(forecast.transactionIds, ['current-25'])
@@ -1317,6 +1318,48 @@ test('projects the shared ledger and monthly forecast into persisted cash-use co
     forecast.projectedSources.map(({ id }) => id),
     store.financialTrend.forecast.dailyProjectedEntries.filter((entry) => entry.categoryId === 'food' && entry.flowAmounts?.expenses !== 0).map(({ id }) => id),
   )
+})
+
+test('ranks cash-use facet categories from balancePeriod instead of categoryAverageMonths', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsBalancePeriod', 6)
+  storageOverrides.set('analyticsCategoryAverageMonths', 3)
+  storageOverrides.set('analyticsSelectedCategoryIds', ['archived'])
+  const expense = activeExpense()
+  const checking = activeAsset()
+  const expenseTransaction = (id, date, amount, categoryId) => ({
+    id,
+    attributes: {
+      transactions: [
+        {
+          transaction_journal_id: `${id}-journal`,
+          amount: String(amount),
+          currency_code: 'USD',
+          date,
+          category_id: categoryId,
+          source_id: checking.id,
+          destination_id: expense.id,
+          accountSource: checking,
+          accountDestination: expense,
+        },
+      ],
+    },
+  })
+  transactionResult = [expenseTransaction('march-housing', '2026-03-10', 300, 'housing'), expenseTransaction('july-food', '2026-07-10', 100, 'food')]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.categoryRankingItems, [
+    { id: 'food', amount: 100 },
+    { id: 'archived', amount: 0 },
+  ])
+  assert.deepEqual(store.cashUseSeries.completedMonthKeys, ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'])
+  assert.deepEqual(store.cashUseCategoryRankingItems, [
+    { id: 'housing', amount: 300 },
+    { id: 'food', amount: 100 },
+    { id: 'archived', amount: 0 },
+  ])
 })
 
 test('normalizes invalid cash-use controls without mutating shared category selections', async () => {

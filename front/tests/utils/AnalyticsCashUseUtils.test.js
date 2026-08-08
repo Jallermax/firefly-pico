@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
-import { buildCashUseSeries } from '../../utils/AnalyticsCashUseUtils.js'
+import * as AnalyticsCashUseUtils from '../../utils/AnalyticsCashUseUtils.js'
+import { projectLineChartSelection } from '../../utils/ChartUtils.js'
+
+const { buildCashUseSeries } = AnalyticsCashUseUtils
 
 const refundDefaults = {
   isRefund: false,
@@ -36,7 +40,7 @@ const ledger = (entries, startMonth = '2026-06') => ({
   audit: { unclassifiedValue: 0, transactionIds: [] },
 })
 
-const projected = ({ id, date = '2026-08-20', categoryId = null, flowAmounts, evidenceIds = [] }) => ({
+const projected = ({ id, date = '2026-08-20', categoryId = null, flowAmounts, evidenceIds = [], ...context }) => ({
   id,
   date,
   categoryId,
@@ -45,6 +49,7 @@ const projected = ({ id, date = '2026-08-20', categoryId = null, flowAmounts, ev
   candidateId: `candidate:${id}`,
   evidenceIds,
   flowAmounts,
+  ...context,
 })
 
 const build = ({ entries, mode = 'spending', savingsView = 'combined', categoryIds = [], detailLevel = 'all', remainingActivity = {}, months = ['2026-06', '2026-07'] }) =>
@@ -67,6 +72,7 @@ const build = ({ entries, mode = 'spending', savingsView = 'combined', categoryI
 const pointFor = (series, x) => series.points.find((point) => point.x === x)
 const layerFor = (series, id) => series.useLayers.find((layer) => layer.id === id)
 const sourceFor = (series, id) => series.sourceBands.find((layer) => layer.id === id)
+const geometryFor = (options) => AnalyticsCashUseUtils.buildCombinationAreaGeometry?.(options) ?? []
 
 test('spending mode reconciles gross category areas, truthful refund cash, coverage, zero months, and exact IDs', () => {
   const result = build({
@@ -354,6 +360,219 @@ test('unavailable forecast metrics remain unavailable instead of becoming zero p
   })
 
   assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').value, null)
+  assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').status, 'unavailable')
   assert.equal(pointFor(result.totals, '2026-08:forecast').status, 'unavailable')
   assert.deepEqual(result.audit.unavailable.at(-1), { monthKey: '2026-08:forecast', transactionIds: [], projectedMetricIds: ['expenses'] })
+})
+
+test('Task 8 unavailable audit remains authoritative when its metric status is inconsistent', () => {
+  const result = build({
+    entries: [entry({ id: 'actual-food', monthKey: '2026-08', value: 60, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' })],
+    remainingActivity: {
+      currentMonthKey: '2026-08',
+      dailyProjectedEntries: [projected({ id: 'future-food', categoryId: 'food', flowAmounts: { expenses: 40 } })],
+      statusByMetric: { expenses: 'ready' },
+      progressState: { expenses: 'ready' },
+      audit: { unavailable: { affectedMetricIds: ['expenses'], candidateIds: ['rent-candidate'] } },
+    },
+  })
+
+  assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').status, 'unavailable')
+  assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').value, null)
+})
+
+test('Spending audit excludes unavailable metrics owned only by hidden Full cash-use layers', () => {
+  const result = build({
+    entries: [entry({ id: 'historical-food', value: 1, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' })],
+    remainingActivity: {
+      currentMonthKey: '2026-08',
+      dailyProjectedEntries: [],
+      statusByMetric: { income: 'ready', refunds: 'ready', expenses: 'partial', debtRepayments: 'insufficientHistory' },
+      progressState: { income: 'noExpectedActivity', refunds: 'noExpectedActivity', expenses: 'ready', debtRepayments: 'insufficientHistory' },
+    },
+  })
+
+  assert.deepEqual(result.audit.unavailable.at(-1).projectedMetricIds, ['expenses'])
+})
+
+const flowMetricDefinitions = [
+  {
+    id: 'expense',
+    metric: 'expenses',
+    projection: projected({ id: 'future-expense', categoryId: 'food', flowAmounts: { expenses: 10 } }),
+    point: (series) => pointFor(layerFor(series, 'category:food'), '2026-08:forecast'),
+  },
+  {
+    id: 'ordinary income',
+    metric: 'income',
+    projection: projected({ id: 'future-income', flowAmounts: { income: 10 } }),
+    point: (series) => pointFor(series.ordinaryIncome, '2026-08:forecast'),
+  },
+  {
+    id: 'refund',
+    metric: 'refunds',
+    projection: projected({ id: 'future-refund', categoryId: 'food', flowAmounts: { refunds: 10 } }),
+    point: (series) => pointFor(sourceFor(series, 'refunds'), '2026-08:forecast'),
+  },
+  {
+    id: 'savings',
+    metric: 'savingsDeposits',
+    projection: projected({ id: 'future-savings', flowAmounts: { savingsDeposits: 10 }, destinationAccountKind: 'savingsAccessible' }),
+    point: (series) => pointFor(layerFor(series, 'savings:combined'), '2026-08:forecast'),
+  },
+  {
+    id: 'debt',
+    metric: 'debtRepayments',
+    projection: projected({ id: 'future-debt', flowAmounts: { debtRepayments: 10 } }),
+    point: (series) => pointFor(layerFor(series, 'debt:repaid'), '2026-08:forecast'),
+  },
+]
+const forecastContractCases = [
+  { id: 'ready', status: 'ready', progressState: 'ready', expectedValue: 10, expectedProgress: 0.25, includeProjection: true },
+  { id: 'no expected activity', status: 'ready', progressState: 'noExpectedActivity', expectedValue: 0, expectedProgress: null, includeProjection: false },
+  { id: 'opposite direction', status: 'ready', progressState: 'oppositeDirection', expectedValue: 10, expectedProgress: null, includeProjection: true },
+  { id: 'partial with evidence', status: 'partial', progressState: 'ready', expectedValue: 10, expectedProgress: 0.25, includeProjection: true },
+  { id: 'insufficient history', status: 'insufficientHistory', progressState: 'insufficientHistory', expectedValue: null, expectedProgress: null, includeProjection: false },
+]
+const readyStatuses = Object.fromEntries(['income', 'refunds', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt'].map((metric) => [metric, 'ready']))
+const readyProgressStates = Object.fromEntries(Object.keys(readyStatuses).map((metric) => [metric, 'ready']))
+const readyProgress = Object.fromEntries(Object.keys(readyStatuses).map((metric) => [metric, 0.25]))
+
+for (const definition of flowMetricDefinitions) {
+  for (const contract of forecastContractCases) {
+    test(`${definition.id} forecast preserves Task 8 ${contract.id} status and progress`, () => {
+      const statusByMetric = { ...readyStatuses, [definition.metric]: contract.status }
+      const progressState = { ...readyProgressStates, [definition.metric]: contract.progressState }
+      const progress = { ...readyProgress, [definition.metric]: contract.expectedProgress }
+      const result = build({
+        entries: [entry({ id: 'historical-food', value: 1, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' })],
+        mode: 'full',
+        remainingActivity: {
+          currentMonthKey: '2026-08',
+          dailyProjectedEntries: contract.includeProjection ? [definition.projection] : [],
+          statusByMetric,
+          progressState,
+          progress,
+        },
+      })
+      const point = definition.point(result)
+
+      assert.equal(point.status, contract.status)
+      assert.equal(point.progressState, contract.progressState)
+      assert.equal(point.progress, contract.expectedProgress)
+      assert.equal(point.value, contract.expectedValue)
+      if (definition.metric === 'refunds') assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').refundCoverage.projectedStatus, contract.status)
+    })
+  }
+}
+
+for (const definition of flowMetricDefinitions) {
+  test(`${definition.id} partial forecast without projected evidence stays null`, () => {
+    const result = build({
+      entries: [entry({ id: 'historical-food', value: 1, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' })],
+      mode: 'full',
+      remainingActivity: {
+        currentMonthKey: '2026-08',
+        dailyProjectedEntries: [],
+        statusByMetric: { ...readyStatuses, [definition.metric]: 'partial' },
+        progressState: { ...readyProgressStates, [definition.metric]: 'ready' },
+        progress: { ...readyProgress, [definition.metric]: 0.25 },
+      },
+    })
+
+    assert.equal(definition.point(result).status, 'partial')
+    assert.equal(definition.point(result).value, null)
+    assert.equal(result.audit.status, 'unavailable')
+  })
+}
+
+test('area geometry keeps historical fills solid and patterns only the final Forecast interval', () => {
+  const paths = geometryFor({
+    xValues: ['2026-06', '2026-07', '2026-08:forecast'],
+    points: [
+      { x: '2026-06', kind: 'actual', bottom: 0, top: 10 },
+      { x: '2026-07', kind: 'actual', bottom: 0, top: 20 },
+      { x: '2026-08:forecast', kind: 'forecast', bottom: 0, top: 30 },
+    ],
+    xAt: (index) => index * 100,
+    yAt: (value) => value,
+  })
+
+  assert.equal(typeof AnalyticsCashUseUtils.buildCombinationAreaGeometry, 'function')
+  assert.deepEqual(
+    paths.map(({ forecast }) => forecast),
+    [false, true],
+  )
+  assert.match(paths[0].d, /M 0 10 L 100 20/)
+  assert.match(paths[1].d, /M 100 20 L 200 30/)
+})
+
+for (const [id, point] of [
+  ['refund', { x: '2026-07', kind: 'actual', bottom: 10, top: 20, refundCoverage: { refunded: 10 } }],
+  ['gap', { x: '2026-07', kind: 'actual', bottom: 15, top: 35, direction: 'positive' }],
+]) {
+  test(`${id} geometry gives an isolated single-month band finite width`, () => {
+    const paths = geometryFor({
+      xValues: ['2026-06', '2026-07', '2026-08:forecast'],
+      points: [point],
+      xAt: (index) => index * 100,
+      yAt: (value) => value,
+      isolatedWidth: 24,
+    })
+
+    assert.equal(paths.length, 1)
+    assert.equal(paths[0].forecast, false)
+    assert.match(paths[0].d, /M 88 20 L 112 20 L 112 10 L 88 10 Z|M 88 35 L 112 35 L 112 15 L 88 15 Z/)
+  })
+}
+
+test('area geometry retains explicit zero points and does not bridge unavailable gaps', () => {
+  const paths = geometryFor({
+    xValues: ['2026-05', '2026-06', '2026-07', '2026-08:forecast'],
+    points: [
+      { x: '2026-05', kind: 'actual', bottom: 0, top: 5 },
+      { x: '2026-06', kind: 'actual', bottom: 0, top: 0 },
+      { x: '2026-07', kind: 'actual', bottom: null, top: null },
+      { x: '2026-08:forecast', kind: 'forecast', bottom: 0, top: 8 },
+    ],
+    xAt: (index) => index * 100,
+    yAt: (value) => value,
+    isolatedWidth: 20,
+  })
+
+  assert.equal(paths.length, 2)
+  assert.match(paths[0].d, /L 100 0/)
+  assert.doesNotMatch(paths[0].d, /300/)
+  assert.equal(paths[1].forecast, true)
+  assert.match(paths[1].d, /M 290 8 L 310 8/)
+})
+
+test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {
+  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+
+  assert.match(chart, /buildCombinationAreaGeometry/)
+  assert.match(chart, /setPointerCapture/)
+  assert.match(chart, /isPinned\.value/)
+  for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', 'Escape']) assert.match(chart, new RegExp(`event\\.key === '${key}'`))
+  assert.match(chart, /onClickOutside\(root, clearSelection\)/)
+  assert.match(chart, /:key="selectedRow\.seriesId"/)
+  assert.match(chart, /class="analytics-chart-tooltip-row"[\s\S]*minHeight: '44px'/)
+  assert.match(chart, /refundCoverage\?\.totalRefunded \?\?[^\n]+> 0/)
+  assert.match(chart, /valueFormatter\(selectedRow\.point\.refundCoverage\.totalRefunded \?\? selectedRow\.point\.refundCoverage\.refunded\)/)
+  assert.match(card, /analyticsStore\.cashUseCategoryRankingItems/)
+  assert.match(card, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
+  assert.match(card, /TransactionFilterUtils\.filters\.id\.toUrl/)
+  assert.match(card, /projectLineChartSelection/)
+
+  assert.deepEqual(
+    projectLineChartSelection({ activation: 'pointer', transactionIds: ['actual-2', 'actual-1'], kind: 'forecast', route: '/transactions/list', toUrl: (ids) => `id=${ids.join(',')}` }),
+    { activation: 'pointer', transactionIds: ['actual-2', 'actual-1'], route: '/transactions/list?id=actual-2,actual-1', forecastOnly: false },
+  )
+  assert.deepEqual(projectLineChartSelection({ activation: 'keyboard', transactionIds: [], kind: 'forecast', route: '/transactions/list' }), {
+    activation: 'keyboard',
+    transactionIds: [],
+    route: null,
+    forecastOnly: true,
+  })
 })

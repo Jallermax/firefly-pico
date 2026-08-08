@@ -103,7 +103,7 @@ const layerLabel = (layer) => {
   return layer.labelKey ? t(layer.labelKey) : layer.id
 }
 const facetItems = computed(() => {
-  const items = analyticsStore.categoryRankingItems
+  const items = analyticsStore.cashUseCategoryRankingItems
   const ids = new Set(items.map(({ id }) => id))
   return [...items, ...selectedCategoryIds.value.filter((id) => !ids.has(id)).map((id) => ({ id, amount: 0 }))]
 })

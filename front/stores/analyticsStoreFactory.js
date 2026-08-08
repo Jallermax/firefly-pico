@@ -561,6 +561,11 @@ export function createAnalyticsStore(id, useDependencies) {
         detailLevel: cashUseDetail.value,
       })
     })
+    const cashUseCategoryRankingItems = computed(() => {
+      const items = cashUseSeries.value.rankingItems
+      const ids = new Set(items.map(({ id }) => id))
+      return [...items, ...persistedSelectedCategoryIds.value.filter((id) => !ids.has(id)).map((id) => ({ id, amount: 0 }))]
+    })
     const cashUseState = computed(() => ({
       ...categoryState,
       isUnavailable: cashUseSeries.value.audit.status === 'unavailable',
@@ -722,6 +727,7 @@ export function createAnalyticsStore(id, useDependencies) {
       categoryRankingItems,
       categorySummary,
       cashUseSeries,
+      cashUseCategoryRankingItems,
       cashUseState,
       selectedFlow,
       flowMonthMin,

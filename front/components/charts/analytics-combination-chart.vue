@@ -109,6 +109,7 @@
         :key="selectedRow.seriesId"
         type="button"
         class="analytics-chart-tooltip-row"
+        :style="{ minHeight: '44px' }"
         :tabindex="isPinned || isKeyboardSelection ? 0 : -1"
         @click="emitRow(selectedRow, $event.detail === 0 ? 'keyboard' : 'pointer')"
       >
@@ -125,8 +126,9 @@
         <span v-if="Number.isFinite(selectedRow.point.progress) && selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">
           {{ $t('analytics.cash_use.progress') }}: {{ Math.round(selectedRow.point.progress * 100) }}%
         </span>
-        <span v-if="selectedRow.point.refundCoverage?.status === 'ready'" class="analytics-chart-tooltip-qualifier">
-          {{ $t('analytics.cash_use.refund_coverage') }}: {{ valueFormatter(selectedRow.point.refundCoverage.refunded) }}
+        <span v-if="selectedRow.point.status === 'partial'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.partial') }}</span>
+        <span v-if="Number.isFinite(selectedRow.point.refundCoverage?.totalRefunded ?? selectedRow.point.refundCoverage?.refunded)" class="analytics-chart-tooltip-qualifier">
+          {{ $t('analytics.cash_use.refund_coverage') }}: {{ valueFormatter(selectedRow.point.refundCoverage.totalRefunded ?? selectedRow.point.refundCoverage.refunded) }}
         </span>
       </button>
     </div>
@@ -138,6 +140,7 @@
 <script setup>
 import { onClickOutside, useElementSize } from '@vueuse/core'
 import { useAppStore } from '~/stores/appStore.js'
+import { buildCombinationAreaGeometry } from '~/utils/AnalyticsCashUseUtils.js'
 import { buildLineChartLayout, buildLineChartSelectionPayload, nearestChartPointIndex } from '~/utils/ChartUtils.js'
 
 const GRID_LINE_COUNT = 5
@@ -179,30 +182,8 @@ const yAt = (value) => layout.value.padding.top + ((yMax.value - value) / yMax.v
 const pointAt = (points, key) => points.find((point) => point.x === key)
 const xLabelAt = (key) => pointAt(props.series.ordinaryIncome?.points ?? [], key)?.xLabel ?? (key.endsWith(':forecast') ? key.slice(0, 7) : key)
 
-const areaPaths = (points, predicate = () => true) => {
-  const paths = []
-  let segment = []
-  const flush = () => {
-    if (segment.length === 0) return
-    const top = segment.map(({ index, point }) => `${index === segment[0].index ? 'M' : 'L'} ${xAt(index)} ${yAt(point.top)}`).join(' ')
-    const bottom = [...segment]
-      .reverse()
-      .map(({ index, point }) => `L ${xAt(index)} ${yAt(point.bottom)}`)
-      .join(' ')
-    paths.push({ d: `${top} ${bottom} Z`, forecast: segment.some(({ point }) => point.kind === 'forecast') })
-    segment = []
-  }
-  xValues.value.forEach((key, index) => {
-    const point = pointAt(points, key)
-    if (!point || !predicate(point) || !Number.isFinite(point.top) || !Number.isFinite(point.bottom)) {
-      flush()
-      return
-    }
-    segment.push({ index, point })
-  })
-  flush()
-  return paths
-}
+const areaPaths = (points, predicate = () => true) =>
+  buildCombinationAreaGeometry({ points, xValues: xValues.value, xAt, yAt, predicate, isolatedWidth: Math.max(12, Math.min(24, innerWidth.value / Math.max(2, pointCount.value * 2))) })
 const linePaths = (points) => {
   const paths = []
   let previous = null
@@ -222,15 +203,15 @@ const refundCoveragePoints = (points) =>
   points.map((point) => ({
     ...point,
     bottom:
-      Number.isFinite(point.bottom) && Number.isFinite(point.top) && Number.isFinite(point.refundCoverage?.refunded)
-        ? Math.max(point.bottom, point.top - Math.max(0, point.refundCoverage.refunded))
+      Number.isFinite(point.bottom) && Number.isFinite(point.top) && Number.isFinite(point.refundCoverage?.totalRefunded ?? point.refundCoverage?.refunded)
+        ? Math.max(point.bottom, point.top - Math.max(0, point.refundCoverage.totalRefunded ?? point.refundCoverage.refunded))
         : null,
   }))
 const renderedUseLayers = computed(() =>
   (props.series.useLayers ?? []).map((layer) => ({
     ...layer,
     paths: areaPaths(layer.points),
-    refundPaths: areaPaths(refundCoveragePoints(layer.points), ({ refundCoverage }) => refundCoverage?.refunded > 0),
+    refundPaths: areaPaths(refundCoveragePoints(layer.points), ({ refundCoverage }) => (refundCoverage?.totalRefunded ?? refundCoverage?.refunded) > 0),
   })),
 )
 const renderedSourceBands = computed(() => (props.series.sourceBands ?? []).map((layer) => ({ ...layer, paths: areaPaths(layer.points) })))
