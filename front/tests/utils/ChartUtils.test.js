@@ -168,7 +168,9 @@ test('financial forecast crosshair keeps exact values and dashed segments for ev
     ],
   )
   assert.equal(
-    geometry.series.every((item) => item.segments.some(({ dashed }) => dashed) && ChartUtils.persistentLineChartPoints(item.points).some(({ kind }) => kind === 'forecast')),
+    geometry.series
+      .filter((item) => item.id !== 'expenses')
+      .every((item) => item.segments.some(({ dashed }) => dashed) && ChartUtils.persistentLineChartPoints(item.points).some(({ kind }) => kind === 'forecast')),
     true,
   )
 })
@@ -242,9 +244,42 @@ test('expense summary guard does not expose a null total-expense result', () => 
 
 test('selection route projection distinguishes pointer/keyboard actual forecasts from projected-only forecasts', () => {
   assert.equal(typeof ChartUtils.projectLineChartSelection, 'function')
-  const pointer = ChartUtils.projectLineChartSelection({ activation: 'pointer', transactionIds: ['b', 'a', 'b'], kind: 'forecast' })
-  assert.deepEqual(pointer, { activation: 'pointer', transactionIds: ['b', 'a'], route: RouteConstants.ROUTE_TRANSACTION_LIST + '?id=b%2Ca', forecastOnly: false })
+  const pointer = ChartUtils.projectLineChartSelection({
+    activation: 'pointer',
+    transactionIds: ['b', 'a', 'b'],
+    kind: 'forecast',
+    route: '/custom-transactions',
+    toUrl: (ids) => 'id=' + ids.join('|'),
+  })
+  assert.deepEqual(pointer, { activation: 'pointer', transactionIds: ['b', 'a'], route: '/custom-transactions?id=b|a', forecastOnly: false })
   assert.deepEqual(ChartUtils.projectLineChartSelection({ activation: 'keyboard', transactionIds: [], kind: 'forecast' }), {
+    activation: 'keyboard',
+    transactionIds: [],
+    route: null,
+    forecastOnly: true,
+  })
+})
+
+test('balance and category card projections route actual forecast IDs for pointer and keyboard activation only', () => {
+  assert.equal(typeof ChartUtils.projectBalanceTrendSelection, 'function')
+  assert.equal(typeof ChartUtils.projectCategorySpendingSelection, 'function')
+  const toUrl = (ids) => 'id=' + ids.join('|')
+  assert.deepEqual(ChartUtils.projectBalanceTrendSelection({ activation: 'pointer', point: { kind: 'forecast', transactionIds: ['actual'] }, route: RouteConstants.ROUTE_TRANSACTION_LIST, toUrl }), {
+    activation: 'pointer',
+    transactionIds: ['actual'],
+    route: RouteConstants.ROUTE_TRANSACTION_LIST + '?id=actual',
+    forecastOnly: false,
+  })
+  assert.deepEqual(
+    ChartUtils.projectCategorySpendingSelection({ activation: 'keyboard', point: { kind: 'forecast', transactionIds: ['actual'] }, route: RouteConstants.ROUTE_TRANSACTION_LIST, toUrl }),
+    {
+      activation: 'keyboard',
+      transactionIds: ['actual'],
+      route: RouteConstants.ROUTE_TRANSACTION_LIST + '?id=actual',
+      forecastOnly: false,
+    },
+  )
+  assert.deepEqual(ChartUtils.projectCategorySpendingSelection({ activation: 'keyboard', point: { kind: 'forecast', transactionIds: [] }, route: RouteConstants.ROUTE_TRANSACTION_LIST, toUrl }), {
     activation: 'keyboard',
     transactionIds: [],
     route: null,

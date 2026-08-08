@@ -94,6 +94,7 @@
 <script setup>
 import { format, parseISO } from 'date-fns'
 import Category from '~/models/Category.js'
+import RouteConstants from '~/constants/RouteConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useAppStore } from '~/stores/appStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
@@ -101,7 +102,7 @@ import { useProfileStore } from '~/stores/profileStore.js'
 import { buildCategoryForecastDetailsPresentation, buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '~/utils/AnalyticsCategoryPresentationUtils.js'
 import { ANALYTICS_UNCATEGORIZED_ID } from '~/utils/AnalyticsUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
-import { projectLineChartSelection } from '~/utils/ChartUtils.js'
+import { projectCategorySpendingSelection } from '~/utils/ChartUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
 const CATEGORY_COLORS = [
@@ -230,7 +231,7 @@ const facetItems = computed(() => {
 const hasRetainedData = computed(() => analyticsStore.categoryState.isStale && chartSeries.value.length > 0)
 
 const onSelectPoint = async ({ activation, point, transactionIds }) => {
-  const selection = projectLineChartSelection({ activation, transactionIds, kind: point?.kind, toUrl: TransactionFilterUtils.filters.id.toUrl })
+  const selection = projectCategorySpendingSelection({ activation, point: { ...point, transactionIds }, route: RouteConstants.ROUTE_TRANSACTION_LIST, toUrl: TransactionFilterUtils.filters.id.toUrl })
   if (selection.forecastOnly) {
     selectedForecastPoint.value = point
     forecastDetailsVisible.value = true

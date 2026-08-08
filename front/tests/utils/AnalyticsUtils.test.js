@@ -53,7 +53,9 @@ test('gross category ledger preserves usable gross spending when refund conversi
     transactionIds: ['purchase'],
     transactionIdsByDay: { 3: ['purchase'] },
     refundedAmount: 0,
+    refundedAmountByDay: {},
     refundTransactionIds: [],
+    refundTransactionIdsByDay: {},
     unavailableRefundTransactionIds: ['refund-unavailable'],
   })
   assert.deepEqual(result.unclassified.transactionIds, [])
@@ -552,6 +554,7 @@ test('keeps Task 8 metadata on Today and forecast points while omitting legacy u
         status: 'ready',
         projectedSources: [
           { id: 'zero', flowAmounts: { netWorthChange: 0 } },
+          { id: 'missing', flowAmounts: {} },
           { id: 'nonzero', flowAmounts: { netWorthChange: 3 } },
         ],
       },
@@ -824,7 +827,6 @@ test('builds balance today separately while change and expense charts contain co
         'expenses',
         [
           ['2026-07', 'actual'],
-          ['2026-08', 'partial'],
           ['2026-08:forecast', 'forecast'],
         ],
       ],
@@ -868,6 +870,35 @@ test('summarizes total expense from every category without a legacy forecast', (
   assert.equal('currentForecast' in result, false)
   assert.equal('remainingFromToday' in result, false)
   assert.equal('forecastAvailable' in result, false)
+})
+
+test('total expense aggregates historical and through-today refund coverage without plotting Today', () => {
+  const result = summarizeTotalExpenseWindow({
+    averageMonths: 1,
+    today: new Date('2026-04-10T12:00:00Z'),
+    ledger: {
+      ledgerStartMonth: '2026-03',
+      months: {
+        '2026-03': { categories: { food: { amount: 20, refundedAmount: 5, refundTransactionIds: ['refund'], unavailableRefundTransactionIds: [], transactionIds: ['expense'], byDay: { 2: 20 } } } },
+        '2026-04': {
+          categories: {
+            food: {
+              amount: 30,
+              refundedAmount: 10,
+              refundTransactionIds: ['past-refund', 'future-refund'],
+              unavailableRefundTransactionIds: [],
+              transactionIds: ['past', 'future'],
+              transactionIdsByDay: { 2: ['past'], 20: ['future'] },
+              byDay: { 2: 10, 20: 20 },
+            },
+          },
+        },
+      },
+    },
+  })
+  assert.deepEqual(result.actualPoints[0].refundCoverage, { gross: 20, refunded: 5, netCost: 15, transactionIds: ['refund'], unavailableTransactionIds: [], status: 'ready' })
+  assert.deepEqual(result.refundCoverage, { gross: 10, refunded: 0, netCost: 10, transactionIds: [], unavailableTransactionIds: [], status: 'none' })
+  assert.equal('currentPoint' in result, false)
 })
 
 test('total expense retains current-only uncategorized evidence without a legacy forecast', () => {

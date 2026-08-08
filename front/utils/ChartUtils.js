@@ -1,10 +1,13 @@
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 const SERIES_MARKERS = ['circle', 'square', 'diamond', 'triangle', 'cross', 'hollow']
 
-export const projectLineChartSelection = ({ activation, transactionIds = [], kind, toUrl = (ids) => 'id=' + encodeURIComponent(ids.join(',')) }) => {
+export const projectLineChartSelection = ({ activation, transactionIds = [], kind, route = '/transactions/list', toUrl = (ids) => 'id=' + encodeURIComponent(ids.join(',')) }) => {
   const ids = [...new Set(transactionIds.filter(Boolean))]
-  return { activation, transactionIds: ids, route: ids.length ? '/transactions/list?' + toUrl(ids) : null, forecastOnly: kind === 'forecast' && ids.length === 0 }
+  return { activation, transactionIds: ids, route: ids.length ? route + '?' + toUrl(ids) : null, forecastOnly: kind === 'forecast' && ids.length === 0 }
 }
+export const projectBalanceTrendSelection = ({ activation, point, route, toUrl }) => projectLineChartSelection({ activation, transactionIds: point?.transactionIds, kind: point?.kind, route, toUrl })
+export const projectCategorySpendingSelection = ({ activation, point, route, toUrl }) =>
+  projectLineChartSelection({ activation, transactionIds: point?.transactionIds, kind: point?.kind, route, toUrl })
 
 export function nearestPointIndex({ clientX, left, width, pointCount }) {
   if (pointCount <= 0 || width <= 0) return -1

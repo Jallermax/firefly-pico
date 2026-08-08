@@ -700,7 +700,9 @@ export function buildGrossCategoryLedger({ ledger, coverage = null }) {
       transactionIds: [],
       transactionIdsByDay: {},
       refundedAmount: 0,
+      refundedAmountByDay: {},
       refundTransactionIds: [],
+      refundTransactionIdsByDay: {},
       unavailableRefundTransactionIds: [],
     })
     if (!Number.isFinite(entry.value)) {
@@ -728,7 +730,11 @@ export function buildGrossCategoryLedger({ ledger, coverage = null }) {
     }
     if (isRefund(entry)) {
       category.refundedAmount += Math.abs(entry.value)
-      if (entry.transactionId) category.refundTransactionIds = unique([...category.refundTransactionIds, entry.transactionId])
+      category.refundedAmountByDay[day] = (category.refundedAmountByDay[day] ?? 0) + Math.abs(entry.value)
+      if (entry.transactionId) {
+        category.refundTransactionIds = unique([...category.refundTransactionIds, entry.transactionId])
+        category.refundTransactionIdsByDay[day] = unique([...(category.refundTransactionIdsByDay[day] ?? []), entry.transactionId])
+      }
     }
   }
 
@@ -790,14 +796,16 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
       average,
       currentActual,
       currentTransactionIds,
-      refundedAmount: current.refundedAmount ?? 0,
-      refundTransactionIds: current.refundTransactionIds ?? [],
+      refundedAmount: Object.entries(current.refundedAmountByDay ?? {}).reduce((total, [day, value]) => total + (Number(day) <= todayDay ? value : 0), 0),
+      refundTransactionIds: unique(Object.entries(current.refundTransactionIdsByDay ?? {}).flatMap(([day, ids]) => (Number(day) <= todayDay ? ids : []))),
       unavailableRefundTransactionIds: current.unavailableRefundTransactionIds ?? [],
       refundCoverage: {
-        gross: current.amount,
-        refunded: current.refundedAmount ?? 0,
-        netCost: (current.unavailableRefundTransactionIds ?? []).length ? null : current.amount - (current.refundedAmount ?? 0),
-        transactionIds: current.refundTransactionIds ?? [],
+        gross: currentActual,
+        refunded: Object.entries(current.refundedAmountByDay ?? {}).reduce((total, [day, value]) => total + (Number(day) <= todayDay ? value : 0), 0),
+        netCost: (current.unavailableRefundTransactionIds ?? []).length
+          ? null
+          : currentActual - Object.entries(current.refundedAmountByDay ?? {}).reduce((total, [day, value]) => total + (Number(day) <= todayDay ? value : 0), 0),
+        transactionIds: unique(Object.entries(current.refundTransactionIdsByDay ?? {}).flatMap(([day, ids]) => (Number(day) <= todayDay ? ids : []))),
         unavailableTransactionIds: current.unavailableRefundTransactionIds ?? [],
         status: (current.unavailableRefundTransactionIds ?? []).length ? 'unavailable' : (current.refundedAmount ?? 0) ? 'ready' : 'none',
       },
@@ -816,11 +824,25 @@ export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
   const categoryIds = getForecastCategoryIds({ ledger, averageMonths, today })
   const categorySummary = summarizeCategoryWindow({ ledger, categoryIds, averageMonths, today })
   const categoryForecasts = categorySummary.series
+  const refundCoverage = (items) => {
+    const gross = items.reduce((total, item) => total + item.gross, 0)
+    const refunded = items.reduce((total, item) => total + item.refunded, 0)
+    const unavailableTransactionIds = unique(items.flatMap((item) => item.unavailableTransactionIds))
+    return {
+      gross,
+      refunded,
+      netCost: unavailableTransactionIds.length ? null : gross - refunded,
+      transactionIds: unique(items.flatMap((item) => item.transactionIds)),
+      unavailableTransactionIds,
+      status: unavailableTransactionIds.length ? 'unavailable' : refunded ? 'ready' : 'none',
+    }
+  }
   const actualPoints = categorySummary.monthKeys.map((key, index) => ({
     x: key,
     value: categoryForecasts.reduce((total, category) => total + category.actualPoints[index].value, 0),
     kind: 'actual',
     transactionIds: unique(categoryForecasts.flatMap((category) => category.actualPoints[index].transactionIds)),
+    refundCoverage: refundCoverage(categoryForecasts.map((category) => category.actualPoints[index].refundCoverage)),
   }))
   const currentActual = categoryForecasts.reduce((total, category) => total + category.currentActual, 0)
 
@@ -833,6 +855,7 @@ export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
     categoryIds,
     categoryForecasts,
     currentTransactionIds: unique(categoryForecasts.flatMap((category) => category.currentTransactionIds)),
+    refundCoverage: refundCoverage(categoryForecasts.map((category) => category.refundCoverage)),
   }
 }
 
@@ -918,7 +941,7 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
     if (metric.id === 'expenses') {
       if (view !== 'changes' || !expenses) return []
       const actualPoints = expenses.actualPoints ?? []
-      const projectedSources = (expenses.projectedSources ?? []).filter((entry) => entry.flowAmounts?.expenses !== 0)
+      const projectedSources = (expenses.projectedSources ?? []).filter((entry) => Number.isFinite(entry.flowAmounts?.expenses) && entry.flowAmounts.expenses !== 0)
       const forecastMetadata = {
         transactionIds: expenses.actualTransactionIds ?? expenses.currentTransactionIds ?? [],
         actualToDate: expenses.actualToDate,
@@ -931,18 +954,11 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
         actualTransactionCount: (expenses.actualTransactionIds ?? expenses.currentTransactionIds ?? []).length,
         projectedSources,
       }
-      const partial = actualPoints.find((point) => point.kind === 'partial')
-      const today = partial
-        ? { ...partial, ...forecastMetadata }
-        : Number.isFinite(expenses.currentActual)
-          ? { x: currentMonthKey, value: expenses.currentActual, kind: 'partial', transactionIds: expenses.currentTransactionIds ?? [], ...forecastMetadata }
-          : null
       return [
         {
           ...metric,
           points: [
             ...actualPoints.filter((point) => point.kind !== 'partial'),
-            ...(today ? [today] : []),
             ...(expenses.forecastAvailable && Number.isFinite(expenses.currentForecast)
               ? [{ x: currentMonthKey + ':forecast', value: expenses.currentForecast, kind: 'forecast', ...forecastMetadata }]
               : []),
@@ -960,7 +976,7 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
     const fallback = !isBalances && actualPoints.length === 0 && partial ? [{ ...partial, inspectionOnly: true }] : []
     const flowKey = { netWorth: 'netWorthChange', debt: 'debtChange', savings: 'savingsChange' }[metric.id]
     const projectedSources = (series.projectedSources ?? []).filter((entry) => {
-      if (flowKey) return entry.flowAmounts?.[flowKey] !== 0
+      if (flowKey) return Number.isFinite(entry.flowAmounts?.[flowKey]) && entry.flowAmounts[flowKey] !== 0
       const savingsKind = metric.id === 'savingsIncluded' ? 'savingsAccessible' : metric.id === 'savingsExcluded' ? 'savingsRestricted' : null
       return savingsKind ? (entry.destinationKind === savingsKind ? entry.amount : entry.sourceKind === savingsKind ? -entry.amount : 0) !== 0 : false
     })

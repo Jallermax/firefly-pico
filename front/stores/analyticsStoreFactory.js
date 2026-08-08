@@ -285,7 +285,7 @@ export function createAnalyticsStore(id, useDependencies) {
       const available = forecast.statusByMetric.expenses !== 'unavailable' && Number.isFinite(forecast.final.expenses)
       const projectedByCategory = new Map()
       for (const entry of forecast.dailyProjectedEntries) {
-        if (!Number.isFinite(entry.flowAmounts?.expenses)) continue
+        if (!Number.isFinite(entry.flowAmounts?.expenses) || entry.flowAmounts.expenses === 0) continue
         const categoryId = entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID
         projectedByCategory.set(categoryId, (projectedByCategory.get(categoryId) ?? 0) + entry.flowAmounts.expenses)
       }
@@ -311,7 +311,9 @@ export function createAnalyticsStore(id, useDependencies) {
             progress: projection.progress,
             progressState: projection.progressState,
             status: projection.status,
-            projectedSources: forecast.dailyProjectedEntries.filter((entry) => (entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID) === series.id && Number.isFinite(entry.flowAmounts?.expenses)),
+            projectedSources: forecast.dailyProjectedEntries.filter(
+              (entry) => (entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID) === series.id && Number.isFinite(entry.flowAmounts?.expenses) && entry.flowAmounts.expenses !== 0,
+            ),
           }
         }),
       }
