@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { addMonths, format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import DateUtils from '../utils/DateUtils.js'
 import {
+  ANALYTICS_UNCATEGORIZED_ID,
   buildGrossCategoryLedger,
   buildMonthlyMoneyFlow,
   convertAnalyticsAmount,
@@ -161,12 +162,6 @@ export function createAnalyticsStore(id, useDependencies) {
       const currentMonth = startOfMonth(getNow())
       return new Set([format(currentMonth, 'yyyy-MM'), ...Array.from({ length: Number(categoryAverageMonths.value) }, (_, index) => format(subMonths(currentMonth, index + 1), 'yyyy-MM'))])
     })
-    const categoryWindowUnclassifiedIds = computed(() =>
-      [...categoryWindowMonthKeys.value]
-        .flatMap((key) => categoryLedger.value.unclassifiedByMonth?.[key] ?? [])
-        .filter(Boolean)
-        .sort(),
-    )
     const categoryBlockingTransactionIds = computed(() =>
       [...categoryWindowMonthKeys.value]
         .flatMap((key) => normalizedSelectedCategoryIds.value.flatMap((categoryId) => categoryLedger.value.unclassifiedByMonthCategory?.[key]?.[categoryId] ?? []))
@@ -287,8 +282,9 @@ export function createAnalyticsStore(id, useDependencies) {
       const available = forecast.statusByMetric.expenses !== 'unavailable' && Number.isFinite(forecast.final.expenses)
       const projectedByCategory = new Map()
       for (const entry of forecast.dailyProjectedEntries) {
-        if (!Number.isFinite(entry.flowAmounts?.expenses) || !entry.categoryId) continue
-        projectedByCategory.set(entry.categoryId, (projectedByCategory.get(entry.categoryId) ?? 0) + entry.flowAmounts.expenses)
+        if (!Number.isFinite(entry.flowAmounts?.expenses)) continue
+        const categoryId = entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID
+        projectedByCategory.set(categoryId, (projectedByCategory.get(categoryId) ?? 0) + entry.flowAmounts.expenses)
       }
       return {
         ...categorySummaryBase.value,
@@ -305,7 +301,7 @@ export function createAnalyticsStore(id, useDependencies) {
             progress: currentForecast > 0 ? series.currentActual / currentForecast : null,
             progressState: forecast.progressState.expenses,
             status: forecast.statusByMetric.expenses,
-            projectedSources: forecast.dailyProjectedEntries.filter((entry) => entry.categoryId === series.id && Number.isFinite(entry.flowAmounts?.expenses)),
+            projectedSources: forecast.dailyProjectedEntries.filter((entry) => (entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID) === series.id && Number.isFinite(entry.flowAmounts?.expenses)),
           }
         }),
       }
@@ -468,9 +464,14 @@ export function createAnalyticsStore(id, useDependencies) {
           progress: flowKey ? forecast.progress[flowKey] : null,
           progressState: flowKey ? forecast.progressState[flowKey] : 'notApplicable',
           status,
+          actualTransactionIds: flowKey ? forecast.actualTransactionIds[flowKey] : (item.changePoints.find((point) => point.kind === 'partial')?.transactionIds ?? []),
+          projectedSources: forecast.dailyProjectedEntries.filter((entry) => (flowKey ? Number.isFinite(entry.flowAmounts?.[flowKey]) : true)),
         }
       })
-      const expenseBase = categoryWindowUnclassifiedIds.value.length ? null : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() })
+      const globalGrossExpenseUnavailableTransactionIds = categoryLedger.value.unclassified.transactionIds
+      const expenseBase = globalGrossExpenseUnavailableTransactionIds.length
+        ? null
+        : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() })
       const expensesAvailable = forecast.statusByMetric.expenses !== 'unavailable' && Number.isFinite(forecast.final.expenses)
       const expenses = !expenseBase
         ? null
@@ -488,7 +489,7 @@ export function createAnalyticsStore(id, useDependencies) {
             actualTransactionIds: forecast.actualTransactionIds.expenses,
             projectedSources: forecast.dailyProjectedEntries.filter((entry) => Number.isFinite(entry.flowAmounts?.expenses)),
           }
-      return { ...trend, series, expenses, forecast }
+      return { ...trend, series, expenses, forecast, globalGrossExpenseUnavailableTransactionIds, unavailableRefundTransactionIds: categoryLedger.value.unavailableRefundTransactionIds }
     })
 
     async function loadTransactions(startDate, endDate) {

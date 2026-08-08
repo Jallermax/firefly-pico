@@ -53,7 +53,11 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
     const marker = item.marker ?? SERIES_MARKERS[seriesIndex % SERIES_MARKERS.length]
     const points = item.points.map((point) => ({ ...point, x: xAt(point.x), y: Number.isFinite(point.value) ? yAt(point.value) : null, key: point.x, marker }))
     const segments = points.flatMap((point, index) => {
-      const previous = point.kind === 'forecast' ? points.slice(0, index).findLast((candidate) => candidate.y !== null && candidate.kind !== 'forecast') : points[index - 1]
+      const previous =
+        point.kind === 'forecast'
+          ? (points.slice(0, index).findLast((candidate) => candidate.y !== null && candidate.kind !== 'forecast' && !candidate.inspectionOnly) ??
+            points.slice(0, index).findLast((candidate) => candidate.y !== null && candidate.kind !== 'forecast'))
+          : points[index - 1]
       if (!previous || previous.y === null || point.y === null || point.inspectionOnly || (point.kind !== 'forecast' && previous.inspectionOnly)) return []
       if (point.kind !== 'forecast' && xValues.indexOf(point.key) - xValues.indexOf(previous.key) !== 1) return []
       return [{ path: 'M ' + previous.x + ' ' + previous.y + ' L ' + point.x + ' ' + point.y, dashed: point.kind === 'forecast' }]
@@ -67,6 +71,22 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
   })
   return { xValues, yMin, yMax, series: outputSeries }
 }
+
+export function buildLineChartSelectionPayload({ seriesId, point }) {
+  const transactionIds = [...new Set((point?.transactionIds ?? []).filter(Boolean))]
+  return {
+    seriesId,
+    pointId: String(point?.pointId ?? point?.key ?? point?.x),
+    transactionIds,
+    point,
+    metadata: point,
+    canNavigate: transactionIds.length > 0,
+    forecastOnly: point?.kind === 'forecast' && transactionIds.length === 0,
+  }
+}
+
+export const hasFinancialExpenseSummary = ({ expensesSelected, hasExpenseResult, unavailableTransactionIds = [], expenses }) =>
+  Boolean(expensesSelected && hasExpenseResult && unavailableTransactionIds.length === 0 && expenses)
 
 export function decorateLineChartPoint(point, { xLabel, valueLabel, secondaryLabel, secondaryValueLabel, isEstimated = false }) {
   return {

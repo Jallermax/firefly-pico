@@ -25,15 +25,18 @@ export const decorateCategoryChartPoint = (point, { kind, fallbackXLabel, curren
   isEstimated,
 })
 
-export const buildCategoryForecastDetailsPresentation = ({ point, labels, formatValue, formatSignedValue = formatValue }) => [
-  { id: 'currentActual', label: labels.currentActual, value: formatValue(point.currentActual) },
-  { id: 'average', label: labels.average, value: formatValue(point.average) },
-  { id: 'historicalRemainder', label: labels.historicalRemainder, value: formatValue(point.averageHistoricalRemainder) },
-  { id: 'pacedForecast', label: labels.pacedForecast, value: formatValue(point.pacedForecast) },
-  { id: 'finalForecast', label: labels.finalForecast, value: formatValue(point.currentForecast) },
-  { id: 'remainingFromToday', label: labels.remainingFromToday, value: formatSignedValue(point.remainingFromToday) },
-  { id: 'usedMonths', label: labels.usedMonths, value: point.usedMonths },
-]
+export const buildCategoryForecastDetailsPresentation = ({ point, labels, formatValue, formatSignedValue = formatValue }) => {
+  const actual = point.actualToDate ?? point.currentActual
+  const final = point.final ?? point.currentForecast
+  const rows = [
+    { id: 'currentActual', label: labels.currentActual, value: formatValue(actual) },
+    { id: 'finalForecast', label: labels.finalForecast, value: formatValue(final) },
+    { id: 'remainingFromToday', label: labels.remainingFromToday, value: formatSignedValue(point.remainingFromToday) },
+  ]
+  if (point.progressState === 'ready' && Number.isFinite(point.progress)) rows.push({ id: 'progress', label: labels.progress, value: `${Math.round(point.progress * 100)}%` })
+  else rows.push({ id: 'progressState', value: point.progressState ?? point.status })
+  return rows
+}
 
 export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, unclassified = { transactionIds: [] } }) => {
   const unavailableTransactionIds = unclassified.transactionIds ?? []

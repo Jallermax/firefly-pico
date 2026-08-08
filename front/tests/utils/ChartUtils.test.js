@@ -197,6 +197,48 @@ test('inspection-only actual anchors a dashed forecast segment without becoming 
   )
 })
 
+test('forecast geometry prefers the completed actual anchor and selection payload keeps actual evidence separate', () => {
+  assert.equal(typeof ChartUtils.buildLineChartSelectionPayload, 'function')
+  const geometry = buildLineChartGeometry({
+    width: 100,
+    height: 60,
+    padding: { top: 10, right: 10, bottom: 10, left: 10 },
+    series: [
+      {
+        id: 'expenses',
+        points: [
+          { x: '2026-07', value: 10, kind: 'actual' },
+          { x: '2026-08', value: 20, kind: 'partial', inspectionOnly: true },
+          { x: '2026-08:forecast', value: 30, kind: 'forecast' },
+        ],
+      },
+    ],
+  })
+  const dashed = geometry.series[0].segments.find(({ dashed }) => dashed)
+  assert.match(dashed.path, /^M 10 /)
+  assert.deepEqual(
+    ChartUtils.buildLineChartSelectionPayload({
+      seriesId: 'expenses',
+      point: { x: '2026-08:forecast', kind: 'forecast', transactionIds: ['actual-2', 'actual-1', 'actual-2'], projectedSources: [{ id: 'projection' }] },
+    }),
+    {
+      seriesId: 'expenses',
+      pointId: '2026-08:forecast',
+      transactionIds: ['actual-2', 'actual-1'],
+      point: { x: '2026-08:forecast', kind: 'forecast', transactionIds: ['actual-2', 'actual-1', 'actual-2'], projectedSources: [{ id: 'projection' }] },
+      metadata: { x: '2026-08:forecast', kind: 'forecast', transactionIds: ['actual-2', 'actual-1', 'actual-2'], projectedSources: [{ id: 'projection' }] },
+      canNavigate: true,
+      forecastOnly: false,
+    },
+  )
+  assert.equal(ChartUtils.buildLineChartSelectionPayload({ seriesId: 'expenses', point: { x: 'forecast', kind: 'forecast', transactionIds: [] } }).forecastOnly, true)
+})
+
+test('expense summary guard does not expose a null total-expense result', () => {
+  assert.equal(ChartUtils.hasFinancialExpenseSummary({ expensesSelected: true, hasExpenseResult: true, unavailableTransactionIds: [], expenses: null }), false)
+  assert.equal(ChartUtils.hasFinancialExpenseSummary({ expensesSelected: true, hasExpenseResult: true, unavailableTransactionIds: [], expenses: { currentActual: 2 } }), true)
+})
+
 test('financial trend omits unavailable expenses while retaining selected account metrics', () => {
   const series = buildFinancialTrendChartSeries({
     view: 'changes',
@@ -379,15 +421,6 @@ test('financial trend source states keep account and transaction failures indepe
       selectedSourcesSettled: false,
     },
   )
-})
-
-test('financial trend card warns about unavailable expenses without hiding account results', () => {
-  const component = readFileSync(new URL('../../components/analytics/analytics-balance-trends.vue', import.meta.url), 'utf8')
-
-  assert.match(component, /const hasUnavailableExpenses = computed/)
-  assert.match(component, /series\.id === 'expenses' \? hasExpenseResult\.value && !hasUnavailableExpenses\.value : hasBalanceResult\.value/)
-  assert.match(component, /expensesSelected && hasUnavailableExpenses[\s\S]*analytics\.common\.unavailable_amounts/)
-  assert.match(component, /const expenseSummary = computed\(\(\) => \{[\s\S]*hasUnavailableExpenses\.value[\s\S]*return null/)
 })
 
 test('line geometry assigns six persistent non-color marker treatments to every finite point', () => {

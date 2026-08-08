@@ -162,7 +162,6 @@ const chartSeries = computed(() =>
                 currentActual: category.currentActual,
                 average: category.average,
                 averageHistoricalRemainder: category.averageHistoricalRemainder,
-                pacedForecast: category.pacedForecast,
                 currentForecast: category.currentForecast,
                 remainingFromToday: category.remainingFromToday,
                 usedMonths: summary.value.usedMonths,
@@ -208,12 +207,9 @@ const forecastDetails = computed(() =>
         point: selectedForecastPoint.value,
         labels: {
           currentActual: t('analytics.category.current_actual'),
-          average: t('analytics.common.average'),
-          historicalRemainder: t('analytics.category.average_remainder'),
-          pacedForecast: t('analytics.category.paced_forecast'),
           finalForecast: t('analytics.common.end_of_month'),
           remainingFromToday: t('analytics.category.remaining_from_today'),
-          usedMonths: t('analytics.category.used_month_count'),
+          progress: '%',
         },
         formatValue: formatCurrency,
         formatSignedValue: formatSignedCurrency,
@@ -234,13 +230,13 @@ const facetItems = computed(() => {
 })
 const hasRetainedData = computed(() => analyticsStore.categoryState.isStale && chartSeries.value.length > 0)
 
-const onSelectPoint = async ({ point, transactionIds }) => {
-  if (point.kind === 'forecast' && !transactionIds?.length) {
+const onSelectPoint = async ({ point, transactionIds, forecastOnly, canNavigate }) => {
+  if (forecastOnly) {
     selectedForecastPoint.value = point
     forecastDetailsVisible.value = true
     return
   }
-  if (!transactionIds?.length) return
+  if (!canNavigate) return
   const ids = [...new Set(transactionIds)].join(',')
   const query = TransactionFilterUtils.filters.id.toUrl(ids)
   await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + query)

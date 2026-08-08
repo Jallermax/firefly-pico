@@ -887,6 +887,40 @@ test('blocks category summaries only for relevant unavailable spending inside th
   assert.deepEqual(store.categorySummary.series, [])
 })
 
+test('keeps a selected category usable while an unselected gross expense makes only total expenses unavailable', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
+  const expenseAccount = activeExpense()
+  accountStore.accountList = [checking, expenseAccount]
+  const unavailableOther = {
+    id: 'other-unavailable',
+    attributes: {
+      transactions: [
+        {
+          transaction_journal_id: 'other-unavailable-journal',
+          amount: null,
+          currency_code: 'USD',
+          date: new Date('2026-08-05T12:00:00'),
+          category_id: 'other',
+          source_id: checking.id,
+          destination_id: expenseAccount.id,
+        },
+      ],
+    },
+  }
+  transactionResult = [currentExpenseTransaction(25, 'food'), unavailableOther]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.categorySummary.unclassified.transactionIds, [])
+  assert.equal(store.categorySummary.series.length, 1)
+  assert.deepEqual(store.financialTrend.globalGrossExpenseUnavailableTransactionIds, ['other-unavailable'])
+  assert.equal(store.financialTrend.expenses, null)
+  assert.equal(store.financialTrend.globalGrossExpenseUnavailableTransactionIds.length > 0 && !store.financialTrend.expenses, true)
+})
+
 test('exposes ranked category items with completed-window gross spending totals', async () => {
   const checking = { attributes: { type: { fireflyCode: 'asset' } } }
   const expense = { attributes: { type: { fireflyCode: 'expense' } } }

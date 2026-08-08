@@ -670,6 +670,7 @@ export function buildGrossCategoryLedger({ ledger, coverage = null }) {
   const unavailableTransactionIds = new Set()
   const unavailableByMonth = {}
   const unavailableByMonthCategory = {}
+  const unavailableRefundTransactionIds = new Set()
   const missingCurrencies = new Set()
   const kindFor = (entry, side) => {
     const kind = entry?.[`${side}Kind`]
@@ -693,13 +694,25 @@ export function buildGrossCategoryLedger({ ledger, coverage = null }) {
     if (!key || !Number.isInteger(day) || day < 1 || day > 31) continue
     const categoryId = String((isRefund(entry) ? entry.refund?.coverageCategoryId : entry.categoryId) ?? ANALYTICS_UNCATEGORIZED_ID)
     const month = (months[key] ??= { categories: {} })
-    const category = (month.categories[categoryId] ??= { amount: 0, byDay: {}, transactionIds: [], transactionIdsByDay: {}, refundedAmount: 0, refundTransactionIds: [] })
+    const category = (month.categories[categoryId] ??= {
+      amount: 0,
+      byDay: {},
+      transactionIds: [],
+      transactionIdsByDay: {},
+      refundedAmount: 0,
+      refundTransactionIds: [],
+      unavailableRefundTransactionIds: [],
+    })
     if (!Number.isFinite(entry.value)) {
-      if (isExpense(entry) || isRefund(entry)) {
+      if (isExpense(entry)) {
         unavailableTransactionIds.add(entry.transactionId)
         unavailableByMonth[key] = unique([...(unavailableByMonth[key] ?? []), entry.transactionId])
         unavailableByMonthCategory[key] ??= {}
         unavailableByMonthCategory[key][categoryId] = unique([...(unavailableByMonthCategory[key][categoryId] ?? []), entry.transactionId])
+      }
+      if (isRefund(entry)) {
+        unavailableRefundTransactionIds.add(entry.transactionId)
+        category.unavailableRefundTransactionIds = unique([...category.unavailableRefundTransactionIds, entry.transactionId])
       }
       if (entry.conversion?.missingCurrency) missingCurrencies.add(entry.conversion.missingCurrency)
       continue
@@ -727,6 +740,7 @@ export function buildGrossCategoryLedger({ ledger, coverage = null }) {
     unclassified: { value: unavailableTransactionIds.size ? null : 0, transactionIds: [...unavailableTransactionIds].filter(Boolean).sort() },
     unclassifiedByMonth: Object.fromEntries(Object.entries(unavailableByMonth).map(([key, ids]) => [key, [...ids].filter(Boolean).sort()])),
     unclassifiedByMonthCategory: unavailableByMonthCategory,
+    unavailableRefundTransactionIds: [...unavailableRefundTransactionIds].filter(Boolean).sort(),
   }
 }
 
@@ -761,11 +775,7 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
 
     return {
       id: categoryId,
-      actualPoints: monthKeys.map((key) => ({
-        x: key,
-        value: categoryForMonth(ledger, key, categoryId).amount,
-        transactionIds: categoryForMonth(ledger, key, categoryId).transactionIds,
-      })),
+      actualPoints: monthKeys.map((key) => ({ x: key, value: categoryForMonth(ledger, key, categoryId).amount, transactionIds: categoryForMonth(ledger, key, categoryId).transactionIds })),
       average,
       currentActual,
       currentTransactionIds,
@@ -773,6 +783,9 @@ export function summarizeCategoryWindow({ ledger, categoryIds, averageMonths, to
       currentForecast,
       remainingFromToday,
       forecastAvailable,
+      refundedAmount: current.refundedAmount ?? 0,
+      refundTransactionIds: current.refundTransactionIds ?? [],
+      unavailableRefundTransactionIds: current.unavailableRefundTransactionIds ?? [],
     }
   })
 
@@ -788,7 +801,12 @@ export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
   const categoryIds = getForecastCategoryIds({ ledger, averageMonths, today })
   const categorySummary = summarizeCategoryWindow({ ledger, categoryIds, averageMonths, today })
   const categoryForecasts = categorySummary.series
-  const actualPoints = categorySummary.monthKeys.map((key, index) => ({ x: key, value: categoryForecasts.reduce((total, category) => total + category.actualPoints[index].value, 0), kind: 'actual' }))
+  const actualPoints = categorySummary.monthKeys.map((key, index) => ({
+    x: key,
+    value: categoryForecasts.reduce((total, category) => total + category.actualPoints[index].value, 0),
+    kind: 'actual',
+    transactionIds: unique(categoryForecasts.flatMap((category) => category.actualPoints[index].transactionIds)),
+  }))
   const currentActual = categoryForecasts.reduce((total, category) => total + category.currentActual, 0)
   const forecastAvailable = categorySummary.usedMonths >= 2
   const currentForecast = forecastAvailable ? categoryForecasts.reduce((total, category) => total + category.currentForecast, 0) : null
@@ -804,6 +822,7 @@ export function summarizeTotalExpenseWindow({ ledger, averageMonths, today }) {
     forecastAvailable,
     categoryIds,
     categoryForecasts,
+    currentTransactionIds: unique(categoryForecasts.flatMap((category) => category.currentTransactionIds)),
   }
 }
 
@@ -825,16 +844,17 @@ export function summarizeBalanceMovements({ balanceSeries, months, today }) {
       const currentTotal = Number.isFinite(currentPoint?.value) ? currentPoint.value : null
       const currentEstimate = currentPoint?.isEstimated ? { isEstimated: true } : {}
       const sourceMonthKeys = Object.keys(monthlyPoints).sort()
-      const totalForKey = (key) => {
+      const pointForKey = (key) => {
         const sourceKey = sourceMonthKeys.filter((sourceMonthKey) => sourceMonthKey <= key).at(-1)
-        return sourceKey ? monthlyPoints[sourceKey].value : null
+        return sourceKey ? monthlyPoints[sourceKey] : null
       }
+      const totalForKey = (key) => pointForKey(key)?.value ?? null
       const completedMonthKeys = monthKeys.filter((key) => key !== currentMonthKey)
       const precedingCompletedTotal = totalForKey(completedMonthKeys.at(-1))
       const totalPoints = [
         ...completedMonthKeys.flatMap((key) => {
           const value = totalForKey(key)
-          return value === null ? [] : [{ x: key, value, kind: 'actual' }]
+          return value === null ? [] : [{ x: key, value, kind: 'actual', transactionIds: pointForKey(key)?.transactionIds ?? [] }]
         }),
         ...(currentTotal === null || precedingCompletedTotal === null ? [] : [{ x: currentMonthKey, value: currentTotal, kind: 'partial', ...currentEstimate }]),
       ]
@@ -843,7 +863,17 @@ export function summarizeBalanceMovements({ balanceSeries, months, today }) {
         const previous = totalForKey(previousKey)
         const isCurrentMonth = key === currentMonthKey
         const current = isCurrentMonth ? currentTotal : totalForKey(key)
-        return previous === null || current === null ? [] : [{ x: key, value: current - previous, kind: isCurrentMonth ? 'partial' : 'actual', ...(isCurrentMonth ? currentEstimate : {}) }]
+        return previous === null || current === null
+          ? []
+          : [
+              {
+                x: key,
+                value: current - previous,
+                kind: isCurrentMonth ? 'partial' : 'actual',
+                transactionIds: isCurrentMonth ? (currentPoint?.transactionIds ?? []) : (pointForKey(key)?.transactionIds ?? []),
+                ...(isCurrentMonth ? currentEstimate : {}),
+              },
+            ]
       })
       const completedChanges = changePoints.filter(({ kind }) => kind === 'actual')
       const averageChange = completedChanges.length > 0 ? completedChanges.reduce((total, point) => total + point.value, 0) / completedChanges.length : null
@@ -876,15 +906,33 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
     if (!selected.has(metric.id)) return []
     if (metric.id === 'expenses') {
       if (view !== 'changes' || !expenses) return []
+      const actualPoints = expenses.actualPoints ?? []
+      const fallback = actualPoints.some((point) => point.kind === 'actual')
+        ? []
+        : Number.isFinite(expenses.currentActual)
+          ? [{ x: currentMonthKey, value: expenses.currentActual, kind: 'partial', inspectionOnly: true, transactionIds: expenses.currentTransactionIds ?? [] }]
+          : []
+      const forecastMetadata = {
+        transactionIds: expenses.actualTransactionIds ?? expenses.currentTransactionIds ?? [],
+        actualToDate: expenses.actualToDate,
+        final: expenses.final,
+        remainingFromToday: expenses.remainingFromToday,
+        progress: expenses.progress,
+        progressState: expenses.progressState,
+        status: expenses.status,
+        actualTransactionIds: expenses.actualTransactionIds ?? expenses.currentTransactionIds ?? [],
+        actualTransactionCount: (expenses.actualTransactionIds ?? expenses.currentTransactionIds ?? []).length,
+        projectedSources: expenses.projectedSources ?? [],
+      }
       return [
         {
           ...metric,
           points: [
-            ...expenses.actualPoints,
-            ...(Number.isFinite(expenses.currentActual)
-              ? [{ x: currentMonthKey, value: expenses.currentActual, kind: 'partial', inspectionOnly: true, transactionIds: expenses.currentTransactionIds ?? [] }]
+            ...actualPoints,
+            ...fallback,
+            ...(expenses.forecastAvailable && Number.isFinite(expenses.currentForecast)
+              ? [{ x: currentMonthKey + ':forecast', value: expenses.currentForecast, kind: 'forecast', ...forecastMetadata }]
               : []),
-            ...(expenses.forecastAvailable && Number.isFinite(expenses.currentForecast) ? [{ x: currentMonthKey + ':forecast', value: expenses.currentForecast, kind: 'forecast' }] : []),
           ],
         },
       ]
@@ -894,12 +942,28 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
     if (!series) return []
     const isBalances = view === 'balances'
     const forecastValue = isBalances ? series.forecastTotal : series.forecastChange
+    const actualPoints = (isBalances ? series.totalPoints : series.changePoints).filter((point) => point.kind === 'actual')
+    const partial = isBalances ? series.totalPoints.find((point) => point.kind === 'partial') : series.changePoints.find((point) => point.kind === 'partial')
+    const fallback = !isBalances && actualPoints.length === 0 && partial ? [{ ...partial, inspectionOnly: true }] : []
+    const forecastMetadata = {
+      transactionIds: series.actualTransactionIds ?? partial?.transactionIds ?? [],
+      actualToDate: series.actualToDate,
+      final: series.final,
+      remainingFromToday: series.remainingFromToday,
+      progress: series.progress,
+      progressState: series.progressState,
+      status: series.status,
+      actualTransactionIds: series.actualTransactionIds ?? partial?.transactionIds ?? [],
+      actualTransactionCount: (series.actualTransactionIds ?? partial?.transactionIds ?? []).length,
+      projectedSources: series.projectedSources ?? [],
+    }
     return [
       {
         ...metric,
         points: [
-          ...(isBalances ? series.totalPoints : series.changePoints.map((point) => (point.kind === 'partial' ? { ...point, inspectionOnly: true } : point))),
-          ...(series.forecastAvailable && Number.isFinite(forecastValue) ? [{ x: currentMonthKey + ':forecast', value: forecastValue, kind: 'forecast' }] : []),
+          ...actualPoints,
+          ...(isBalances && partial ? [partial] : fallback),
+          ...(series.forecastAvailable && Number.isFinite(forecastValue) ? [{ x: currentMonthKey + ':forecast', value: forecastValue, kind: 'forecast', ...forecastMetadata }] : []),
         ],
       },
     ]

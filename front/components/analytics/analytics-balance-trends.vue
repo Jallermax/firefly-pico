@@ -91,7 +91,7 @@ import RouteConstants from '~/constants/RouteConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { buildFinancialTrendChartSeries, formatFinancialTrendForecastValue } from '~/utils/AnalyticsUtils.js'
-import { decorateLineChartPoint, projectSelectedBalanceWarnings, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
+import { decorateLineChartPoint, hasFinancialExpenseSummary, projectSelectedBalanceWarnings, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
@@ -141,7 +141,7 @@ const selectedMetricIds = computed({
 const selectedAccountMetrics = computed(() => metrics.value.filter((metric) => metric.id !== 'expenses' && selectedMetricIds.value.includes(metric.id)))
 const hasSelectedAccountMetrics = computed(() => selectedAccountMetrics.value.length > 0)
 const expensesSelected = computed(() => selectedMetricIds.value.includes('expenses'))
-const unavailableExpenseTransactionIds = computed(() => analyticsStore.categorySummary.unclassified?.transactionIds ?? [])
+const unavailableExpenseTransactionIds = computed(() => analyticsStore.financialTrend.globalGrossExpenseUnavailableTransactionIds ?? [])
 const hasUnavailableExpenses = computed(() => unavailableExpenseTransactionIds.value.length > 0)
 const hasBalanceResult = computed(() => ['ready', 'empty'].includes(analyticsStore.balanceState.status) || analyticsStore.balanceState.isStale)
 const hasExpenseResult = computed(() => ['ready', 'empty'].includes(analyticsStore.categoryState.status) || analyticsStore.categoryState.isStale)
@@ -222,7 +222,15 @@ const accountSummaries = computed(() => {
   })
 })
 const expenseSummary = computed(() => {
-  if (!expensesSelected.value || !hasExpenseResult.value || hasUnavailableExpenses.value) return null
+  if (
+    !hasFinancialExpenseSummary({
+      expensesSelected: expensesSelected.value,
+      hasExpenseResult: hasExpenseResult.value,
+      unavailableTransactionIds: unavailableExpenseTransactionIds.value,
+      expenses: analyticsStore.financialTrend.expenses,
+    })
+  )
+    return null
   const expenses = analyticsStore.financialTrend.expenses
   const metric = metrics.value.find((item) => item.id === 'expenses')
   return {
@@ -253,8 +261,8 @@ const expenseSummary = computed(() => {
 })
 const summaries = computed(() => [...accountSummaries.value, ...(expenseSummary.value ? [expenseSummary.value] : [])])
 const isSplitSavingsMetric = (id) => ['savingsIncluded', 'savingsExcluded'].includes(id)
-const onSelectPoint = async ({ transactionIds }) => {
-  if (!transactionIds?.length) return
+const onSelectPoint = async ({ transactionIds, canNavigate }) => {
+  if (!canNavigate) return
   await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + TransactionFilterUtils.filters.id.toUrl(transactionIds))
 }
 

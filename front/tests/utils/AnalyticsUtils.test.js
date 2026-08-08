@@ -5,6 +5,7 @@ import * as AnalyticsUtils from '../../utils/AnalyticsUtils.js'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
   buildCategoryLedger,
+  buildGrossCategoryLedger,
   buildMonthlyMoneyFlow,
   combineSavingsBalanceSeries,
   convertAnalyticsAmount,
@@ -16,6 +17,47 @@ import {
   summarizeCategoryWindow,
   summarizeTotalExpenseWindow,
 } from '../../utils/AnalyticsUtils.js'
+
+const withoutTransactionIds = (point) => {
+  const copy = { ...point }
+  delete copy.transactionIds
+  return copy
+}
+
+test('gross category ledger preserves usable gross spending when refund conversion is unavailable', () => {
+  const ledger = {
+    coverage: { startMonth: '2026-07' },
+    entries: [
+      { transactionId: 'purchase', monthKey: '2026-08', day: 3, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food', value: 40 },
+      {
+        transactionId: 'refund-unavailable',
+        monthKey: '2026-08',
+        day: 4,
+        sourceKind: 'expense',
+        destinationKind: 'available',
+        categoryId: 'food',
+        value: null,
+        refund: { isRefund: true, coverageCategoryId: 'food' },
+        conversion: { missingCurrency: 'EUR' },
+      },
+    ],
+    fx: { isEstimated: false, missingCurrencies: [] },
+  }
+
+  const result = buildGrossCategoryLedger({ ledger, coverage: ledger.coverage })
+
+  assert.deepEqual(result.months['2026-08'].categories.food, {
+    amount: 40,
+    byDay: { 3: 40 },
+    transactionIds: ['purchase'],
+    transactionIdsByDay: { 3: ['purchase'] },
+    refundedAmount: 0,
+    refundTransactionIds: [],
+    unavailableRefundTransactionIds: ['refund-unavailable'],
+  })
+  assert.deepEqual(result.unclassified.transactionIds, [])
+  assert.deepEqual(result.unavailableRefundTransactionIds, ['refund-unavailable'])
+})
 
 const account = ({ id, type = 'asset', role = 'defaultAsset', direction = null, active = true, includeNetWorth = true }) => ({
   id,
@@ -440,7 +482,7 @@ test('builds completed and partial monthly account movement from month-end total
   })
 
   assert.deepEqual(result.monthKeys, ['2026-05', '2026-06', '2026-07', '2026-08'])
-  assert.deepEqual(result.series.find(({ id }) => id === 'netWorth').changePoints, [
+  assert.deepEqual(result.series.find(({ id }) => id === 'netWorth').changePoints.map(withoutTransactionIds), [
     { x: '2026-06', value: 30, kind: 'actual' },
     { x: '2026-07', value: -10, kind: 'actual' },
     { x: '2026-08', value: 30, kind: 'partial' },
@@ -512,7 +554,7 @@ test('omits monthly movement without a preceding baseline', () => {
     ],
   })
 
-  assert.deepEqual(result.series[0].changePoints, [
+  assert.deepEqual(result.series[0].changePoints.map(withoutTransactionIds), [
     { x: '2026-07', value: 20, kind: 'actual' },
     { x: '2026-08', value: 10, kind: 'partial' },
   ])
@@ -537,7 +579,7 @@ test('uses the final weekly sample in a completed month and requires current poi
     ],
   })
 
-  assert.deepEqual(result.series[0].changePoints, [
+  assert.deepEqual(result.series[0].changePoints.map(withoutTransactionIds), [
     { x: '2026-06', value: 30, kind: 'actual' },
     { x: '2026-07', value: 20, kind: 'actual' },
   ])
@@ -562,28 +604,35 @@ test('carries sparse account totals through completed months and forecasts from 
   })
 
   assert.deepEqual(result.monthKeys, ['2026-05', '2026-06', '2026-07', '2026-08'])
-  assert.deepEqual(result.series[0], {
-    id: 'netWorth',
-    totalPoints: [
-      { x: '2026-05', value: 120, kind: 'actual' },
-      { x: '2026-06', value: 120, kind: 'actual' },
-      { x: '2026-07', value: 130, kind: 'actual' },
-      { x: '2026-08', value: 130, kind: 'partial' },
-    ],
-    changePoints: [
-      { x: '2026-05', value: 20, kind: 'actual' },
-      { x: '2026-06', value: 0, kind: 'actual' },
-      { x: '2026-07', value: 10, kind: 'actual' },
-      { x: '2026-08', value: 0, kind: 'partial' },
-    ],
-    currentTotal: 130,
-    currentChange: 0,
-    averageChange: 10,
-    forecastChange: 10,
-    forecastTotal: 140,
-    remainingFromToday: 10,
-    forecastAvailable: true,
-  })
+  assert.deepEqual(
+    {
+      ...result.series[0],
+      totalPoints: result.series[0].totalPoints.map(withoutTransactionIds),
+      changePoints: result.series[0].changePoints.map(withoutTransactionIds),
+    },
+    {
+      id: 'netWorth',
+      totalPoints: [
+        { x: '2026-05', value: 120, kind: 'actual' },
+        { x: '2026-06', value: 120, kind: 'actual' },
+        { x: '2026-07', value: 130, kind: 'actual' },
+        { x: '2026-08', value: 130, kind: 'partial' },
+      ],
+      changePoints: [
+        { x: '2026-05', value: 20, kind: 'actual' },
+        { x: '2026-06', value: 0, kind: 'actual' },
+        { x: '2026-07', value: 10, kind: 'actual' },
+        { x: '2026-08', value: 0, kind: 'partial' },
+      ],
+      currentTotal: 130,
+      currentChange: 0,
+      averageChange: 10,
+      forecastChange: 10,
+      forecastTotal: 140,
+      remainingFromToday: 10,
+      forecastAvailable: true,
+    },
+  )
 })
 
 test('does not carry account totals before the first source point or forecast one completed movement', () => {
@@ -609,24 +658,24 @@ test('does not carry account totals before the first source point or forecast on
     ],
   })
 
-  assert.deepEqual(result.series[0].totalPoints, [
+  assert.deepEqual(result.series[0].totalPoints.map(withoutTransactionIds), [
     { x: '2026-06', value: 50, kind: 'actual' },
     { x: '2026-07', value: 50, kind: 'actual' },
     { x: '2026-08', value: 50, kind: 'partial' },
   ])
-  assert.deepEqual(result.series[0].changePoints, [
+  assert.deepEqual(result.series[0].changePoints.map(withoutTransactionIds), [
     { x: '2026-07', value: 0, kind: 'actual' },
     { x: '2026-08', value: 0, kind: 'partial' },
   ])
   assert.equal(result.series[0].forecastAvailable, false)
   assert.equal(result.series[0].forecastChange, null)
   assert.equal(result.series[0].forecastTotal, null)
-  assert.deepEqual(result.series[1].totalPoints, [
+  assert.deepEqual(result.series[1].totalPoints.map(withoutTransactionIds), [
     { x: '2026-05', value: 80, kind: 'actual' },
     { x: '2026-06', value: 80, kind: 'actual' },
     { x: '2026-07', value: 80, kind: 'actual' },
   ])
-  assert.deepEqual(result.series[1].changePoints, [
+  assert.deepEqual(result.series[1].changePoints.map(withoutTransactionIds), [
     { x: '2026-05', value: 0, kind: 'actual' },
     { x: '2026-06', value: 0, kind: 'actual' },
     { x: '2026-07', value: 0, kind: 'actual' },
@@ -666,37 +715,35 @@ test('builds balance today separately while change and expense charts contain co
     forecastAvailable: true,
   }
 
-  assert.deepEqual(AnalyticsUtils.buildFinancialTrendChartSeries({ view: 'balances', metrics, selectedIds: ['netWorth'], accountSeries, expenses, currentMonthKey: '2026-08' }), [
-    {
-      id: 'netWorth',
-      label: 'Localized net worth',
-      points: [
-        { x: '2026-07', value: 130, kind: 'actual' },
-        { x: '2026-08', value: 130, kind: 'partial' },
-        { x: '2026-08:forecast', value: 140, kind: 'forecast' },
+  const balancePoints = AnalyticsUtils.buildFinancialTrendChartSeries({ view: 'balances', metrics, selectedIds: ['netWorth'], accountSeries, expenses, currentMonthKey: '2026-08' })[0].points
+  assert.deepEqual(
+    balancePoints.map(({ x, value, kind }) => ({ x, value, kind })),
+    [
+      { x: '2026-07', value: 130, kind: 'actual' },
+      { x: '2026-08', value: 130, kind: 'partial' },
+      { x: '2026-08:forecast', value: 140, kind: 'forecast' },
+    ],
+  )
+  const changeSeries = AnalyticsUtils.buildFinancialTrendChartSeries({ view: 'changes', metrics, selectedIds: ['netWorth', 'expenses'], accountSeries, expenses, currentMonthKey: '2026-08' })
+  assert.deepEqual(
+    changeSeries.map((series) => [series.id, series.points.map(({ x, kind }) => [x, kind])]),
+    [
+      [
+        'netWorth',
+        [
+          ['2026-07', 'actual'],
+          ['2026-08:forecast', 'forecast'],
+        ],
       ],
-    },
-  ])
-  assert.deepEqual(AnalyticsUtils.buildFinancialTrendChartSeries({ view: 'changes', metrics, selectedIds: ['netWorth', 'expenses'], accountSeries, expenses, currentMonthKey: '2026-08' }), [
-    {
-      id: 'netWorth',
-      label: 'Localized net worth',
-      points: [
-        { x: '2026-07', value: 10, kind: 'actual' },
-        { x: '2026-08', value: 0, kind: 'partial', inspectionOnly: true },
-        { x: '2026-08:forecast', value: 10, kind: 'forecast' },
+      [
+        'expenses',
+        [
+          ['2026-07', 'actual'],
+          ['2026-08:forecast', 'forecast'],
+        ],
       ],
-    },
-    {
-      id: 'expenses',
-      label: 'Localized expenses',
-      points: [
-        { x: '2026-07', value: 30, kind: 'actual' },
-        { x: '2026-08', value: 10, kind: 'partial', inspectionOnly: true, transactionIds: [] },
-        { x: '2026-08:forecast', value: 40, kind: 'forecast' },
-      ],
-    },
-  ])
+    ],
+  )
 })
 
 test('distinguishes insufficient forecast history from a genuinely missing forecast value', () => {

@@ -98,26 +98,23 @@ test('category chart point decoration includes currency and forecast metadata', 
   })
 })
 
-test('category forecast details expose every input and both forecast values', () => {
+test('category forecast details use Task 8 values and only show ready progress', () => {
   assert.equal(typeof CategoryPresentation.buildCategoryForecastDetailsPresentation, 'function')
   const presentation = CategoryPresentation.buildCategoryForecastDetailsPresentation({
     point: {
       currentActual: 319,
-      average: 2100,
-      averageHistoricalRemainder: 1800,
-      pacedForecast: 2119,
-      currentForecast: 2500,
+      actualToDate: 319,
+      final: 2500,
       remainingFromToday: 2181,
-      usedMonths: 6,
+      progress: 0.1276,
+      progressState: 'ready',
+      status: 'ready',
     },
     labels: {
       currentActual: 'Current actual',
-      average: 'Average',
-      historicalRemainder: 'Historical remainder',
-      pacedForecast: 'Paced forecast',
       finalForecast: 'Final max result',
       remainingFromToday: 'Remaining from today',
-      usedMonths: 'Completed months used',
+      progress: 'Progress',
     },
     formatValue: (value) => `${value} USD`,
     formatSignedValue: (value) => `${value > 0 ? '+' : ''}${value} USD`,
@@ -125,13 +122,24 @@ test('category forecast details expose every input and both forecast values', ()
 
   assert.deepEqual(presentation, [
     { id: 'currentActual', label: 'Current actual', value: '319 USD' },
-    { id: 'average', label: 'Average', value: '2100 USD' },
-    { id: 'historicalRemainder', label: 'Historical remainder', value: '1800 USD' },
-    { id: 'pacedForecast', label: 'Paced forecast', value: '2119 USD' },
     { id: 'finalForecast', label: 'Final max result', value: '2500 USD' },
     { id: 'remainingFromToday', label: 'Remaining from today', value: '+2181 USD' },
-    { id: 'usedMonths', label: 'Completed months used', value: 6 },
+    { id: 'progress', label: 'Progress', value: '13%' },
   ])
+  assert.deepEqual(
+    CategoryPresentation.buildCategoryForecastDetailsPresentation({
+      point: { actualToDate: 4, final: 8, remainingFromToday: 4, progress: null, progressState: 'partial', status: 'partial' },
+      labels: { currentActual: 'Actual', finalForecast: 'Final', remainingFromToday: 'Remaining', progress: 'Progress' },
+      formatValue: String,
+      formatSignedValue: String,
+    }),
+    [
+      { id: 'currentActual', label: 'Actual', value: '4' },
+      { id: 'finalForecast', label: 'Final', value: '8' },
+      { id: 'remainingFromToday', label: 'Remaining', value: '4' },
+      { id: 'progressState', value: 'partial' },
+    ],
+  )
 })
 
 test('category ready presentation keeps unavailable amounts blocking without owning FX disclosure', () => {
