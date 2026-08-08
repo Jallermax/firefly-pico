@@ -1,0 +1,552 @@
+const MODES = ['spending', 'full']
+const SAVINGS_VIEWS = ['combined', 'split']
+const DETAIL_LEVELS = [5, 10, 'all']
+const MONEY_KINDS = new Set(['available', 'savingsAccessible', 'savingsRestricted', 'liability'])
+const SAVINGS_KINDS = new Set(['savingsAccessible', 'savingsRestricted'])
+const UNCATEGORIZED_ID = 'uncategorized'
+
+const unique = (values) => [...new Set(values.filter((value) => value !== null && value !== undefined && value !== '').map(String))].sort()
+const round = (value) => (Number.isFinite(value) ? Number(value.toFixed(8)) : value)
+const amountOf = (entry) => (Number.isFinite(entry?.value) ? Math.abs(entry.value) : null)
+const transactionIdOf = (entry) => (entry?.transactionId === null || entry?.transactionId === undefined ? null : String(entry.transactionId))
+const projectedIdOf = (entry) => String(entry?.id ?? entry?.candidateId ?? entry?.sourceId ?? '')
+const monthOfProjected = (entry) => String(entry?.date ?? '').match(/^\d{4}-\d{2}/)?.[0] ?? null
+const categoryOf = (entry) => String(entry?.categoryId ?? UNCATEGORIZED_ID)
+const normalizedMode = (mode) => (MODES.includes(mode) ? mode : 'spending')
+const normalizedSavingsView = (view) => (SAVINGS_VIEWS.includes(view) ? view : 'combined')
+const normalizedDetailLevel = (value) => (DETAIL_LEVELS.includes(value) ? value : 5)
+
+const emptyBucket = () => ({ value: 0, transactionIds: [], unavailableTransactionIds: [] })
+const emptyMonth = () => ({
+  categories: new Map(),
+  income: emptyBucket(),
+  refunds: emptyBucket(),
+  savings: { combined: emptyBucket(), accessible: emptyBucket(), restricted: emptyBucket() },
+  debtRepaid: emptyBucket(),
+  newDebt: emptyBucket(),
+})
+const ensureCategory = (month, categoryId) => {
+  if (!month.categories.has(categoryId))
+    month.categories.set(categoryId, { ...emptyBucket(), coverage: { refunded: 0, refundTransactionIds: [], purchaseTransactionIds: [], unavailableTransactionIds: [] } })
+  return month.categories.get(categoryId)
+}
+const addId = (bucket, id, key = 'transactionIds') => {
+  if (id) bucket[key] = unique([...bucket[key], id])
+}
+const addActual = (bucket, entry, signedAmount) => {
+  const id = transactionIdOf(entry)
+  if (!Number.isFinite(signedAmount)) {
+    addId(bucket, id, 'unavailableTransactionIds')
+    return
+  }
+  bucket.value = round(bucket.value + signedAmount)
+  if (signedAmount !== 0) addId(bucket, id)
+}
+
+const isRefund = (entry) => entry?.refund?.isRefund === true && entry?.sourceKind === 'expense' && MONEY_KINDS.has(entry?.destinationKind)
+const isIncome = (entry) => !isRefund(entry) && entry?.sourceKind === 'revenue' && MONEY_KINDS.has(entry?.destinationKind)
+
+const actualMonths = (ledger) => {
+  const result = new Map()
+  const month = (key) => {
+    if (!result.has(key)) result.set(key, emptyMonth())
+    return result.get(key)
+  }
+
+  for (const entry of ledger?.entries ?? []) {
+    const monthKey = entry?.monthKey
+    if (!monthKey) continue
+    const current = month(monthKey)
+    const amount = amountOf(entry)
+
+    if (entry?.destinationKind === 'expense') {
+      if (MONEY_KINDS.has(entry?.sourceKind)) addActual(ensureCategory(current, categoryOf(entry)), entry, amount)
+      else if (entry?.sourceKind === 'unknown' || !entry?.sourceKind) addActual(ensureCategory(current, categoryOf(entry)), entry, null)
+    }
+    if (isIncome(entry)) addActual(current.income, entry, amount)
+    if (isRefund(entry)) addActual(current.refunds, entry, amount)
+
+    const sourceSavings = SAVINGS_KINDS.has(entry?.sourceKind)
+    const destinationSavings = SAVINGS_KINDS.has(entry?.destinationKind)
+    if (sourceSavings !== destinationSavings) addActual(current.savings.combined, entry, amount === null ? null : destinationSavings ? amount : -amount)
+    for (const [id, kind] of [
+      ['accessible', 'savingsAccessible'],
+      ['restricted', 'savingsRestricted'],
+    ]) {
+      const delta = (entry?.destinationKind === kind ? 1 : 0) - (entry?.sourceKind === kind ? 1 : 0)
+      if (delta !== 0) addActual(current.savings[id], entry, amount === null ? null : delta * amount)
+    }
+
+    const sourceLiability = entry?.sourceKind === 'liability'
+    const destinationLiability = entry?.destinationKind === 'liability'
+    if (!sourceLiability && destinationLiability) addActual(current.debtRepaid, entry, amount)
+    if (sourceLiability && !destinationLiability) addActual(current.newDebt, entry, amount)
+
+    if (entry?.refund?.isRefund === true) {
+      const coverageMonthKey = entry.refund.coverageMonthKey ?? monthKey
+      const coverageCategoryId = String(entry.refund.coverageCategoryId ?? entry.categoryId ?? UNCATEGORIZED_ID)
+      const category = ensureCategory(month(coverageMonthKey), coverageCategoryId)
+      const coverageAmount = Number.isFinite(entry.refund.coverageValue) ? Math.abs(entry.refund.coverageValue) : amount
+      const refundId = transactionIdOf(entry)
+      if (Number.isFinite(coverageAmount)) {
+        category.coverage.refunded = round(category.coverage.refunded + coverageAmount)
+        addId(category.coverage, refundId, 'refundTransactionIds')
+        addId(category.coverage, entry.refund.linkedPurchaseTransactionId, 'purchaseTransactionIds')
+      } else addId(category.coverage, refundId, 'unavailableTransactionIds')
+    }
+  }
+  return result
+}
+
+const projectedEntries = (remainingActivity, currentMonthKey) => (remainingActivity?.dailyProjectedEntries ?? []).filter((entry) => monthOfProjected(entry) === currentMonthKey && projectedIdOf(entry))
+
+const projectedFlowValue = (entry, key) => {
+  const value = entry?.flowAmounts?.[key]
+  if (value === null || value === undefined) return 0
+  return Number.isFinite(value) ? Math.abs(value) : null
+}
+
+const projectedFor = (entries, predicate, key) => {
+  const sources = entries.filter((entry) => predicate(entry) && projectedFlowValue(entry, key) !== 0)
+  const unavailable = sources.some((entry) => !Number.isFinite(projectedFlowValue(entry, key)))
+  return {
+    value: unavailable ? null : round(sources.reduce((total, entry) => total + projectedFlowValue(entry, key), 0)),
+    sources: sources.map((entry) => structuredClone(entry)),
+  }
+}
+
+const projectedSavingsFor = (entries, viewId) => {
+  const expectedKind = viewId === 'accessible' ? 'savingsAccessible' : viewId === 'restricted' ? 'savingsRestricted' : null
+  const relevant = []
+  let value = 0
+  let unavailable = false
+  for (const entry of entries) {
+    const deposits = projectedFlowValue(entry, 'savingsDeposits')
+    const withdrawals = projectedFlowValue(entry, 'savingsWithdrawals')
+    if (deposits === 0 && withdrawals === 0) continue
+    if (!Number.isFinite(deposits) || !Number.isFinite(withdrawals)) unavailable = true
+    const destinationKind = entry.destinationKind ?? entry.destinationAccountKind ?? entry.context?.destinationKind
+    const sourceKind = entry.sourceKindNormalized ?? entry.sourceAccountKind ?? entry.context?.sourceKind
+    const includedDeposit = !expectedKind || destinationKind === expectedKind
+    const includedWithdrawal = !expectedKind || sourceKind === expectedKind
+    if (expectedKind && ((deposits > 0 && !destinationKind) || (withdrawals > 0 && !sourceKind))) unavailable = true
+    const delta = (includedDeposit && Number.isFinite(deposits) ? deposits : 0) - (includedWithdrawal && Number.isFinite(withdrawals) ? withdrawals : 0)
+    if (delta !== 0 || unavailable) {
+      value = round(value + delta)
+      relevant.push(structuredClone(entry))
+    }
+  }
+  return { value: unavailable ? null : value, sources: relevant }
+}
+
+const categoryRanking = ({ months, completedMonthKeys, currentMonthKey, projected }) => {
+  const ids = new Set()
+  for (const key of completedMonthKeys) for (const id of months.get(key)?.categories.keys() ?? []) ids.add(id)
+  for (const id of months.get(currentMonthKey)?.categories.keys() ?? []) ids.add(id)
+  for (const entry of projected) if (projectedFlowValue(entry, 'expenses') !== 0) ids.add(categoryOf(entry))
+  const amountFor = (id) =>
+    completedMonthKeys.reduce((total, key) => {
+      const bucket = months.get(key)?.categories.get(id)
+      return total + (Number.isFinite(bucket?.value) ? bucket.value : 0)
+    }, 0)
+  return [...ids].sort((left, right) => amountFor(right) - amountFor(left) || left.localeCompare(right))
+}
+
+const selectedCategories = ({ ranking, categoryIds, detailLevel }) => {
+  if (detailLevel === 'all') return ranking
+  const explicit = new Set((Array.isArray(categoryIds) ? categoryIds : []).map(String))
+  return ranking.filter((id, index) => index < detailLevel || explicit.has(id))
+}
+
+const aggregateCategories = (month, ids) => {
+  const buckets = ids.map((id) => month?.categories.get(id)).filter(Boolean)
+  const unavailable = unique(buckets.flatMap((bucket) => bucket.unavailableTransactionIds))
+  const refundUnavailable = unique(buckets.flatMap((bucket) => bucket.coverage.unavailableTransactionIds))
+  const gross = unavailable.length ? null : round(buckets.reduce((total, bucket) => total + bucket.value, 0))
+  const refunded = round(buckets.reduce((total, bucket) => total + bucket.coverage.refunded, 0))
+  return {
+    value: gross,
+    transactionIds: unique(buckets.flatMap((bucket) => bucket.transactionIds)),
+    unavailableTransactionIds: unavailable,
+    coverage: {
+      gross,
+      refunded,
+      netCost: gross === null || refundUnavailable.length ? null : round(gross - refunded),
+      status: refundUnavailable.length ? 'unavailable' : refunded ? 'ready' : 'none',
+      refundTransactionIds: unique(buckets.flatMap((bucket) => bucket.coverage.refundTransactionIds)),
+      purchaseTransactionIds: unique(buckets.flatMap((bucket) => bucket.coverage.purchaseTransactionIds)),
+      unavailableTransactionIds: refundUnavailable,
+    },
+  }
+}
+
+const categoryProjected = (entries, categoryIds) => projectedFor(entries, (entry) => categoryIds.includes(categoryOf(entry)), 'expenses')
+
+const forecastProgress = ({ actualValue, value, remainingActivity }) => {
+  if (!Number.isFinite(actualValue) || !Number.isFinite(value)) return { progress: null, progressState: 'unavailable' }
+  if (value === 0) return { progress: null, progressState: 'notApplicable' }
+  if (actualValue > value) return { progress: null, progressState: 'aboveHistoricalAverage' }
+  const globalState = remainingActivity?.progressState?.expenses
+  return { progress: Math.min(1, Math.max(0, actualValue / value)), progressState: globalState ?? 'ready' }
+}
+
+const buildLayerPoint = ({ x, kind, actual, projected = { value: 0, sources: [] }, coverage = null, remainingActivity = null }) => {
+  const actualValue = actual?.value ?? 0
+  const projectedValue = projected.value ?? 0
+  const unavailable = actualValue === null || projected.value === null || (actual?.unavailableTransactionIds?.length ?? 0) > 0
+  const value = unavailable ? null : round(actualValue + projectedValue)
+  const point = {
+    x,
+    kind,
+    value,
+    actualValue: actualValue === null ? null : actualValue,
+    projectedValue: projected.value === null ? null : projectedValue,
+    bottom: null,
+    top: null,
+    transactionIds: unique(actual?.transactionIds ?? []),
+    projectedSources: projected.sources ?? [],
+    ...(coverage ? { refundCoverage: coverage } : {}),
+  }
+  if (kind === 'forecast') Object.assign(point, forecastProgress({ actualValue, value, remainingActivity }))
+  return point
+}
+
+const cumulative = (layers, monthKeys, startFor = () => 0) => {
+  for (const x of monthKeys) {
+    let total = startFor(x)
+    for (const layer of layers) {
+      const point = layer.points.find((item) => item.x === x)
+      if (!point) continue
+      if (!Number.isFinite(total) || !Number.isFinite(point.value)) {
+        point.bottom = null
+        point.top = null
+        total = null
+      } else {
+        point.bottom = total
+        point.top = round(total + point.value)
+        total = point.top
+      }
+    }
+  }
+}
+
+const bucketForSavingsUse = (bucket) => ({ ...bucket, value: Number.isFinite(bucket?.value) ? Math.max(0, bucket.value) : null })
+const bucketForSavingsSource = (bucket) => ({ ...bucket, value: Number.isFinite(bucket?.value) ? Math.max(0, -bucket.value) : null })
+const projectedSavingsUse = (projection) => ({ value: Number.isFinite(projection.value) ? Math.max(0, projection.value) : null, sources: projection.value > 0 ? projection.sources : [] })
+const projectedSavingsSource = (projection) => ({ value: Number.isFinite(projection.value) ? Math.max(0, -projection.value) : null, sources: projection.value < 0 ? projection.sources : [] })
+
+export function buildCashUseSeries({ ledger, remainingActivity = {}, months = [], mode, savingsView, categoryIds = [], detailLevel = 5 }) {
+  const selectedMode = normalizedMode(mode)
+  const selectedSavingsView = normalizedSavingsView(savingsView)
+  const selectedDetailLevel = normalizedDetailLevel(detailLevel)
+  const completedMonthKeys = unique(months).sort()
+  const currentMonthKey =
+    remainingActivity.currentMonthKey ??
+    (remainingActivity.dailyProjectedEntries ?? []).map(monthOfProjected).filter(Boolean).sort().at(-1) ??
+    (ledger?.entries ?? [])
+      .map(({ monthKey }) => monthKey)
+      .filter(Boolean)
+      .sort()
+      .at(-1)
+  const forecastX = currentMonthKey ? `${currentMonthKey}:forecast` : null
+  const monthKeys = [...completedMonthKeys, ...(forecastX ? [forecastX] : [])]
+  const actual = actualMonths(ledger)
+  const future = currentMonthKey ? projectedEntries(remainingActivity, currentMonthKey) : []
+  const unavailableForecastMetrics = new Set([
+    ...Object.entries(remainingActivity?.statusByMetric ?? {}).flatMap(([metric, status]) => (status === 'unavailable' ? [metric] : [])),
+    ...(remainingActivity?.audit?.unavailable?.affectedMetricIds ?? []),
+  ])
+  const availableProjection = (projection, ...metricIds) => (metricIds.some((id) => unavailableForecastMetrics.has(id)) ? { ...projection, value: null } : projection)
+  const ranking = categoryRanking({ months: actual, completedMonthKeys, currentMonthKey, projected: future })
+  const visibleCategoryIds = selectedCategories({ ranking, categoryIds, detailLevel: selectedDetailLevel })
+  const hiddenCategoryIds = ranking.filter((id) => !visibleCategoryIds.includes(id))
+
+  const categoryGroups = visibleCategoryIds.map((id) => ({ id: `category:${id}`, kind: 'expenseCategory', categoryIds: [id], categoryId: id, pattern: 'solid' }))
+  if (hiddenCategoryIds.length > 0) categoryGroups.push({ id: 'category:other', kind: 'otherExpense', categoryIds: hiddenCategoryIds, labelKey: 'analytics.flow.other', pattern: 'solid' })
+
+  const useLayers = categoryGroups.map((group) => ({
+    ...group,
+    points: monthKeys.map((x) => {
+      const isForecast = x === forecastX
+      const key = isForecast ? currentMonthKey : x
+      const actualCategory = aggregateCategories(actual.get(key), group.categoryIds)
+      return buildLayerPoint({
+        x,
+        kind: isForecast ? 'forecast' : 'actual',
+        actual: actualCategory,
+        projected: isForecast ? availableProjection(categoryProjected(future, group.categoryIds), 'expenses') : undefined,
+        coverage: actualCategory.coverage,
+        remainingActivity,
+      })
+    }),
+  }))
+
+  const savingsGroups = selectedSavingsView === 'split' ? ['accessible', 'restricted'] : ['combined']
+  if (selectedMode === 'full') {
+    for (const id of savingsGroups) {
+      const projection = availableProjection(projectedSavingsFor(future, id), 'savingsDeposits', 'savingsWithdrawals')
+      useLayers.push({
+        id: `savings:${id}`,
+        kind: id === 'combined' ? 'savingsDeposit' : id === 'accessible' ? 'savingsAccessibleDeposit' : 'savingsRestrictedDeposit',
+        labelKey: `analytics.cash_use.savings_${id}`,
+        pattern: id === 'restricted' ? 'restricted-savings' : 'accessible-savings',
+        points: monthKeys.map((x) => {
+          const isForecast = x === forecastX
+          const key = isForecast ? currentMonthKey : x
+          return buildLayerPoint({
+            x,
+            kind: isForecast ? 'forecast' : 'actual',
+            actual: bucketForSavingsUse(actual.get(key)?.savings[id] ?? emptyBucket()),
+            projected: isForecast ? projectedSavingsUse(projection) : undefined,
+            remainingActivity,
+          })
+        }),
+      })
+    }
+    useLayers.push({
+      id: 'debt:repaid',
+      kind: 'debtRepaid',
+      labelKey: 'analytics.cash_use.debt_repaid',
+      pattern: 'debt',
+      points: monthKeys.map((x) => {
+        const isForecast = x === forecastX
+        const key = isForecast ? currentMonthKey : x
+        return buildLayerPoint({
+          x,
+          kind: isForecast ? 'forecast' : 'actual',
+          actual: actual.get(key)?.debtRepaid ?? emptyBucket(),
+          projected: isForecast
+            ? availableProjection(
+                projectedFor(future, () => true, 'debtRepayments'),
+                'debtRepayments',
+              )
+            : undefined,
+          remainingActivity,
+        })
+      }),
+    })
+  }
+
+  const ordinaryIncome = {
+    id: 'ordinary-income',
+    kind: 'ordinaryIncome',
+    labelKey: 'analytics.cash_use.ordinary_income',
+    pattern: 'solid-line',
+    points: monthKeys.map((x) => {
+      const isForecast = x === forecastX
+      const key = isForecast ? currentMonthKey : x
+      const actualIncome = actual.get(key)?.income ?? emptyBucket()
+      const projection = isForecast
+        ? availableProjection(
+            projectedFor(future, () => true, 'income'),
+            'income',
+          )
+        : undefined
+      return buildLayerPoint({ x, kind: isForecast ? 'forecast' : 'actual', actual: actualIncome, projected: projection, remainingActivity })
+    }),
+  }
+
+  const sourceBands = [
+    {
+      id: 'refunds',
+      kind: 'refunds',
+      labelKey: 'analytics.cash_use.refunds',
+      pattern: 'refund',
+      actualBucket: (month) => month?.refunds ?? emptyBucket(),
+      projected: () =>
+        availableProjection(
+          projectedFor(future, () => true, 'refunds'),
+          'refunds',
+        ),
+    },
+  ]
+  if (selectedMode === 'full') {
+    for (const id of savingsGroups) {
+      const projection = availableProjection(projectedSavingsFor(future, id), 'savingsDeposits', 'savingsWithdrawals')
+      sourceBands.push({
+        id: `savings-withdrawn:${id}`,
+        kind: id === 'combined' ? 'savingsWithdrawn' : id === 'accessible' ? 'savingsAccessibleWithdrawn' : 'savingsRestrictedWithdrawn',
+        labelKey: `analytics.cash_use.savings_withdrawn_${id}`,
+        pattern: id === 'restricted' ? 'restricted-savings' : 'accessible-savings',
+        actualBucket: (month) => bucketForSavingsSource(month?.savings[id] ?? emptyBucket()),
+        projected: () => projectedSavingsSource(projection),
+      })
+    }
+    sourceBands.push({
+      id: 'new-debt',
+      kind: 'newDebt',
+      labelKey: 'analytics.cash_use.new_debt',
+      pattern: 'debt',
+      actualBucket: (month) => month?.newDebt ?? emptyBucket(),
+      projected: () =>
+        availableProjection(
+          projectedFor(future, () => true, 'newDebt'),
+          'newDebt',
+        ),
+    })
+  }
+  const projectedSourceBands = sourceBands.map(({ actualBucket, projected, ...band }) => ({
+    ...band,
+    points: monthKeys.map((x) => {
+      const isForecast = x === forecastX
+      const key = isForecast ? currentMonthKey : x
+      return buildLayerPoint({ x, kind: isForecast ? 'forecast' : 'actual', actual: actualBucket(actual.get(key)), projected: isForecast ? projected() : undefined, remainingActivity })
+    }),
+  }))
+
+  cumulative(useLayers, monthKeys)
+  cumulative(projectedSourceBands, monthKeys, (x) => pointForX(ordinaryIncome.points, x)?.value ?? null)
+
+  const totals = {
+    id: 'totals',
+    points: monthKeys.map((x) => {
+      const usePoints = useLayers.map((layer) => pointForX(layer.points, x))
+      const sourcePoints = [pointForX(ordinaryIncome.points, x), ...projectedSourceBands.map((layer) => pointForX(layer.points, x))]
+      const unavailable = [...usePoints, ...sourcePoints].some((point) => !Number.isFinite(point?.value))
+      const uses = unavailable ? null : round(usePoints.reduce((total, point) => total + point.value, 0))
+      const sources = unavailable ? null : round(sourcePoints.reduce((total, point) => total + point.value, 0))
+      return {
+        x,
+        kind: x === forecastX ? 'forecast' : 'actual',
+        uses,
+        sources,
+        gap: unavailable ? null : round(sources - uses),
+        status: unavailable ? 'unavailable' : 'ok',
+        delta: unavailable ? null : 0,
+      }
+    }),
+  }
+
+  const gap = {
+    id: 'gap',
+    kind: 'gap',
+    points: monthKeys.map((x) => {
+      const total = pointForX(totals.points, x)
+      const usePoints = useLayers.map((layer) => pointForX(layer.points, x))
+      const sourcePoints = [pointForX(ordinaryIncome.points, x), ...projectedSourceBands.map((layer) => pointForX(layer.points, x))]
+      const direction = total.gap === null ? 'unavailable' : total.gap >= 0 ? 'positive' : 'negative'
+      const labelKey =
+        selectedMode === 'spending' ? 'analytics.cash_use.after_spending' : direction === 'negative' ? 'analytics.cash_use.existing_available_funds_required' : 'analytics.cash_use.new_excess'
+      return {
+        x,
+        kind: total.kind,
+        value: total.gap,
+        bottom: total.gap === null ? null : Math.min(total.uses, total.sources),
+        top: total.gap === null ? null : Math.max(total.uses, total.sources),
+        direction,
+        labelKey,
+        pattern: direction === 'negative' ? 'gap-negative' : direction === 'positive' ? 'gap-positive' : 'unavailable',
+        transactionIds: unique([...usePoints, ...sourcePoints].flatMap((point) => point.transactionIds)),
+        projectedSources: [...usePoints, ...sourcePoints].flatMap((point) => point.projectedSources),
+      }
+    }),
+  }
+
+  const reconciliation = totals.points.map((point) => {
+    const key = point.x === forecastX ? currentMonthKey : point.x
+    const actualGross = aggregateCategories(actual.get(key), ranking).value
+    const projectedGross =
+      point.x === forecastX
+        ? availableProjection(
+            projectedFor(future, () => true, 'expenses'),
+            'expenses',
+          ).value
+        : 0
+    const grossExpense = Number.isFinite(actualGross) && Number.isFinite(projectedGross) ? round(actualGross + projectedGross) : null
+    const categoryTotal = Number.isFinite(point.uses)
+      ? round(
+          categoryGroups.reduce((total, group) => {
+            const value = pointForX(useLayers.find(({ id }) => id === group.id).points, point.x)?.value
+            return total + (Number.isFinite(value) ? value : 0)
+          }, 0),
+        )
+      : null
+    const useLayerTotal = point.uses
+    const sourceComponentTotal = point.sources
+    const gapPoint = pointForX(gap.points, point.x)
+    const available = [grossExpense, categoryTotal, point.uses, useLayerTotal, point.sources, sourceComponentTotal, point.gap, gapPoint?.value].every(Number.isFinite)
+    const categoryDelta = available ? round(categoryTotal - grossExpense) : null
+    const useDelta = available ? round(useLayerTotal - point.uses) : null
+    const sourceDelta = available ? round(sourceComponentTotal - point.sources) : null
+    const gapDelta = available ? round(gapPoint.value - (point.sources - point.uses)) : null
+    const delta = available ? round(categoryDelta + useDelta + sourceDelta + gapDelta) : null
+    return {
+      monthKey: point.x,
+      status: !available ? 'unavailable' : delta === 0 ? 'ok' : 'mismatch',
+      grossExpense,
+      categoryTotal,
+      categoryDelta,
+      totalUses: point.uses,
+      useLayerTotal,
+      useDelta,
+      totalSources: point.sources,
+      sourceComponentTotal,
+      sourceDelta,
+      gap: point.gap,
+      gapDelta,
+      delta,
+    }
+  })
+  const unavailable = completedMonthKeys.flatMap((monthKey) => {
+    const ids = unique([
+      ...[...(actual.get(monthKey)?.categories.values() ?? [])].flatMap((bucket) => bucket.unavailableTransactionIds),
+      ...(actual.get(monthKey)?.income.unavailableTransactionIds ?? []),
+      ...(actual.get(monthKey)?.refunds.unavailableTransactionIds ?? []),
+      ...(selectedMode === 'full'
+        ? [
+            ...savingsGroups.flatMap((id) => actual.get(monthKey)?.savings[id].unavailableTransactionIds ?? []),
+            ...(actual.get(monthKey)?.debtRepaid.unavailableTransactionIds ?? []),
+            ...(actual.get(monthKey)?.newDebt.unavailableTransactionIds ?? []),
+          ]
+        : []),
+    ])
+    return ids.length ? [{ monthKey, transactionIds: ids }] : []
+  })
+  if (forecastX && pointForX(totals.points, forecastX)?.status === 'unavailable') {
+    const current = actual.get(currentMonthKey)
+    const transactionIds = unique([
+      ...[...(current?.categories.values() ?? [])].flatMap((bucket) => bucket.unavailableTransactionIds),
+      ...(current?.income.unavailableTransactionIds ?? []),
+      ...(current?.refunds.unavailableTransactionIds ?? []),
+      ...(selectedMode === 'full'
+        ? [
+            ...savingsGroups.flatMap((id) => current?.savings[id].unavailableTransactionIds ?? []),
+            ...(current?.debtRepaid.unavailableTransactionIds ?? []),
+            ...(current?.newDebt.unavailableTransactionIds ?? []),
+          ]
+        : []),
+    ])
+    const relevantForecastMetrics =
+      selectedMode === 'full' ? ['income', 'refunds', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt'] : ['income', 'refunds', 'expenses']
+    unavailable.push({ monthKey: forecastX, transactionIds, projectedMetricIds: relevantForecastMetrics.filter((id) => unavailableForecastMetrics.has(id)) })
+  }
+
+  return {
+    mode: selectedMode,
+    savingsView: selectedSavingsView,
+    detailLevel: selectedDetailLevel,
+    completedMonthKeys,
+    currentMonthKey,
+    monthKeys,
+    ranking,
+    visibleCategoryIds,
+    hiddenCategoryIds,
+    useLayers,
+    ordinaryIncome,
+    sourceBands: projectedSourceBands,
+    totalSources: {
+      id: 'total-sources',
+      kind: 'totalSources',
+      labelKey: 'analytics.cash_use.total_sources',
+      pattern: 'boundary-line',
+      points: totals.points.map((point) => ({ x: point.x, kind: point.kind, value: point.sources })),
+    },
+    totals,
+    gap,
+    audit: { status: unavailable.length ? 'unavailable' : 'ok', unavailable, reconciliation },
+  }
+}
+
+function pointForX(points, x) {
+  return points.find((point) => point.x === x)
+}

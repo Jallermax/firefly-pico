@@ -16,12 +16,14 @@ import {
 } from '../utils/AnalyticsUtils.js'
 import { buildRemainingActivityForecast, projectMetricForecast } from '../utils/AnalyticsForecastUtils.js'
 import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../utils/AnalyticsRecurringUtils.js'
+import { buildCashUseSeries } from '../utils/AnalyticsCashUseUtils.js'
 
 const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt']
 const RECONSTRUCTED_METRICS = ['netWorth', 'savings', 'savingsIncluded', 'savingsExcluded', 'debt', 'expenses']
 const SAVINGS_VIEWS = ['combined', 'split']
 const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
 const MONEY_FLOW_DETAIL_LEVELS = [5, 10, 'all']
+const CASH_USE_MODES = ['spending', 'full']
 const CATEGORY_SERIES_LIMIT = 6
 
 const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
@@ -58,6 +60,8 @@ export function createAnalyticsStore(id, useDependencies) {
     const storedVisibleBalanceMetrics = useStoredValue('analyticsVisibleBalanceTotalMetrics', balanceMetricIdsForSavingsView('combined'))
     const storedFinancialTrendView = useStoredValue('analyticsFinancialTrendView', 'balances')
     const storedGraphDetail = useStoredValue('analyticsMoneyFlowDetail', 5)
+    const storedCashUseMode = useStoredValue('analyticsCashUseMode', 'spending')
+    const storedCashUseDetail = useStoredValue('analyticsCashUseDetail', 5)
     const normalizeSavingsView = (view) => (SAVINGS_VIEWS.includes(view) ? view : 'combined')
     const normalizeMetrics = (metrics, availableMetrics, view) => {
       const compatibleMetrics = (Array.isArray(metrics) ? metrics : []).flatMap((metric) => {
@@ -104,6 +108,18 @@ export function createAnalyticsStore(id, useDependencies) {
       get: () => normalizeGraphDetail(storedGraphDetail.value),
       set: (detailLevel) => {
         storedGraphDetail.value = normalizeGraphDetail(detailLevel)
+      },
+    })
+    const cashUseMode = computed({
+      get: () => (CASH_USE_MODES.includes(storedCashUseMode.value) ? storedCashUseMode.value : 'spending'),
+      set: (value) => {
+        storedCashUseMode.value = CASH_USE_MODES.includes(value) ? value : 'spending'
+      },
+    })
+    const cashUseDetail = computed({
+      get: () => normalizeGraphDetail(storedCashUseDetail.value),
+      set: (value) => {
+        storedCashUseDetail.value = normalizeGraphDetail(value)
       },
     })
     const selectedFlowMonth = ref(startOfMonth(getNow()))
@@ -519,6 +535,37 @@ export function createAnalyticsStore(id, useDependencies) {
           }
       return { ...trend, series, expenses, forecast, globalGrossExpenseUnavailableTransactionIds, unavailableRefundTransactionIds: categoryLedger.value.unavailableRefundTransactionIds }
     })
+    const cashUseCompletedMonthKeys = computed(() => {
+      const currentMonth = startOfMonth(getNow())
+      const count = Number(balancePeriod.value)
+      return Array.from({ length: count }, (_, index) => format(subMonths(currentMonth, count - index), 'yyyy-MM'))
+    })
+    const cashUseSeries = computed(() => {
+      const currentMonthKey = format(getNow(), 'yyyy-MM')
+      const forecast = financialForecast.value
+      return buildCashUseSeries({
+        ledger: ledger.value,
+        remainingActivity: {
+          ...forecast,
+          currentMonthKey,
+          dailyProjectedEntries: forecast.dailyProjectedEntries.map((entry) => ({
+            ...entry,
+            sourceAccountKind: forecastAccountContexts.value[entry.sourceAccountId]?.kind ?? null,
+            destinationAccountKind: forecastAccountContexts.value[entry.destinationAccountId]?.kind ?? null,
+          })),
+        },
+        months: cashUseCompletedMonthKeys.value,
+        mode: cashUseMode.value,
+        savingsView: savingsView.value,
+        categoryIds: persistedSelectedCategoryIds.value,
+        detailLevel: cashUseDetail.value,
+      })
+    })
+    const cashUseState = computed(() => ({
+      ...categoryState,
+      isUnavailable: cashUseSeries.value.audit.status === 'unavailable',
+      unavailableTransactionIds: [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort(),
+    }))
 
     async function loadTransactions(startDate, endDate) {
       const query = [`date_after:${startDate}`, `date_before:${endDate}`, ...getExcludedTransactionFilters()]
@@ -636,6 +683,10 @@ export function createAnalyticsStore(id, useDependencies) {
       await loadSnapshot({ force: true })
     }
 
+    async function retryCashUse() {
+      await loadSnapshot({ force: true })
+    }
+
     return {
       balancePeriod,
       categoryAverageMonths,
@@ -647,6 +698,8 @@ export function createAnalyticsStore(id, useDependencies) {
       visibleBalanceMetrics,
       visibleFinancialMetrics,
       graphDetail,
+      cashUseMode,
+      cashUseDetail,
       selectedFlowMonth,
       balanceState,
       categoryState,
@@ -668,6 +721,8 @@ export function createAnalyticsStore(id, useDependencies) {
       categoryRanking,
       categoryRankingItems,
       categorySummary,
+      cashUseSeries,
+      cashUseState,
       selectedFlow,
       flowMonthMin,
       flowMonthMax,
@@ -678,6 +733,7 @@ export function createAnalyticsStore(id, useDependencies) {
       retryBalance,
       retryCategory,
       retryFlow,
+      retryCashUse,
       canMoveFlowMonth,
       moveFlowMonth,
     }

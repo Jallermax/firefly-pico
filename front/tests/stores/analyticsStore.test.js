@@ -1272,3 +1272,96 @@ test('keeps a completed snapshot on its captured exchange rates', async () => {
 
   assert.equal(store.balanceSeries.find(({ id }) => id === 'netWorth').currentPoint.value, 200)
 })
+
+test('projects the shared ledger and monthly forecast into persisted cash-use controls', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsBalancePeriod', 3)
+  storageOverrides.set('analyticsCashUseMode', 'full')
+  storageOverrides.set('analyticsCashUseDetail', 10)
+  storageOverrides.set('analyticsSavingsView', 'split')
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  transactionResult = [
+    currentExpenseTransaction(25, 'food'),
+    {
+      id: 'july-food',
+      attributes: {
+        transactions: [
+          {
+            transaction_journal_id: 'july-food-journal',
+            amount: '40',
+            currency_code: 'USD',
+            date: '2026-07-20',
+            category_id: 'food',
+            source_id: 'checking',
+            destination_id: 'expense',
+            accountSource: { id: 'checking', attributes: { type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'defaultAsset' }, include_net_worth: true } },
+            accountDestination: { id: 'expense', attributes: { type: { fireflyCode: 'expense' } } },
+          },
+        ],
+      },
+    },
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.cashUseMode, 'full')
+  assert.equal(store.cashUseDetail, 10)
+  assert.deepEqual(store.cashUseSeries.completedMonthKeys, ['2026-05', '2026-06', '2026-07'])
+  assert.deepEqual(store.cashUseSeries.monthKeys, ['2026-05', '2026-06', '2026-07', '2026-08:forecast'])
+  assert.equal(store.cashUseSeries.savingsView, 'split')
+  const food = store.cashUseSeries.useLayers.find(({ id }) => id === 'category:food')
+  const forecast = food.points.find(({ kind }) => kind === 'forecast')
+  assert.deepEqual(forecast.transactionIds, ['current-25'])
+  assert.deepEqual(
+    forecast.projectedSources.map(({ id }) => id),
+    store.financialTrend.forecast.dailyProjectedEntries.filter((entry) => entry.categoryId === 'food' && entry.flowAmounts?.expenses !== 0).map(({ id }) => id),
+  )
+})
+
+test('normalizes invalid cash-use controls without mutating shared category selections', async () => {
+  storageOverrides.set('analyticsCashUseMode', 'corrupt')
+  storageOverrides.set('analyticsCashUseDetail', 'corrupt')
+  storageOverrides.set('analyticsSelectedCategoryIds', ['one', 'two', 'three', 'four', 'five', 'six', 'seven'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+  store.cashUseMode = 'also-corrupt'
+  store.cashUseDetail = 99
+
+  assert.equal(store.cashUseMode, 'spending')
+  assert.equal(store.cashUseDetail, 5)
+  assert.deepEqual(store.selectedCategoryIds, ['one', 'two', 'three', 'four', 'five', 'six', 'seven'])
+})
+
+test('isolates unavailable cash-use evidence in its selector state', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  transactionResult = [
+    {
+      id: 'missing-cash-use',
+      attributes: {
+        transactions: [
+          {
+            transaction_journal_id: 'missing-cash-use-journal',
+            amount: 'not-an-amount',
+            currency_code: 'USD',
+            date: '2026-07-05',
+            category_id: 'food',
+            source_id: 'checking',
+            destination_id: 'expense',
+            accountSource: { id: 'checking', attributes: { type: { fireflyCode: 'asset' }, account_role: { fireflyCode: 'defaultAsset' }, include_net_worth: true } },
+            accountDestination: { id: 'expense', attributes: { type: { fireflyCode: 'expense' } } },
+          },
+        ],
+      },
+    },
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.cashUseState.status, 'ready')
+  assert.equal(store.cashUseState.isUnavailable, true)
+  assert.deepEqual(store.cashUseState.unavailableTransactionIds, ['missing-cash-use'])
+  assert.equal(store.flowState.status, 'ready')
+})
