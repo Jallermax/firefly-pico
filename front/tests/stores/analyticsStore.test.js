@@ -1406,5 +1406,53 @@ test('isolates unavailable cash-use evidence in its selector state', async () =>
   assert.equal(store.cashUseState.status, 'ready')
   assert.equal(store.cashUseState.isUnavailable, true)
   assert.deepEqual(store.cashUseState.unavailableTransactionIds, ['missing-cash-use'])
+  assert.deepEqual(store.cashUseState.projectedUnavailability, [
+    {
+      monthKey: '2026-08:forecast',
+      metricIds: ['expenses'],
+      sourceIds: [],
+      candidateIds: [],
+      evidenceIds: [],
+      statuses: [{ metricId: 'expenses', status: 'unavailable' }],
+    },
+  ])
   assert.equal(store.flowState.status, 'ready')
+})
+
+test('retains structured projected cash-use unavailability separately from actual transaction IDs', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  currencyStore.exchangeRates = { rates: { USD: 1 } }
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'foreign-rent',
+        attributes: {
+          active: true,
+          amount_avg: '90',
+          currency_code: 'EUR',
+          next_expected_match: '2026-08-20',
+          transactions: [{ source_id: 'checking', destination_id: 'expense', amount: '90', currency_code: 'EUR' }],
+        },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const unavailableForecast = store.financialTrend.forecast.audit.unavailable
+  assert.equal(unavailableForecast.candidateIds.length, 1)
+  assert.equal(unavailableForecast.affectedMetricIds.includes('expenses'), true)
+  assert.deepEqual(store.cashUseState.unavailableTransactionIds, [])
+  assert.deepEqual(store.cashUseState.projectedUnavailability, [
+    {
+      monthKey: '2026-08:forecast',
+      metricIds: ['expenses'],
+      sourceIds: store.financialTrend.forecast.audit.recurring.unresolvedCandidates.map(({ sourceId }) => sourceId),
+      candidateIds: unavailableForecast.candidateIds,
+      evidenceIds: [],
+      statuses: [{ metricId: 'expenses', status: 'unavailable' }],
+    },
+  ])
 })

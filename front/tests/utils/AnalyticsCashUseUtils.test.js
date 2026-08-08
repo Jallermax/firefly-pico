@@ -73,6 +73,8 @@ const pointFor = (series, x) => series.points.find((point) => point.x === x)
 const layerFor = (series, id) => series.useLayers.find((layer) => layer.id === id)
 const sourceFor = (series, id) => series.sourceBands.find((layer) => layer.id === id)
 const geometryFor = (options) => AnalyticsCashUseUtils.buildCombinationAreaGeometry?.(options) ?? []
+const interactionFor = (state, event) => AnalyticsCashUseUtils.reduceCombinationChartInteraction?.(state, event) ?? state
+const reconciliationFor = (options) => AnalyticsCashUseUtils.propagateCashUseReconciliation?.(options) ?? options
 
 test('spending mode reconciles gross category areas, truthful refund cash, coverage, zero months, and exact IDs', () => {
   const result = build({
@@ -334,6 +336,92 @@ test('forecast points separate actual IDs and values from projected source evide
     ['future-refund'],
   )
   assert.deepEqual(pointFor(result.gap, '2026-08:forecast').transactionIds, ['actual-food', 'actual-income'])
+
+  const totalUses = pointFor(result.totalUses, '2026-08:forecast')
+  assert.deepEqual(
+    {
+      value: totalUses.value,
+      actualValue: totalUses.actualValue,
+      projectedValue: totalUses.projectedValue,
+      progress: totalUses.progress,
+      progressState: totalUses.progressState,
+      status: totalUses.status,
+      transactionIds: totalUses.transactionIds,
+      projectedSourceIds: totalUses.projectedSources.map(({ id }) => id),
+    },
+    {
+      value: 100,
+      actualValue: 60,
+      projectedValue: 40,
+      progress: 0.6,
+      progressState: 'ready',
+      status: 'ready',
+      transactionIds: ['actual-food'],
+      projectedSourceIds: ['future-food'],
+    },
+  )
+
+  const totalSources = pointFor(result.totalSources, '2026-08:forecast')
+  assert.deepEqual(
+    {
+      value: totalSources.value,
+      actualValue: totalSources.actualValue,
+      projectedValue: totalSources.projectedValue,
+      progress: totalSources.progress,
+      progressState: totalSources.progressState,
+      status: totalSources.status,
+      transactionIds: totalSources.transactionIds,
+      projectedSourceIds: totalSources.projectedSources.map(({ id }) => id),
+    },
+    {
+      value: 160,
+      actualValue: 100,
+      projectedValue: 60,
+      progress: 0.625,
+      progressState: 'ready',
+      status: 'ready',
+      transactionIds: ['actual-income'],
+      projectedSourceIds: ['future-income', 'future-refund'],
+    },
+  )
+
+  const gap = pointFor(result.gap, '2026-08:forecast')
+  assert.deepEqual(
+    {
+      value: gap.value,
+      actualValue: gap.actualValue,
+      projectedValue: gap.projectedValue,
+      progress: gap.progress,
+      progressState: gap.progressState,
+      status: gap.status,
+    },
+    { value: 60, actualValue: 40, projectedValue: 20, progress: 0.66666667, progressState: 'ready', status: 'ready' },
+  )
+  assert.equal(totalUses.actualValue + totalUses.projectedValue, totalUses.value)
+  assert.equal(totalSources.actualValue + totalSources.projectedValue, totalSources.value)
+  assert.equal(gap.actualValue + gap.projectedValue, gap.value)
+})
+
+test('signed forecast gap retains opposite-direction metadata without losing reconciliation', () => {
+  const result = build({
+    entries: [
+      entry({ id: 'actual-income', monthKey: '2026-08', value: 50, sourceKind: 'revenue', destinationKind: 'available' }),
+      entry({ id: 'actual-food', monthKey: '2026-08', value: 100, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' }),
+    ],
+    remainingActivity: {
+      currentMonthKey: '2026-08',
+      dailyProjectedEntries: [projected({ id: 'future-income', flowAmounts: { income: 100 } })],
+      statusByMetric: { income: 'ready', refunds: 'ready', expenses: 'ready' },
+      progressState: { income: 'ready', refunds: 'noExpectedActivity', expenses: 'noExpectedActivity' },
+    },
+  })
+
+  const gap = pointFor(result.gap, '2026-08:forecast')
+  assert.deepEqual(
+    { value: gap.value, actualValue: gap.actualValue, projectedValue: gap.projectedValue, progress: gap.progress, progressState: gap.progressState, status: gap.status },
+    { value: 50, actualValue: -50, projectedValue: 100, progress: null, progressState: 'oppositeDirection', status: 'ready' },
+  )
+  assert.equal(gap.actualValue + gap.projectedValue, gap.value)
 })
 
 test('unavailable relevant inputs are audited instead of becoming zero', () => {
@@ -362,7 +450,64 @@ test('unavailable forecast metrics remain unavailable instead of becoming zero p
   assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').value, null)
   assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').status, 'unavailable')
   assert.equal(pointFor(result.totals, '2026-08:forecast').status, 'unavailable')
-  assert.deepEqual(result.audit.unavailable.at(-1), { monthKey: '2026-08:forecast', transactionIds: [], projectedMetricIds: ['expenses'] })
+  assert.deepEqual(result.audit.unavailable.at(-1), {
+    monthKey: '2026-08:forecast',
+    transactionIds: [],
+    projected: {
+      metricIds: ['expenses'],
+      sourceIds: [],
+      candidateIds: ['rent-candidate'],
+      evidenceIds: [],
+      statuses: [{ metricId: 'expenses', status: 'unavailable' }],
+    },
+  })
+})
+
+test('empty expense categories preserve insufficient-history forecast unavailability in totals, gap, reconciliation, and audit', () => {
+  const result = build({
+    entries: [],
+    remainingActivity: {
+      currentMonthKey: '2026-08',
+      dailyProjectedEntries: [],
+      statusByMetric: { income: 'ready', refunds: 'ready', expenses: 'insufficientHistory' },
+      progressState: { income: 'noExpectedActivity', refunds: 'noExpectedActivity', expenses: 'insufficientHistory' },
+    },
+  })
+
+  const totals = pointFor(result.totals, '2026-08:forecast')
+  const totalUses = pointFor(result.totalUses, '2026-08:forecast')
+  const gap = pointFor(result.gap, '2026-08:forecast')
+  const reconciliation = result.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-08:forecast')
+
+  assert.deepEqual(result.useLayers, [])
+  assert.equal(totalUses.value, null)
+  assert.equal(totalUses.status, 'insufficientHistory')
+  assert.equal(totals.uses, null)
+  assert.equal(totals.gap, null)
+  assert.equal(totals.status, 'unavailable')
+  assert.equal(gap.value, null)
+  assert.equal(gap.status, 'unavailable')
+  assert.equal(reconciliation.status, 'unavailable')
+  assert.equal(result.audit.status, 'unavailable')
+  assert.deepEqual(result.audit.unavailable.at(-1).projected.metricIds, ['expenses'])
+})
+
+test('reconciliation mismatches invalidate totals and gap instead of leaving audited values usable', () => {
+  const result = reconciliationFor({
+    totals: {
+      id: 'totals',
+      points: [{ x: '2026-07', kind: 'actual', uses: 10, sources: 20, gap: 10, status: 'ok', delta: 0 }],
+    },
+    gap: {
+      id: 'gap',
+      points: [{ x: '2026-07', kind: 'actual', value: 10, bottom: 10, top: 20, direction: 'positive', status: 'ok' }],
+    },
+    reconciliation: [{ monthKey: '2026-07', status: 'mismatch', delta: 1 }],
+  })
+
+  assert.deepEqual(result.totals.points[0], { x: '2026-07', kind: 'actual', uses: null, sources: null, gap: null, status: 'unavailable', delta: 1 })
+  assert.deepEqual(result.gap.points[0], { x: '2026-07', kind: 'actual', value: null, bottom: null, top: null, direction: 'unavailable', status: 'unavailable' })
+  assert.equal(result.auditStatus, 'mismatch')
 })
 
 test('Task 8 unavailable audit remains authoritative when its metric status is inconsistent', () => {
@@ -381,6 +526,34 @@ test('Task 8 unavailable audit remains authoritative when its metric status is i
   assert.equal(pointFor(layerFor(result, 'category:food'), '2026-08:forecast').value, null)
 })
 
+test('projected unavailable evidence excludes candidates owned only by hidden Full cash-use metrics', () => {
+  const result = build({
+    entries: [],
+    remainingActivity: {
+      currentMonthKey: '2026-08',
+      dailyProjectedEntries: [],
+      statusByMetric: { income: 'ready', refunds: 'ready', expenses: 'unavailable', debtRepayments: 'unavailable' },
+      audit: {
+        unavailable: { affectedMetricIds: ['expenses', 'debtRepayments'], candidateIds: ['expense-candidate', 'debt-candidate'] },
+        recurring: {
+          unresolvedCandidates: [
+            { candidateId: 'expense-candidate', sourceId: 'expense-source', affectedMetricIds: ['expenses'] },
+            { candidateId: 'debt-candidate', sourceId: 'debt-source', affectedMetricIds: ['debtRepayments'] },
+          ],
+        },
+      },
+    },
+  })
+
+  assert.deepEqual(result.audit.unavailable.at(-1).projected, {
+    metricIds: ['expenses'],
+    sourceIds: ['expense-source'],
+    candidateIds: ['expense-candidate'],
+    evidenceIds: [],
+    statuses: [{ metricId: 'expenses', status: 'unavailable' }],
+  })
+})
+
 test('Spending audit excludes unavailable metrics owned only by hidden Full cash-use layers', () => {
   const result = build({
     entries: [entry({ id: 'historical-food', value: 1, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' })],
@@ -392,7 +565,7 @@ test('Spending audit excludes unavailable metrics owned only by hidden Full cash
     },
   })
 
-  assert.deepEqual(result.audit.unavailable.at(-1).projectedMetricIds, ['expenses'])
+  assert.deepEqual(result.audit.unavailable.at(-1).projected.metricIds, ['expenses'])
 })
 
 const flowMetricDefinitions = [
@@ -547,14 +720,63 @@ test('area geometry retains explicit zero points and does not bridge unavailable
   assert.match(paths[1].d, /M 290 8 L 310 8/)
 })
 
+test('combination interaction controller pins a point and dismisses it completely on a second tap', () => {
+  const initial = {
+    selectedIndex: -1,
+    isPinned: false,
+    isKeyboardSelection: false,
+    isDragging: false,
+    pointerStartedOnPinnedIndex: -1,
+    effect: null,
+  }
+  let state = interactionFor(initial, { type: 'pointerDown', index: 1, pointCount: 3 })
+  assert.deepEqual(state, { ...initial, selectedIndex: 1, isDragging: true })
+  state = interactionFor(state, { type: 'pointerUp', index: 1, pointCount: 3 })
+  assert.deepEqual(state, { ...initial, selectedIndex: 1, isPinned: true, effect: { type: 'select' } })
+  state = interactionFor(state, { type: 'pointerDown', index: 1, pointCount: 3 })
+  assert.deepEqual(state, { ...initial, selectedIndex: 1, isDragging: true, pointerStartedOnPinnedIndex: 1 })
+  state = interactionFor(state, { type: 'pointerUp', index: 1, pointCount: 3 })
+  assert.deepEqual(state, initial)
+})
+
+test('combination interaction controller owns pointer, keyboard, outside, and row-selection transitions', () => {
+  const initial = {
+    selectedIndex: -1,
+    isPinned: false,
+    isKeyboardSelection: false,
+    isDragging: false,
+    pointerStartedOnPinnedIndex: -1,
+    effect: null,
+  }
+  let state = interactionFor(initial, { type: 'pointerMove', index: 2, pointCount: 3 })
+  assert.deepEqual(state, { ...initial, selectedIndex: 2 })
+  state = interactionFor(state, { type: 'pointerLeave', pointCount: 3 })
+  assert.deepEqual(state, initial)
+  state = interactionFor(initial, { type: 'key', key: 'ArrowRight', pointCount: 3 })
+  assert.deepEqual(state, { ...initial, selectedIndex: 0, isKeyboardSelection: true, effect: { type: 'select' } })
+  state = interactionFor(state, { type: 'key', key: 'End', pointCount: 3 })
+  assert.deepEqual(state, { ...initial, selectedIndex: 2, isKeyboardSelection: true, effect: { type: 'select' } })
+  state = interactionFor(state, { type: 'key', key: 'Enter', pointCount: 3 })
+  assert.deepEqual(state, { ...initial, selectedIndex: 2, isPinned: true, isKeyboardSelection: true, effect: { type: 'select' } })
+  const item = { seriesId: 'category:food', point: { transactionIds: ['actual-food'] } }
+  state = interactionFor(state, { type: 'rowSelect', item, activation: 'keyboard', pointCount: 3 })
+  assert.deepEqual(state.effect, { type: 'selectRow', item, activation: 'keyboard' })
+  state = interactionFor(state, { type: 'outside', pointCount: 3 })
+  assert.deepEqual(state, initial)
+})
+
 test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {
   const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
   const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
 
   assert.match(chart, /buildCombinationAreaGeometry/)
+  assert.match(chart, /reduceCombinationChartInteraction/)
+  assert.match(chart, /applyInteraction/)
   assert.match(chart, /setPointerCapture/)
-  assert.match(chart, /isPinned\.value/)
-  for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', 'Escape']) assert.match(chart, new RegExp(`event\\.key === '${key}'`))
+  assert.match(chart, /applyInteraction\(\{ type: 'pointerDown'/)
+  assert.match(chart, /applyInteraction\(\{ type: 'pointerUp'/)
+  assert.match(chart, /applyInteraction\(\{ type: 'key'/)
+  assert.match(chart, /applyInteraction\(\{ type: 'rowSelect'/)
   assert.match(chart, /onClickOutside\(root, clearSelection\)/)
   assert.match(chart, /:key="selectedRow\.seriesId"/)
   assert.match(chart, /class="analytics-chart-tooltip-row"[\s\S]*minHeight: '44px'/)
@@ -564,6 +786,7 @@ test('combination chart and card wire accessible interaction targets and exact e
   assert.match(card, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
   assert.match(card, /TransactionFilterUtils\.filters\.id\.toUrl/)
   assert.match(card, /projectLineChartSelection/)
+  assert.match(card, /projectedUnavailability/)
 
   assert.deepEqual(
     projectLineChartSelection({ activation: 'pointer', transactionIds: ['actual-2', 'actual-1'], kind: 'forecast', route: '/transactions/list', toUrl: (ids) => `id=${ids.join(',')}` }),

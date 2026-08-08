@@ -26,7 +26,11 @@
       <van-button size="small" @click="analyticsStore.retryCashUse">{{ $t('analytics.common.retry') }}</van-button>
     </div>
     <div v-else-if="cashUseState.isUnavailable" class="analytics-warning" role="alert">
-      {{ $t('analytics.common.unavailable_amounts', { ids: cashUseState.unavailableTransactionIds.join(', ') }) }}
+      <div v-if="cashUseState.unavailableTransactionIds.length">{{ $t('analytics.common.unavailable_amounts', { ids: cashUseState.unavailableTransactionIds.join(', ') }) }}</div>
+      <div v-if="projectedUnavailableIds.length">{{ $t('analytics.cash_use.forecast_unavailable', { ids: projectedUnavailableIds.join(', ') }) }}</div>
+      <template v-if="!cashUseState.unavailableTransactionIds.length && !projectedUnavailableIds.length">{{
+        $t('analytics.cash_use.forecast_unavailable', { ids: cashUseState.auditStatus })
+      }}</template>
     </div>
     <template v-else-if="!hasActivity">
       <div class="analytics-card-state">{{ $t('analytics.cash_use.empty') }}</div>
@@ -110,6 +114,7 @@ const facetItems = computed(() => {
 const chartSeries = computed(() => ({
   ...cashUse.value,
   useLayers: cashUse.value.useLayers.map((layer, index) => ({ ...layer, label: layerLabel(layer), color: USE_COLORS[index % USE_COLORS.length], points: layer.points.map(pointLabel) })),
+  totalUses: { ...cashUse.value.totalUses, points: cashUse.value.totalUses.points.map(pointLabel) },
   ordinaryIncome: {
     ...cashUse.value.ordinaryIncome,
     label: t(cashUse.value.ordinaryIncome.labelKey),
@@ -130,6 +135,9 @@ const hasActivity = computed(() =>
   [...cashUse.value.useLayers, cashUse.value.ordinaryIncome, ...cashUse.value.sourceBands].some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)),
 )
 const hasRetainedData = computed(() => cashUseState.value.isStale && hasActivity.value)
+const projectedUnavailableIds = computed(() => [
+  ...new Set((cashUseState.value.projectedUnavailability ?? []).flatMap(({ metricIds, sourceIds, candidateIds, evidenceIds }) => [...metricIds, ...sourceIds, ...candidateIds, ...evidenceIds])),
+])
 
 const onSelectPoint = async ({ activation, point, transactionIds }) => {
   const selection = projectLineChartSelection({

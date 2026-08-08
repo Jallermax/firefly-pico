@@ -9,7 +9,7 @@
       @pointermove="onPointerMove"
       @pointerdown="onPointerDown"
       @pointerup="onPointerUp"
-      @pointercancel="clearSelection"
+      @pointercancel="applyInteraction({ type: 'pointerCancel' })"
       @pointerleave="onPointerLeave"
       @keydown="onKeydown"
     >
@@ -140,7 +140,7 @@
 <script setup>
 import { onClickOutside, useElementSize } from '@vueuse/core'
 import { useAppStore } from '~/stores/appStore.js'
-import { buildCombinationAreaGeometry } from '~/utils/AnalyticsCashUseUtils.js'
+import { buildCombinationAreaGeometry, reduceCombinationChartInteraction } from '~/utils/AnalyticsCashUseUtils.js'
 import { buildLineChartLayout, buildLineChartSelectionPayload, nearestChartPointIndex } from '~/utils/ChartUtils.js'
 
 const GRID_LINE_COUNT = 5
@@ -156,11 +156,10 @@ const emit = defineEmits(['select', 'select-point'])
 const appStore = useAppStore()
 const root = ref(null)
 const { width: renderedWidth } = useElementSize(root)
-const selectedIndex = ref(-1)
-const isPinned = ref(props.pinned)
-const isKeyboardSelection = ref(false)
-const isDragging = ref(false)
-const pointerStartedOnPinnedIndex = ref(-1)
+const interaction = ref({ selectedIndex: -1, isPinned: props.pinned, isKeyboardSelection: false, isDragging: false, pointerStartedOnPinnedIndex: -1, effect: null })
+const selectedIndex = computed(() => interaction.value.selectedIndex)
+const isPinned = computed(() => interaction.value.isPinned)
+const isKeyboardSelection = computed(() => interaction.value.isKeyboardSelection)
 
 const layout = computed(() => buildLineChartLayout({ isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
 const xValues = computed(() => props.series.monthKeys ?? [])
@@ -218,6 +217,7 @@ const renderedSourceBands = computed(() => (props.series.sourceBands ?? []).map(
 const renderedPositiveGap = computed(() => areaPaths(props.series.gap?.points ?? [], ({ direction }) => direction === 'positive'))
 const renderedNegativeGap = computed(() => areaPaths(props.series.gap?.points ?? [], ({ direction }) => direction === 'negative'))
 const ordinaryIncome = computed(() => props.series.ordinaryIncome ?? { points: [], color: 'var(--income2)' })
+const totalUses = computed(() => props.series.totalUses ?? { points: [] })
 const totalSources = computed(() => props.series.totalSources ?? { points: [], color: 'var(--van-text-color-2)' })
 const ordinaryIncomePaths = computed(() => linePaths(ordinaryIncome.value.points))
 const totalSourcePaths = computed(() => linePaths(totalSources.value.points))
@@ -253,7 +253,8 @@ const selectedRows = computed(() => {
     const point = pointAt(band.points, key)
     return row({ seriesId: band.id, label: point?.label ?? band.label ?? band.id, color: band.color, point, yValue: point?.top })
   })
-  const totals = pointAt(props.series.totals?.points ?? [], key)
+  const totalUsePoint = pointAt(totalUses.value.points, key)
+  const totalSourcePoint = pointAt(totalSources.value.points, key)
   const gapPoint = pointAt(props.series.gap?.points ?? [], key)
   return [
     ...uses,
@@ -263,18 +264,13 @@ const selectedRows = computed(() => {
       seriesId: 'total-uses',
       label: props.series.totalUsesLabel,
       color: 'var(--expense2)',
-      point: { ...totals, value: totals?.uses, transactionIds: uses.flatMap(({ point }) => point.transactionIds), projectedSources: uses.flatMap(({ point }) => point.projectedSources) },
+      point: totalUsePoint,
     }),
     row({
       seriesId: 'total-sources',
       label: totalSources.value.label ?? totalSources.value.id,
       color: totalSources.value.color,
-      point: {
-        ...totals,
-        value: totals?.sources,
-        transactionIds: [incomePoint, ...sources.map(({ point }) => point)].flatMap((point) => point?.transactionIds ?? []),
-        projectedSources: [incomePoint, ...sources.map(({ point }) => point)].flatMap((point) => point?.projectedSources ?? []),
-      },
+      point: totalSourcePoint,
     }),
     row({
       seriesId: 'gap',
@@ -314,75 +310,42 @@ const selectionPayload = () => ({
 const emitSelection = () => {
   if (selectedIndex.value >= 0) emit('select', selectionPayload())
 }
-const clearSelection = () => {
-  selectedIndex.value = -1
-  isPinned.value = false
-  isKeyboardSelection.value = false
-  isDragging.value = false
-  pointerStartedOnPinnedIndex.value = -1
+const applyInteraction = (event) => {
+  interaction.value = reduceCombinationChartInteraction(interaction.value, { ...event, pointCount: pointCount.value })
+  if (interaction.value.effect?.type === 'select') emitSelection()
+  if (interaction.value.effect?.type === 'selectRow') {
+    const { item, activation } = interaction.value.effect
+    emit('select-point', buildLineChartSelectionPayload({ seriesId: item.seriesId, point: item.point, activation }))
+  }
 }
-const selectIndex = (index, { keyboard = false, notify = false } = {}) => {
-  if (pointCount.value === 0) return clearSelection()
-  selectedIndex.value = Math.min(pointCount.value - 1, Math.max(0, index))
-  isKeyboardSelection.value = keyboard
-  if (notify) emitSelection()
-}
+const clearSelection = () => applyInteraction({ type: 'clear' })
 const pointerIndex = (event) => {
   const bounds = root.value?.getBoundingClientRect()
   if (!bounds) return -1
   return nearestChartPointIndex({ clientX: event.clientX, left: bounds.left, width: bounds.width, viewBoxWidth: layout.value.width, padding: layout.value.padding, pointCount: pointCount.value })
 }
 const onPointerMove = (event) => {
-  if (isPinned.value && !isDragging.value) return
   const index = pointerIndex(event)
-  if (index >= 0) selectIndex(index)
+  applyInteraction({ type: 'pointerMove', index })
 }
 const onPointerDown = (event) => {
   const index = pointerIndex(event)
   if (index < 0) return
-  pointerStartedOnPinnedIndex.value = isPinned.value && selectedIndex.value === index ? index : -1
-  isPinned.value = false
-  isDragging.value = true
-  selectIndex(index)
+  applyInteraction({ type: 'pointerDown', index })
   if (event.pointerType === 'touch') event.currentTarget.setPointerCapture?.(event.pointerId)
 }
 const onPointerUp = (event) => {
-  if (!isDragging.value) return
   const index = pointerIndex(event)
-  if (index >= 0) selectIndex(index)
-  isDragging.value = false
-  if (pointerStartedOnPinnedIndex.value === selectedIndex.value) return (pointerStartedOnPinnedIndex.value = -1)
-  pointerStartedOnPinnedIndex.value = -1
-  isPinned.value = selectedIndex.value >= 0
-  if (isPinned.value) emitSelection()
+  applyInteraction({ type: 'pointerUp', index })
 }
-const onPointerLeave = () => {
-  if (!isPinned.value && !isDragging.value) clearSelection()
-}
+const onPointerLeave = () => applyInteraction({ type: 'pointerLeave' })
 const onKeydown = (event) => {
-  if (pointCount.value === 0) return
-  let index = selectedIndex.value
-  if (event.key === 'ArrowLeft') index--
-  else if (event.key === 'ArrowRight') index++
-  else if (event.key === 'Home') index = 0
-  else if (event.key === 'End') index = pointCount.value - 1
-  else if (event.key === 'Enter') {
-    event.preventDefault()
-    if (selectedIndex.value < 0) selectIndex(0, { keyboard: true })
-    isPinned.value = true
-    return emitSelection()
-  } else if (event.key === 'Escape') {
-    event.preventDefault()
-    return clearSelection()
-  } else return
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', 'Escape'].includes(event.key)) return
   event.preventDefault()
-  selectIndex(index, { keyboard: true, notify: true })
+  applyInteraction({ type: 'key', key: event.key })
 }
-const emitRow = (item, activation) => emit('select-point', buildLineChartSelectionPayload({ seriesId: item.seriesId, point: item.point, activation }))
+const emitRow = (item, activation) => applyInteraction({ type: 'rowSelect', item, activation })
 
-watch(pointCount, (count) => {
-  if (count === 0) clearSelection()
-  else if (selectedIndex.value >= count) selectedIndex.value = count - 1
-})
+watch(pointCount, () => applyInteraction({ type: 'pointCountChanged' }))
 onClickOutside(root, clearSelection)
 </script>

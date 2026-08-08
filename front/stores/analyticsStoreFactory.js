@@ -568,8 +568,10 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const cashUseState = computed(() => ({
       ...categoryState,
-      isUnavailable: cashUseSeries.value.audit.status === 'unavailable',
+      isUnavailable: !['ok', 'partial'].includes(cashUseSeries.value.audit.status),
+      auditStatus: cashUseSeries.value.audit.status,
       unavailableTransactionIds: [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort(),
+      projectedUnavailability: cashUseSeries.value.audit.unavailable.flatMap(({ monthKey, projected }) => (projected ? [{ monthKey, ...projected }] : [])),
     }))
 
     async function loadTransactions(startDate, endDate) {

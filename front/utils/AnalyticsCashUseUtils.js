@@ -64,6 +64,77 @@ export function buildCombinationAreaGeometry({ points = [], xValues = [], xAt, y
   return paths
 }
 
+const clearedInteraction = () => ({ selectedIndex: -1, isPinned: false, isKeyboardSelection: false, isDragging: false, pointerStartedOnPinnedIndex: -1, effect: null })
+const interactionIndex = (index, pointCount) => (pointCount > 0 ? Math.min(pointCount - 1, Math.max(0, index)) : -1)
+
+export function reduceCombinationChartInteraction(state, event) {
+  const current = { ...clearedInteraction(), ...state, effect: null }
+  const pointCount = Number(event?.pointCount) || 0
+  const rawIndex = Number(event?.index)
+  const index = Number.isInteger(rawIndex) && rawIndex >= 0 ? interactionIndex(rawIndex, pointCount) : -1
+  if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return clearedInteraction()
+  if (event?.type === 'pointCountChanged') {
+    if (pointCount === 0) return clearedInteraction()
+    return current.selectedIndex >= pointCount ? { ...current, selectedIndex: pointCount - 1 } : current
+  }
+  if (event?.type === 'pointerMove') {
+    if (index < 0 || (current.isPinned && !current.isDragging)) return current
+    return { ...current, selectedIndex: index, isKeyboardSelection: false }
+  }
+  if (event?.type === 'pointerLeave') return !current.isPinned && !current.isDragging ? clearedInteraction() : current
+  if (event?.type === 'pointerDown') {
+    if (index < 0) return current
+    return {
+      ...current,
+      selectedIndex: index,
+      isPinned: false,
+      isKeyboardSelection: false,
+      isDragging: true,
+      pointerStartedOnPinnedIndex: current.isPinned && current.selectedIndex === index ? index : -1,
+    }
+  }
+  if (event?.type === 'pointerUp') {
+    if (!current.isDragging) return current
+    const selectedIndex = index < 0 ? current.selectedIndex : index
+    if (current.pointerStartedOnPinnedIndex === selectedIndex) return clearedInteraction()
+    return { ...current, selectedIndex, isPinned: selectedIndex >= 0, isDragging: false, pointerStartedOnPinnedIndex: -1, effect: selectedIndex >= 0 ? { type: 'select' } : null }
+  }
+  if (event?.type === 'key') {
+    if (event.key === 'Escape') return clearedInteraction()
+    if (pointCount === 0) return current
+    if (event.key === 'Enter') {
+      const selectedIndex = current.selectedIndex < 0 ? 0 : current.selectedIndex
+      return { ...current, selectedIndex, isPinned: true, isKeyboardSelection: true, effect: { type: 'select' } }
+    }
+    let selectedIndex = current.selectedIndex
+    if (event.key === 'ArrowLeft') selectedIndex--
+    else if (event.key === 'ArrowRight') selectedIndex++
+    else if (event.key === 'Home') selectedIndex = 0
+    else if (event.key === 'End') selectedIndex = pointCount - 1
+    else return current
+    if (current.selectedIndex < 0 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) selectedIndex = 0
+    return { ...current, selectedIndex: interactionIndex(selectedIndex, pointCount), isKeyboardSelection: true, effect: { type: 'select' } }
+  }
+  if (event?.type === 'rowSelect') return { ...current, effect: { type: 'selectRow', item: event.item, activation: event.activation } }
+  return current
+}
+
+export function propagateCashUseReconciliation({ totals, gap, reconciliation }) {
+  const statusByMonth = new Map(reconciliation.map((item) => [item.monthKey, item]))
+  const blocked = (x) => ['unavailable', 'mismatch'].includes(statusByMonth.get(x)?.status)
+  const nextTotals = {
+    ...totals,
+    points: totals.points.map((point) => (blocked(point.x) ? { ...point, uses: null, sources: null, gap: null, status: 'unavailable', delta: statusByMonth.get(point.x)?.delta ?? null } : point)),
+  }
+  const nextGap = {
+    ...gap,
+    points: gap.points.map((point) => (blocked(point.x) ? { ...point, value: null, bottom: null, top: null, direction: 'unavailable', status: 'unavailable' } : point)),
+  }
+  const statuses = reconciliation.map(({ status }) => status)
+  const auditStatus = statuses.includes('mismatch') ? 'mismatch' : statuses.includes('unavailable') ? 'unavailable' : statuses.includes('partial') ? 'partial' : 'ok'
+  return { totals: nextTotals, gap: nextGap, auditStatus }
+}
+
 const emptyBucket = () => ({ value: 0, transactionIds: [], unavailableTransactionIds: [] })
 const emptyMonth = () => ({
   categories: new Map(),
@@ -311,6 +382,57 @@ const projectedSavingsSource = (projection) => ({
   sources: projection.value < 0 ? projection.sources : [],
 })
 
+const uniqueProjectedSources = (sources) => {
+  const seen = new Set()
+  return sources.filter((source) => {
+    const id = projectedIdOf(source)
+    if (!id || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+const aggregateForecastStatus = (points) => {
+  const statuses = points.map(({ status }) => status).filter(Boolean)
+  if (statuses.includes('unavailable')) return 'unavailable'
+  if (statuses.includes('insufficientHistory')) return 'insufficientHistory'
+  if (statuses.includes('partial')) return 'partial'
+  return 'ready'
+}
+
+const aggregateForecastProgress = ({ actualValue, projectedValue, value, status }) => {
+  if (status === 'unavailable' || status === 'insufficientHistory') return { progress: null, progressState: status }
+  if (![actualValue, projectedValue, value].every(Number.isFinite)) return { progress: null, progressState: status === 'partial' ? 'partial' : 'unavailable' }
+  if (actualValue === 0 && projectedValue === 0) return { progress: null, progressState: 'noExpectedActivity' }
+  if ((actualValue < 0 && value > 0) || (actualValue > 0 && value < 0) || (actualValue !== 0 && value === 0)) return { progress: null, progressState: 'oppositeDirection' }
+  return { progress: value === 0 ? null : round(Math.min(1, Math.abs(actualValue / value))), progressState: 'ready' }
+}
+
+const aggregateSummaryPoint = ({ x, kind, components }) => {
+  const points = components.map(({ point }) => point).filter(Boolean)
+  const status = kind === 'forecast' ? aggregateForecastStatus(points) : 'ok'
+  const totalFor = (key) => {
+    if (components.some(({ point }) => !Number.isFinite(point?.[key]))) return null
+    return round(components.reduce((total, { point, factor = 1 }) => total + point[key] * factor, 0))
+  }
+  const actualValue = totalFor('actualValue')
+  const projectedValue = totalFor('projectedValue')
+  const value = totalFor('value')
+  const transactionIds = unique(points.flatMap((point) => point.transactionIds ?? []))
+  const projectedSources = uniqueProjectedSources(points.flatMap((point) => point.projectedSources ?? []))
+  const metricIds = unique(points.flatMap((point) => point.metricIds ?? []))
+  return {
+    x,
+    kind,
+    value,
+    actualValue,
+    projectedValue,
+    transactionIds,
+    projectedSources,
+    ...(kind === 'forecast' ? { status, ...aggregateForecastProgress({ actualValue, projectedValue, value, status }), metricIds } : {}),
+  }
+}
+
 export function buildCashUseSeries({ ledger, remainingActivity = {}, months = [], mode, savingsView, categoryIds = [], detailLevel = 5 }) {
   const selectedMode = normalizedMode(mode)
   const selectedSavingsView = normalizedSavingsView(savingsView)
@@ -493,15 +615,56 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
   cumulative(useLayers, monthKeys)
   cumulative(projectedSourceBands, monthKeys, (x) => pointForX(ordinaryIncome.points, x)?.value ?? null)
 
-  const totals = {
+  const expenseSummaryPoints = monthKeys.map((x) => {
+    const isForecast = x === forecastX
+    const key = isForecast ? currentMonthKey : x
+    return buildLayerPoint({
+      x,
+      kind: isForecast ? 'forecast' : 'actual',
+      actual: aggregateCategories(actual.get(key), ranking),
+      projected: isForecast
+        ? projectedWithStatus(
+            projectedFor(future, () => true, 'expenses'),
+            ['expenses'],
+          )
+        : undefined,
+    })
+  })
+  const nonExpenseUseLayers = useLayers.filter(({ kind }) => !['expenseCategory', 'otherExpense'].includes(kind))
+  const totalUses = {
+    id: 'total-uses',
+    kind: 'totalUses',
+    labelKey: 'analytics.cash_use.total_uses',
+    points: monthKeys.map((x) =>
+      aggregateSummaryPoint({
+        x,
+        kind: x === forecastX ? 'forecast' : 'actual',
+        components: [{ point: pointForX(expenseSummaryPoints, x) }, ...nonExpenseUseLayers.map((layer) => ({ point: pointForX(layer.points, x) }))],
+      }),
+    ),
+  }
+  const totalSources = {
+    id: 'total-sources',
+    kind: 'totalSources',
+    labelKey: 'analytics.cash_use.total_sources',
+    pattern: 'boundary-line',
+    points: monthKeys.map((x) =>
+      aggregateSummaryPoint({
+        x,
+        kind: x === forecastX ? 'forecast' : 'actual',
+        components: [{ point: pointForX(ordinaryIncome.points, x) }, ...projectedSourceBands.map((layer) => ({ point: pointForX(layer.points, x) }))],
+      }),
+    ),
+  }
+  let totals = {
     id: 'totals',
     points: monthKeys.map((x) => {
-      const usePoints = useLayers.map((layer) => pointForX(layer.points, x))
-      const sourcePoints = [pointForX(ordinaryIncome.points, x), ...projectedSourceBands.map((layer) => pointForX(layer.points, x))]
-      const unavailable = [...usePoints, ...sourcePoints].some((point) => !Number.isFinite(point?.value))
-      const partial = [...usePoints, ...sourcePoints].some((point) => point?.status === 'partial')
-      const uses = unavailable ? null : round(usePoints.reduce((total, point) => total + point.value, 0))
-      const sources = unavailable ? null : round(sourcePoints.reduce((total, point) => total + point.value, 0))
+      const usePoint = pointForX(totalUses.points, x)
+      const sourcePoint = pointForX(totalSources.points, x)
+      const unavailable = !Number.isFinite(usePoint?.value) || !Number.isFinite(sourcePoint?.value)
+      const partial = [usePoint, sourcePoint].some((point) => point?.status === 'partial')
+      const uses = unavailable ? null : usePoint.value
+      const sources = unavailable ? null : sourcePoint.value
       return {
         x,
         kind: x === forecastX ? 'forecast' : 'actual',
@@ -514,13 +677,21 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
     }),
   }
 
-  const gap = {
+  let gap = {
     id: 'gap',
     kind: 'gap',
     points: monthKeys.map((x) => {
       const total = pointForX(totals.points, x)
-      const usePoints = useLayers.map((layer) => pointForX(layer.points, x))
-      const sourcePoints = [pointForX(ordinaryIncome.points, x), ...projectedSourceBands.map((layer) => pointForX(layer.points, x))]
+      const usePoint = pointForX(totalUses.points, x)
+      const sourcePoint = pointForX(totalSources.points, x)
+      const summary = aggregateSummaryPoint({
+        x,
+        kind: total.kind,
+        components: [
+          { point: sourcePoint, factor: 1 },
+          { point: usePoint, factor: -1 },
+        ],
+      })
       const direction = total.gap === null ? 'unavailable' : total.gap >= 0 ? 'positive' : 'negative'
       const labelKey =
         selectedMode === 'spending' ? 'analytics.cash_use.after_spending' : direction === 'negative' ? 'analytics.cash_use.existing_available_funds_required' : 'analytics.cash_use.new_excess'
@@ -533,8 +704,18 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
         direction,
         labelKey,
         pattern: direction === 'negative' ? 'gap-negative' : direction === 'positive' ? 'gap-positive' : 'unavailable',
-        transactionIds: unique([...usePoints, ...sourcePoints].flatMap((point) => point.transactionIds)),
-        projectedSources: [...usePoints, ...sourcePoints].flatMap((point) => point.projectedSources),
+        transactionIds: unique([...(usePoint?.transactionIds ?? []), ...(sourcePoint?.transactionIds ?? [])]),
+        projectedSources: uniqueProjectedSources([...(usePoint?.projectedSources ?? []), ...(sourcePoint?.projectedSources ?? [])]),
+        ...(total.kind === 'forecast'
+          ? {
+              actualValue: summary.actualValue,
+              projectedValue: summary.projectedValue,
+              progress: summary.progress,
+              progressState: summary.progressState,
+              status: Number.isFinite(summary.value) ? summary.status : 'unavailable',
+              metricIds: summary.metricIds,
+            }
+          : {}),
       }
     }),
   }
@@ -558,8 +739,10 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
           }, 0),
         )
       : null
-    const useLayerTotal = point.uses
-    const sourceComponentTotal = point.sources
+    const usePoints = useLayers.map((layer) => pointForX(layer.points, point.x))
+    const sourcePoints = [pointForX(ordinaryIncome.points, point.x), ...projectedSourceBands.map((layer) => pointForX(layer.points, point.x))]
+    const useLayerTotal = usePoints.every((item) => Number.isFinite(item?.value)) ? round(usePoints.reduce((total, item) => total + item.value, 0)) : null
+    const sourceComponentTotal = sourcePoints.every((item) => Number.isFinite(item?.value)) ? round(sourcePoints.reduce((total, item) => total + item.value, 0)) : null
     const gapPoint = pointForX(gap.points, point.x)
     const available = [grossExpense, categoryTotal, point.uses, useLayerTotal, point.sources, sourceComponentTotal, point.gap, gapPoint?.value].every(Number.isFinite)
     const categoryDelta = available ? round(categoryTotal - grossExpense) : null
@@ -584,6 +767,9 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
       delta,
     }
   })
+  const propagated = propagateCashUseReconciliation({ totals, gap, reconciliation })
+  totals = propagated.totals
+  gap = propagated.gap
   const unavailable = completedMonthKeys.flatMap((monthKey) => {
     const ids = unique([
       ...[...(actual.get(monthKey)?.categories.values() ?? [])].flatMap((bucket) => bucket.unavailableTransactionIds),
@@ -613,12 +799,42 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
           ]
         : []),
     ])
-    const forecastPoints = [...useLayers, ordinaryIncome, ...projectedSourceBands].map(({ points }) => pointForX(points, forecastX))
-    const projectedMetricIds = unique(forecastPoints.flatMap((point) => (!Number.isFinite(point?.value) ? (point?.metricIds ?? []) : [])))
-    unavailable.push({ monthKey: forecastX, transactionIds, projectedMetricIds })
+    const forecastPoints = [
+      pointForX(expenseSummaryPoints, forecastX),
+      ...nonExpenseUseLayers.map(({ points }) => pointForX(points, forecastX)),
+      pointForX(ordinaryIncome.points, forecastX),
+      ...projectedSourceBands.map(({ points }) => pointForX(points, forecastX)),
+    ]
+    const blockedForecastPoints = forecastPoints.filter((point) => !Number.isFinite(point?.value))
+    const metricIds = unique(blockedForecastPoints.flatMap((point) => point?.metricIds ?? []))
+    const projectedSources = blockedForecastPoints.flatMap((point) => point?.projectedSources ?? [])
+    const unresolvedCandidates = authoritativeRemainingActivity?.audit?.recurring?.unresolvedCandidates ?? []
+    const unavailableCandidateIds = authoritativeRemainingActivity?.audit?.unavailable?.candidateIds ?? []
+    const relevantUnresolvedCandidates = unresolvedCandidates.filter(({ affectedMetricIds = [] }) => affectedMetricIds.some((metricId) => metricIds.includes(metricId)))
+    const unresolvedCandidateIds = new Set(unresolvedCandidates.map(({ candidateId }) => String(candidateId)))
+    const orphanCandidateIds = unavailableCandidateIds.filter((candidateId) => !unresolvedCandidateIds.has(String(candidateId)))
+    unavailable.push({
+      monthKey: forecastX,
+      transactionIds,
+      projected: {
+        metricIds,
+        sourceIds: unique([...projectedSources.map(({ sourceId }) => sourceId), ...relevantUnresolvedCandidates.map(({ sourceId }) => sourceId)]),
+        candidateIds: unique([...projectedSources.map(({ candidateId }) => candidateId), ...relevantUnresolvedCandidates.map(({ candidateId }) => candidateId), ...orphanCandidateIds]),
+        evidenceIds: unique(projectedSources.flatMap(({ evidenceIds }) => evidenceIds ?? [])),
+        statuses: metricIds.map((metricId) => ({ metricId, status: authoritativeRemainingActivity.statusByMetric?.[metricId] ?? 'unavailable' })),
+      },
+    })
   }
 
-  const hasPartialForecast = forecastX && [...useLayers, ordinaryIncome, ...projectedSourceBands].some(({ points }) => pointForX(points, forecastX)?.status === 'partial')
+  const hasPartialForecast = forecastX && [totalUses, totalSources].some(({ points }) => pointForX(points, forecastX)?.status === 'partial')
+  const auditStatus =
+    propagated.auditStatus === 'mismatch'
+      ? 'mismatch'
+      : unavailable.length || propagated.auditStatus === 'unavailable'
+        ? 'unavailable'
+        : hasPartialForecast || propagated.auditStatus === 'partial'
+          ? 'partial'
+          : 'ok'
 
   return {
     mode: selectedMode,
@@ -632,18 +848,13 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
     visibleCategoryIds,
     hiddenCategoryIds,
     useLayers,
+    totalUses,
     ordinaryIncome,
     sourceBands: projectedSourceBands,
-    totalSources: {
-      id: 'total-sources',
-      kind: 'totalSources',
-      labelKey: 'analytics.cash_use.total_sources',
-      pattern: 'boundary-line',
-      points: totals.points.map((point) => ({ x: point.x, kind: point.kind, value: point.sources })),
-    },
+    totalSources,
     totals,
     gap,
-    audit: { status: unavailable.length ? 'unavailable' : hasPartialForecast ? 'partial' : 'ok', unavailable, reconciliation },
+    audit: { status: auditStatus, unavailable, reconciliation },
   }
 }
 
