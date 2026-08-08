@@ -820,6 +820,37 @@ test('uses the configured weekday after a shifted first weekly or biweekly occur
   }
 })
 
+test('uses the configured weekday for shifted unbounded weekly and biweekly windows', () => {
+  const recurrence = ({ includeCount, skip }) => ({
+    id: `${skip === 1 ? 'biweekly' : 'weekly'}-${includeCount ? 'null' : 'missing'}`,
+    attributes: {
+      active: true,
+      type: 'withdrawal',
+      first_date: '2026-01-06',
+      ...(includeCount ? { nr_of_repetitions: null } : {}),
+      repetitions: [{ type: 'weekly', moment: '1', skip }],
+      transactions: [{ amount: '100', description: 'Unbounded shifted weekday', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+    },
+  })
+  const cases = [
+    { skip: 0, endDate: '2026-01-31', full: ['2026-01-06', '2026-01-12', '2026-01-19', '2026-01-26'], afterFirst: ['2026-01-12', '2026-01-19', '2026-01-26'] },
+    { skip: 1, endDate: '2026-02-02', full: ['2026-01-06', '2026-01-19', '2026-02-02'], afterFirst: ['2026-01-19', '2026-02-02'] },
+  ]
+
+  for (const includeCount of [true, false]) {
+    for (const { skip, endDate, full, afterFirst } of cases) {
+      const item = recurrence({ includeCount, skip })
+      const completeWindow = buildDefinedOccurrences({ recurringTransactions: [item], startDate: '2026-01-01', endDate })
+      const laterWindow = buildDefinedOccurrences({ recurringTransactions: [item], startDate: '2026-01-10', endDate })
+      assert.equal(completeWindow.length, 1)
+      assert.equal(laterWindow.length, 1)
+      assert.deepEqual(completeWindow[0].expectedDates, full)
+      assert.deepEqual(laterWindow[0].expectedDates, afterFirst)
+      assert.deepEqual(laterWindow[0].bounds, { start: '2026-01-06', end: null })
+    }
+  }
+})
+
 test('augments an accepted primary with one exact observed external-endpoint variant when cadence and amount align', () => {
   const primary = entriesForDates(['2026-01-05', '2026-02-05', '2026-03-05', '2026-04-05'], {
     value: 100,

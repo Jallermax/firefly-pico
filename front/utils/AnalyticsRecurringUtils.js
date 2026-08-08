@@ -448,6 +448,25 @@ const datesFromDefinition = ({ attributes, repetition = null, sourceType }) => {
   return unique(values.map(dateKey)).sort()
 }
 
+const weeklyCadenceSequence = ({ cadence, count = null, throughDate = null }) => {
+  const first = dateParts(cadence?.anchorDate)
+  const intervalDays = Number(cadence?.intervalWeeks) * 7
+  const configuredWeekday = Number(cadence?.weekday)
+  if (!first || !Number.isInteger(intervalDays) || intervalDays < 7 || !Number.isInteger(configuredWeekday) || configuredWeekday < 1 || configuredWeekday > 7) return []
+  if (count !== null && (!Number.isInteger(count) || count < 1)) return []
+  const through = dateKey(throughDate)
+  if (count === null && !through) return []
+
+  const dates = [first.key]
+  const firstWeekday = first.date.getDay() || 7
+  let cursor = addDays(first.date, intervalDays + configuredWeekday - firstWeekday)
+  while (count === null ? formatDate(cursor) <= through : dates.length < count) {
+    dates.push(formatDate(cursor))
+    cursor = addDays(cursor, intervalDays)
+  }
+  return dates
+}
+
 const datesForCadence = ({ cadence, startDate, endDate }) => {
   if (!cadence) return []
   const start = dateParts(startDate)
@@ -460,14 +479,7 @@ const datesForCadence = ({ cadence, startDate, endDate }) => {
       for (const day of cadence.days ?? []) dates.push(`${year}-${String(month).padStart(2, '0')}-${String(Math.min(day, daysInMonth(year, month))).padStart(2, '0')}`)
       for (const offset of cadence.fromMonthEnd ?? []) dates.push(`${year}-${String(month).padStart(2, '0')}-${String(daysInMonth(year, month) - offset).padStart(2, '0')}`)
     }
-  } else if (['weekly', 'biweekly'].includes(cadence.type) && cadence.anchorDate) {
-    let cursor = dateParts(cadence.anchorDate).date
-    while (formatDate(cursor) < start.key) cursor = addDays(cursor, cadence.intervalWeeks * 7)
-    while (formatDate(cursor) <= end.key) {
-      dates.push(formatDate(cursor))
-      cursor = addDays(cursor, cadence.intervalWeeks * 7)
-    }
-  }
+  } else if (['weekly', 'biweekly'].includes(cadence.type)) dates.push(...weeklyCadenceSequence({ cadence, throughDate: end.key }))
   return unique(dates.filter((date) => date >= start.key && date <= end.key)).sort()
 }
 
@@ -485,14 +497,7 @@ const expectedAmount = ({ value, min = value, max = value }) => {
 const cadenceDatesAfter = ({ cadence, start, count }) => {
   if (!cadence || !start || !Number.isInteger(count) || count < 1) return []
   const startParts = dateParts(start)
-  if (['weekly', 'biweekly'].includes(cadence.type)) {
-    const intervalDays = cadence.intervalWeeks * 7
-    const configuredWeekday = Number(cadence.weekday)
-    if (!Number.isInteger(intervalDays) || intervalDays < 7 || !Number.isInteger(configuredWeekday) || configuredWeekday < 1 || configuredWeekday > 7) return []
-    const startWeekday = startParts.date.getDay() || 7
-    const firstContinuation = addDays(startParts.date, intervalDays + configuredWeekday - startWeekday)
-    return Array.from({ length: count }, (_, index) => formatDate(addDays(firstContinuation, intervalDays * index)))
-  }
+  if (['weekly', 'biweekly'].includes(cadence.type)) return weeklyCadenceSequence({ cadence: { ...cadence, anchorDate: start }, count: count + 1 }).slice(1)
   let horizon
   if (['monthly', 'twiceMonthly'].includes(cadence.type)) {
     const occurrencesPerMonth = (cadence.days?.length ?? 0) + (cadence.fromMonthEnd?.length ?? 0)
