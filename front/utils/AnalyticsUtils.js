@@ -685,13 +685,13 @@ export function buildGrossCategoryLedger({ ledger, coverage = null }) {
         : accountKind
   }
   const isExpense = (entry) => kindFor(entry, 'destination') === 'expense' && ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(kindFor(entry, 'source'))
-  const isRefund = (entry) =>
-    kindFor(entry, 'source') === 'expense' && (entry?.refund?.isRefund || ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(kindFor(entry, 'destination')))
+  const isRefund = (entry) => kindFor(entry, 'source') === 'expense' && (entry?.refund?.isRefund === true || (entry?.refund?.coverageMonthKey && entry?.refund?.coverageCategoryId))
 
   for (const entry of ledger?.entries ?? []) {
-    const key = entry?.monthKey
+    const key = isRefund(entry) ? (entry.refund?.coverageMonthKey ?? entry?.monthKey) : entry?.monthKey
     const day = Number(entry?.day)
     if (!key || !Number.isInteger(day) || day < 1 || day > 31) continue
+    if (!isExpense(entry) && !isRefund(entry)) continue
     const categoryId = String((isRefund(entry) ? entry.refund?.coverageCategoryId : entry.categoryId) ?? ANALYTICS_UNCATEGORIZED_ID)
     const month = (months[key] ??= { categories: {} })
     const category = (month.categories[categoryId] ??= {

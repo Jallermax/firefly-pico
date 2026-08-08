@@ -287,6 +287,14 @@ test('balance and category card projections route actual forecast IDs for pointe
   })
 })
 
+test('balance and category consumers wire the real route constant and transaction ID filter into their decisions', () => {
+  for (const file of ['../../components/analytics/analytics-balance-trends.vue', '../../components/analytics/analytics-category-spending.vue']) {
+    const component = readFileSync(new URL(file, import.meta.url), 'utf8')
+    assert.match(component, /route:\s*RouteConstants\.ROUTE_TRANSACTION_LIST/)
+    assert.match(component, /toUrl:\s*TransactionFilterUtils\.filters\.id\.toUrl/)
+  }
+})
+
 test('financial trend omits unavailable expenses while retaining selected account metrics', () => {
   const series = buildFinancialTrendChartSeries({
     view: 'changes',

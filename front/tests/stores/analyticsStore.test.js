@@ -667,6 +667,50 @@ test('combines included and excluded savings without refetching when the view ch
   assert.equal(snapshotRequests.filter(({ input }) => input === 'accounts').length, requestCount)
 })
 
+test('split savings trends retain Task 8 actual evidence and final metadata', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsSavingsView', 'split')
+  const store = (analyticsStore = useAnalyticsStore())
+  await store.init()
+  for (const id of ['savingsIncluded', 'savingsExcluded']) {
+    const series = store.financialTrend.series.find((item) => item.id === id)
+    assert.deepEqual(series.actualTransactionIds, series.changePoints.find((point) => point.kind === 'partial')?.transactionIds ?? [])
+    assert.equal(series.actualTransactionCount, series.actualTransactionIds.length)
+    assert.equal(Number.isFinite(series.actualToDate), true)
+    assert.equal(Number.isFinite(series.final), true)
+    assert.equal(Number.isFinite(series.remainingFromToday), true)
+    assert.equal(typeof series.progressState, 'string')
+    assert.equal(typeof series.status, 'string')
+    assert.equal(Array.isArray(series.projectedSources), true)
+  }
+})
+
+test('ignores unavailable gross expenses outside the selected financial trend window', async () => {
+  const old = new Date()
+  old.setMonth(old.getMonth() - 18)
+  transactionResult = [
+    {
+      id: 'old-unavailable',
+      attributes: {
+        transactions: [
+          {
+            amount: '10',
+            currency_code: 'JPY',
+            date: old,
+            source_id: 'checking',
+            destination_id: 'expense',
+            accountSource: { attributes: { type: { fireflyCode: 'asset' } } },
+            accountDestination: { attributes: { type: { fireflyCode: 'expense' } } },
+          },
+        ],
+      },
+    },
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+  await store.init()
+  assert.deepEqual(store.financialTrend.globalGrossExpenseUnavailableTransactionIds, [])
+})
+
 test('withholds public combined savings when a non-empty group contains convertible and missing-rate data', async () => {
   now = new Date('2026-08-10T12:00:00')
   const included = includedSaving()

@@ -466,7 +466,15 @@ export function createAnalyticsStore(id, useDependencies) {
       const series = trend.series.map((item) => {
         const remainingFromToday = remainingFor(item.id)
         const flowKey = { netWorth: 'netWorthChange', debt: 'debtChange', savings: 'savingsChange' }[item.id]
-        const status = flowKey ? forecast.statusByMetric[flowKey] : forecast.status
+        const splitSavings = ['savingsIncluded', 'savingsExcluded'].includes(item.id)
+        const projection = projectMetricForecast({
+          metric: flowKey ?? 'savingsChange',
+          actual: flowKey ? forecast.actualToDate[flowKey] : item.currentChange,
+          historicalAverage: item.averageChange,
+          remainingActivity: remainingFromToday,
+          currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
+        })
+        const status = flowKey ? forecast.statusByMetric[flowKey] : projection.status
         const forecastAvailable = status !== 'unavailable' && Number.isFinite(remainingFromToday) && Number.isFinite(item.currentTotal)
         return {
           ...item,
@@ -474,12 +482,13 @@ export function createAnalyticsStore(id, useDependencies) {
           forecastChange: forecastAvailable && Number.isFinite(item.currentChange) ? item.currentChange + remainingFromToday : null,
           forecastTotal: forecastAvailable ? item.currentTotal + remainingFromToday : null,
           remainingFromToday: forecastAvailable ? remainingFromToday : null,
-          actualToDate: flowKey ? forecast.actualToDate[flowKey] : item.currentChange,
-          final: flowKey ? forecast.final[flowKey] : null,
-          progress: flowKey ? forecast.progress[flowKey] : null,
-          progressState: flowKey ? forecast.progressState[flowKey] : 'notApplicable',
+          actualToDate: projection.actualToDate,
+          final: splitSavings ? projection.final : forecast.final[flowKey],
+          progress: projection.progress,
+          progressState: projection.progressState,
           status,
           actualTransactionIds: flowKey ? forecast.actualTransactionIds[flowKey] : (item.changePoints.find((point) => point.kind === 'partial')?.transactionIds ?? []),
+          actualTransactionCount: flowKey ? forecast.actualTransactionIds[flowKey].length : (item.changePoints.find((point) => point.kind === 'partial')?.transactionIds ?? []).length,
           projectedSources: forecast.dailyProjectedEntries.filter((entry) => {
             if (flowKey) return entry.flowAmounts?.[flowKey] !== 0
             const savingsKind = item.id === 'savingsIncluded' ? 'savingsAccessible' : 'savingsRestricted'
@@ -487,7 +496,7 @@ export function createAnalyticsStore(id, useDependencies) {
           }),
         }
       })
-      const globalGrossExpenseUnavailableTransactionIds = categoryLedger.value.unclassified.transactionIds
+      const globalGrossExpenseUnavailableTransactionIds = [...new Set(trend.monthKeys.flatMap((key) => categoryLedger.value.unclassifiedByMonth[key] ?? []))]
       const expenseBase = globalGrossExpenseUnavailableTransactionIds.length
         ? null
         : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() })

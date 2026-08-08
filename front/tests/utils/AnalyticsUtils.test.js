@@ -62,6 +62,30 @@ test('gross category ledger preserves usable gross spending when refund conversi
   assert.deepEqual(result.unavailableRefundTransactionIds, ['refund-unavailable'])
 })
 
+test('attributes only explicit linked or tagged refunds to their coverage month', () => {
+  const result = buildGrossCategoryLedger({
+    coverage: { startMonth: '2026-07' },
+    ledger: {
+      entries: [
+        { transactionId: 'ordinary-deposit', monthKey: '2026-08', day: 2, sourceKind: 'expense', destinationKind: 'available', categoryId: 'food', value: 20 },
+        {
+          transactionId: 'linked-refund',
+          monthKey: '2026-08',
+          day: 3,
+          sourceKind: 'expense',
+          destinationKind: 'available',
+          value: 15,
+          refund: { coverageMonthKey: '2026-07', coverageCategoryId: 'food' },
+        },
+      ],
+      fx: { isEstimated: false, missingCurrencies: [] },
+    },
+  })
+  assert.equal(result.months['2026-08']?.categories?.food, undefined)
+  assert.equal(result.months['2026-07'].categories.food.refundedAmount, 15)
+  assert.deepEqual(result.months['2026-07'].categories.food.refundTransactionIds, ['linked-refund'])
+})
+
 const account = ({ id, type = 'asset', role = 'defaultAsset', direction = null, active = true, includeNetWorth = true }) => ({
   id,
   attributes: {
