@@ -173,6 +173,30 @@ test('financial forecast crosshair keeps exact values and dashed segments for ev
   )
 })
 
+test('inspection-only actual anchors a dashed forecast segment without becoming a plotted point', () => {
+  const geometry = buildLineChartGeometry({
+    width: 100,
+    height: 60,
+    padding: { top: 10, right: 10, bottom: 10, left: 10 },
+    series: [
+      {
+        id: 'expenses',
+        points: [
+          { x: '2026-08', value: 20, kind: 'partial', inspectionOnly: true },
+          { x: '2026-08:forecast', value: 30, kind: 'forecast' },
+        ],
+      },
+    ],
+  })
+
+  assert.equal(geometry.series[0].segments.length, 1)
+  assert.equal(geometry.series[0].segments[0].dashed, true)
+  assert.deepEqual(
+    ChartUtils.persistentLineChartPoints(geometry.series[0].points).map(({ key }) => key),
+    ['2026-08:forecast'],
+  )
+})
+
 test('financial trend omits unavailable expenses while retaining selected account metrics', () => {
   const series = buildFinancialTrendChartSeries({
     view: 'changes',

@@ -3,8 +3,9 @@ import { defineStore } from 'pinia'
 import { addMonths, format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import DateUtils from '../utils/DateUtils.js'
 import {
-  buildCategoryLedger,
+  buildGrossCategoryLedger,
   buildMonthlyMoneyFlow,
+  convertAnalyticsAmount,
   getAnalyticsAccountKind,
   limitMoneyFlowGraphDetail,
   rankCategoryIds,
@@ -12,6 +13,8 @@ import {
   summarizeCategoryWindow,
   summarizeTotalExpenseWindow,
 } from '../utils/AnalyticsUtils.js'
+import { buildRemainingActivityForecast } from '../utils/AnalyticsForecastUtils.js'
+import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../utils/AnalyticsRecurringUtils.js'
 
 const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt']
 const RECONSTRUCTED_METRICS = ['netWorth', 'savings', 'savingsIncluded', 'savingsExcluded', 'debt', 'expenses']
@@ -153,61 +156,24 @@ export function createAnalyticsStore(id, useDependencies) {
         rates: rates.value,
       }),
     )
-    const legacyTransactions = computed(() => {
-      const grouped = new Map()
-      ledger.value.entries
-        .filter(({ value }) => Number.isFinite(value))
-        .forEach((entry) => {
-          const transaction = grouped.get(entry.transactionId) ?? { id: entry.transactionId, attributes: { transactions: [] } }
-          transaction.attributes.transactions.push({
-            amount: entry.value,
-            currency_code: displayCurrencyCode.value,
-            date: parseISO(entry.date),
-            category_id: entry.categoryId,
-            tags: entry.tags,
-            accountSource: entry.sourceAccount,
-            accountDestination: entry.destinationAccount,
-          })
-          grouped.set(entry.transactionId, transaction)
-        })
-      return [...grouped.values()]
-    })
-    const legacyUnavailableEntries = computed(() => ledger.value.entries.filter(({ value, conversion }) => !Number.isFinite(value) && !conversion.missingCurrency))
+    const categoryLedger = computed(() => buildGrossCategoryLedger({ ledger: ledger.value, coverage: rawSnapshot.value.transactionCoverage }))
     const categoryWindowMonthKeys = computed(() => {
       const currentMonth = startOfMonth(getNow())
       return new Set([format(currentMonth, 'yyyy-MM'), ...Array.from({ length: Number(categoryAverageMonths.value) }, (_, index) => format(subMonths(currentMonth, index + 1), 'yyyy-MM'))])
     })
-    const categoryUnavailableTransactionIds = computed(() =>
-      [
-        ...new Set(
-          legacyUnavailableEntries.value
-            .filter(({ monthKey, sourceAccount, destinationAccount }) => {
-              if (!categoryWindowMonthKeys.value.has(monthKey)) return false
-              const sourceKind = getAnalyticsAccountKind(sourceAccount)
-              const destinationKind = getAnalyticsAccountKind(destinationAccount)
-              return sourceKind === 'expense' || destinationKind === 'expense'
-            })
-            .map(({ transactionId }) => transactionId)
-            .filter(Boolean),
-        ),
-      ].sort(),
+    const categoryWindowUnclassifiedIds = computed(() =>
+      [...categoryWindowMonthKeys.value]
+        .flatMap((key) => categoryLedger.value.unclassifiedByMonth?.[key] ?? [])
+        .filter(Boolean)
+        .sort(),
     )
-    const categoryLedger = computed(() => {
-      const projection = buildCategoryLedger({
-        transactions: legacyTransactions.value,
-        displayCurrencyCode: displayCurrencyCode.value,
-        primaryCurrencyCode: displayCurrencyCode.value,
-        rates: { [displayCurrencyCode.value]: 1 },
-      })
-      const unclassifiedTransactionIds = [...new Set([...projection.unclassified.transactionIds, ...categoryUnavailableTransactionIds.value])].sort()
-      return {
-        ...projection,
-        isEstimated: ledger.value.fx.isEstimated,
-        missingCurrencies: ledger.value.fx.missingCurrencies,
-        unclassified: { value: unclassifiedTransactionIds.length ? null : projection.unclassified.value, transactionIds: unclassifiedTransactionIds },
-      }
-    })
-    const categoryBlockingTransactionIds = computed(() => categoryLedger.value.unclassified?.transactionIds ?? [])
+    const categoryBlockingTransactionIds = computed(() =>
+      [...categoryWindowMonthKeys.value]
+        .flatMap((key) => normalizedSelectedCategoryIds.value.flatMap((categoryId) => categoryLedger.value.unclassifiedByMonthCategory?.[key]?.[categoryId] ?? []))
+        .filter(Boolean)
+        .sort(),
+    )
+    const categoryUnclassified = computed(() => ({ value: categoryBlockingTransactionIds.value.length ? null : 0, transactionIds: categoryBlockingTransactionIds.value }))
     const categoryRanking = computed(() =>
       rankCategoryIds({
         ledger: categoryLedger.value,
@@ -222,7 +188,7 @@ export function createAnalyticsStore(id, useDependencies) {
         .filter((id) => !rankedIds.has(id))
         .sort((left, right) => currentCategories[right].amount - currentCategories[left].amount || left.localeCompare(right))
     })
-    const categorySummary = computed(() => {
+    const categorySummaryBase = computed(() => {
       const summary = summarizeCategoryWindow({
         ledger: categoryLedger.value,
         categoryIds: normalizedSelectedCategoryIds.value,
@@ -234,7 +200,114 @@ export function createAnalyticsStore(id, useDependencies) {
         ...(categoryBlockingTransactionIds.value.length ? { series: [] } : {}),
         isEstimated: categoryLedger.value.isEstimated,
         missingCurrencies: categoryLedger.value.missingCurrencies,
-        unclassified: categoryLedger.value.unclassified,
+        unclassified: categoryUnclassified.value,
+      }
+    })
+    const forecastStartDate = computed(() => `${rawSnapshot.value.transactionCoverage?.startMonth ?? format(startOfMonth(subMonths(getNow(), 24)), 'yyyy-MM')}-01`)
+    const forecastEndDate = computed(() => format(new Date(getNow().getFullYear(), getNow().getMonth() + 1, 0), 'yyyy-MM-dd'))
+    const forecastCandidates = computed(() =>
+      mergeRecurringCandidates({
+        defined: buildDefinedOccurrences({
+          recurringTransactions: recurringTransactions.value,
+          subscriptions: subscriptions.value,
+          startDate: forecastStartDate.value,
+          endDate: forecastEndDate.value,
+        }),
+        inferred: detectRecurringCandidates({ entries: ledger.value.entries, startDate: forecastStartDate.value, endDate: DateUtils.dateToString(getNow()) }).candidates,
+      }),
+    )
+    const forecastAccountContexts = computed(() =>
+      Object.fromEntries(
+        accounts.value.map((account) => {
+          const kind = getAnalyticsAccountKind(account)
+          return [
+            account.id,
+            {
+              kind: kind === 'savings' ? (account?.attributes?.include_net_worth === true ? 'savingsAccessible' : 'savingsRestricted') : kind.startsWith('liability') ? 'liability' : kind,
+              includeNetWorth: account?.attributes?.include_net_worth === true,
+            },
+          ]
+        }),
+      ),
+    )
+    const forecastCandidateAmounts = computed(() => {
+      const definitionFor = (candidate) => {
+        const collection = candidate.source.type === 'subscription' ? subscriptions.value : recurringTransactions.value
+        return collection.find((item) => String(item?.id) === String(candidate.source.id))?.attributes ?? {}
+      }
+      return Object.fromEntries(
+        forecastCandidates.value.map((candidate) => {
+          if (!candidate.source.authoritative)
+            return [
+              candidate.id,
+              { value: candidate.expectedAmount?.value, conversion: { mode: 'exact', sourceCurrency: displayCurrencyCode.value, displayCurrency: displayCurrencyCode.value, isEstimated: false } },
+            ]
+          const attributes = definitionFor(candidate)
+          const transaction = attributes.transactions?.[0] ?? {}
+          const amount = transaction.primary_amount ?? transaction.amount ?? attributes.pc_amount_avg ?? attributes.amount_avg ?? candidate.expectedAmount?.value
+          const currencyCode =
+            transaction.primary_amount !== null && transaction.primary_amount !== undefined
+              ? (transaction.primary_currency_code ?? primaryCurrencyCode.value)
+              : (transaction.currency_code ?? attributes.pc_currency_code ?? attributes.currency_code)
+          const converted = convertAnalyticsAmount({ amount, currencyCode, displayCurrencyCode: displayCurrencyCode.value, primaryCurrencyCode: primaryCurrencyCode.value, rates: rates.value })
+          const sourceAmount = Number(amount)
+          const mode = converted.missingCurrency || !Number.isFinite(converted.value) ? 'unavailable' : currencyCode === displayCurrencyCode.value ? 'exact' : 'rate'
+          return [
+            candidate.id,
+            {
+              value: converted.value,
+              conversion: {
+                mode,
+                sourceCurrency: currencyCode ?? null,
+                displayCurrency: displayCurrencyCode.value,
+                isEstimated: converted.isEstimated,
+                ...(mode === 'rate' && sourceAmount !== 0 ? { rate: converted.value / sourceAmount } : {}),
+                ...(converted.missingCurrency ? { missingCurrency: converted.missingCurrency } : {}),
+              },
+            },
+          ]
+        }),
+      )
+    })
+    const buildForecast = (historyMonths) =>
+      buildRemainingActivityForecast({
+        ledger: ledger.value,
+        candidates: forecastCandidates.value,
+        candidateAmounts: forecastCandidateAmounts.value,
+        accountContexts: forecastAccountContexts.value,
+        fetchCoverage: rawSnapshot.value.transactionCoverage,
+        currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
+        historyMonths: Number(historyMonths),
+        today: getNow(),
+        endDate: forecastEndDate.value,
+      })
+    const categoryForecast = computed(() => buildForecast(categoryAverageMonths.value))
+    const categorySummary = computed(() => {
+      const forecast = categoryForecast.value
+      const available = forecast.statusByMetric.expenses !== 'unavailable' && Number.isFinite(forecast.final.expenses)
+      const projectedByCategory = new Map()
+      for (const entry of forecast.dailyProjectedEntries) {
+        if (!Number.isFinite(entry.flowAmounts?.expenses) || !entry.categoryId) continue
+        projectedByCategory.set(entry.categoryId, (projectedByCategory.get(entry.categoryId) ?? 0) + entry.flowAmounts.expenses)
+      }
+      return {
+        ...categorySummaryBase.value,
+        series: categorySummaryBase.value.series.map((series) => {
+          const remainingFromToday = available ? (projectedByCategory.get(series.id) ?? 0) : null
+          const currentForecast = Number.isFinite(remainingFromToday) ? Math.max(series.currentActual, series.currentActual + remainingFromToday) : null
+          return {
+            ...series,
+            currentForecast,
+            remainingFromToday,
+            forecastAvailable: available,
+            final: currentForecast,
+            actualToDate: series.currentActual,
+            progress: currentForecast > 0 ? series.currentActual / currentForecast : null,
+            progressState: forecast.progressState.expenses,
+            status: forecast.statusByMetric.expenses,
+            projectedSources: forecast.dailyProjectedEntries.filter((entry) => entry.categoryId === series.id && Number.isFinite(entry.flowAmounts?.expenses)),
+          }
+        }),
       }
     })
     const categoryRankingItems = computed(() => {
@@ -368,10 +441,55 @@ export function createAnalyticsStore(id, useDependencies) {
       if (!usesCurrentRates && missingCurrencies.length === 0) return null
       return { displayCurrencyCode: displayCurrencyCode.value, usesCurrentRates, missingCurrencies, metricIds: affected }
     })
-    const financialTrend = computed(() => ({
-      ...summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() }),
-      expenses: categoryUnavailableTransactionIds.value.length ? null : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() }),
-    }))
+    const financialForecast = computed(() => buildForecast(balancePeriod.value))
+    const financialTrend = computed(() => {
+      const forecast = financialForecast.value
+      const remainingFor = (metric) => {
+        const flowKey = { netWorth: 'netWorthChange', debt: 'debtChange', savings: 'savingsChange' }[metric]
+        if (flowKey) return forecast.remainingFromToday[flowKey]
+        const savingsKind = metric === 'savingsIncluded' ? 'savingsAccessible' : metric === 'savingsExcluded' ? 'savingsRestricted' : null
+        if (!savingsKind) return null
+        return forecast.dailyProjectedEntries.reduce((total, entry) => total + (entry.destinationKind === savingsKind ? entry.amount : 0) - (entry.sourceKind === savingsKind ? entry.amount : 0), 0)
+      }
+      const trend = summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() })
+      const series = trend.series.map((item) => {
+        const remainingFromToday = remainingFor(item.id)
+        const flowKey = { netWorth: 'netWorthChange', debt: 'debtChange', savings: 'savingsChange' }[item.id]
+        const status = flowKey ? forecast.statusByMetric[flowKey] : forecast.status
+        const forecastAvailable = status !== 'unavailable' && Number.isFinite(remainingFromToday) && Number.isFinite(item.currentTotal)
+        return {
+          ...item,
+          forecastAvailable,
+          forecastChange: forecastAvailable && Number.isFinite(item.currentChange) ? item.currentChange + remainingFromToday : null,
+          forecastTotal: forecastAvailable ? item.currentTotal + remainingFromToday : null,
+          remainingFromToday: forecastAvailable ? remainingFromToday : null,
+          actualToDate: flowKey ? forecast.actualToDate[flowKey] : item.currentChange,
+          final: flowKey ? forecast.final[flowKey] : null,
+          progress: flowKey ? forecast.progress[flowKey] : null,
+          progressState: flowKey ? forecast.progressState[flowKey] : 'notApplicable',
+          status,
+        }
+      })
+      const expenseBase = categoryWindowUnclassifiedIds.value.length ? null : summarizeTotalExpenseWindow({ ledger: categoryLedger.value, averageMonths: Number(balancePeriod.value), today: getNow() })
+      const expensesAvailable = forecast.statusByMetric.expenses !== 'unavailable' && Number.isFinite(forecast.final.expenses)
+      const expenses = !expenseBase
+        ? null
+        : {
+            ...expenseBase,
+            currentActual: expenseBase.currentActual,
+            currentForecast: forecast.final.expenses,
+            remainingFromToday: forecast.remainingFromToday.expenses,
+            forecastAvailable: expensesAvailable,
+            final: forecast.final.expenses,
+            actualToDate: forecast.actualToDate.expenses,
+            progress: forecast.progress.expenses,
+            progressState: forecast.progressState.expenses,
+            status: forecast.statusByMetric.expenses,
+            actualTransactionIds: forecast.actualTransactionIds.expenses,
+            projectedSources: forecast.dailyProjectedEntries.filter((entry) => Number.isFinite(entry.flowAmounts?.expenses)),
+          }
+      return { ...trend, series, expenses, forecast }
+    })
 
     async function loadTransactions(startDate, endDate) {
       const query = [`date_after:${startDate}`, `date_before:${endDate}`, ...getExcludedTransactionFilters()]

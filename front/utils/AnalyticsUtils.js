@@ -665,6 +665,71 @@ export function buildCategoryLedger({ transactions, displayCurrencyCode, primary
   }
 }
 
+export function buildGrossCategoryLedger({ ledger, coverage = null }) {
+  const months = {}
+  const unavailableTransactionIds = new Set()
+  const unavailableByMonth = {}
+  const unavailableByMonthCategory = {}
+  const missingCurrencies = new Set()
+  const kindFor = (entry, side) => {
+    const kind = entry?.[`${side}Kind`]
+    if (kind && kind !== 'unknown') return kind
+    const accountKind = getAnalyticsAccountKind(entry?.[`${side}Account`])
+    return accountKind === 'savings'
+      ? entry?.[`${side}Account`]?.attributes?.include_net_worth === true
+        ? 'savingsAccessible'
+        : 'savingsRestricted'
+      : accountKind.startsWith('liability')
+        ? 'liability'
+        : accountKind
+  }
+  const isExpense = (entry) => kindFor(entry, 'destination') === 'expense' && ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(kindFor(entry, 'source'))
+  const isRefund = (entry) =>
+    kindFor(entry, 'source') === 'expense' && (entry?.refund?.isRefund || ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(kindFor(entry, 'destination')))
+
+  for (const entry of ledger?.entries ?? []) {
+    const key = entry?.monthKey
+    const day = Number(entry?.day)
+    if (!key || !Number.isInteger(day) || day < 1 || day > 31) continue
+    const categoryId = String((isRefund(entry) ? entry.refund?.coverageCategoryId : entry.categoryId) ?? ANALYTICS_UNCATEGORIZED_ID)
+    const month = (months[key] ??= { categories: {} })
+    const category = (month.categories[categoryId] ??= { amount: 0, byDay: {}, transactionIds: [], transactionIdsByDay: {}, refundedAmount: 0, refundTransactionIds: [] })
+    if (!Number.isFinite(entry.value)) {
+      if (isExpense(entry) || isRefund(entry)) {
+        unavailableTransactionIds.add(entry.transactionId)
+        unavailableByMonth[key] = unique([...(unavailableByMonth[key] ?? []), entry.transactionId])
+        unavailableByMonthCategory[key] ??= {}
+        unavailableByMonthCategory[key][categoryId] = unique([...(unavailableByMonthCategory[key][categoryId] ?? []), entry.transactionId])
+      }
+      if (entry.conversion?.missingCurrency) missingCurrencies.add(entry.conversion.missingCurrency)
+      continue
+    }
+    if (isExpense(entry)) {
+      const amount = Math.abs(entry.value)
+      category.amount += amount
+      category.byDay[day] = (category.byDay[day] ?? 0) + amount
+      if (entry.transactionId) {
+        category.transactionIds = unique([...category.transactionIds, entry.transactionId])
+        category.transactionIdsByDay[day] = unique([...(category.transactionIdsByDay[day] ?? []), entry.transactionId])
+      }
+    }
+    if (isRefund(entry)) {
+      category.refundedAmount += Math.abs(entry.value)
+      if (entry.transactionId) category.refundTransactionIds = unique([...category.refundTransactionIds, entry.transactionId])
+    }
+  }
+
+  return {
+    months,
+    ledgerStartMonth: coverage?.startMonth ?? ledger?.coverage?.startMonth ?? null,
+    isEstimated: ledger?.fx?.isEstimated === true,
+    missingCurrencies: unique([...missingCurrencies, ...(ledger?.fx?.missingCurrencies ?? [])]),
+    unclassified: { value: unavailableTransactionIds.size ? null : 0, transactionIds: [...unavailableTransactionIds].filter(Boolean).sort() },
+    unclassifiedByMonth: Object.fromEntries(Object.entries(unavailableByMonth).map(([key, ids]) => [key, [...ids].filter(Boolean).sort()])),
+    unclassifiedByMonthCategory: unavailableByMonthCategory,
+  }
+}
+
 const monthKey = (date) => format(date, 'yyyy-MM')
 
 const completedMonthKeys = ({ today, averageMonths, ledgerStartMonth }) => {
@@ -816,7 +881,9 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
           ...metric,
           points: [
             ...expenses.actualPoints,
-            { x: currentMonthKey, value: expenses.currentActual, kind: 'partial' },
+            ...(Number.isFinite(expenses.currentActual)
+              ? [{ x: currentMonthKey, value: expenses.currentActual, kind: 'partial', inspectionOnly: true, transactionIds: expenses.currentTransactionIds ?? [] }]
+              : []),
             ...(expenses.forecastAvailable && Number.isFinite(expenses.currentForecast) ? [{ x: currentMonthKey + ':forecast', value: expenses.currentForecast, kind: 'forecast' }] : []),
           ],
         },
@@ -831,7 +898,7 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
       {
         ...metric,
         points: [
-          ...(isBalances ? series.totalPoints : series.changePoints),
+          ...(isBalances ? series.totalPoints : series.changePoints.map((point) => (point.kind === 'partial' ? { ...point, inspectionOnly: true } : point))),
           ...(series.forecastAvailable && Number.isFinite(forecastValue) ? [{ x: currentMonthKey + ':forecast', value: forecastValue, kind: 'forecast' }] : []),
         ],
       },
@@ -846,11 +913,13 @@ export function formatFinancialTrendForecastValue({ forecastAvailable, value, fo
 export function rankCategoryIds({ ledger, averageMonths, today }) {
   const monthKeys = completedMonthKeys({ today, averageMonths, ledgerStartMonth: ledger.ledgerStartMonth })
   const categoryIds = unique(monthKeys.flatMap((key) => Object.keys(ledger.months?.[key]?.categories ?? {})))
-  return categoryIds.sort((left, right) => {
-    const leftTotal = monthKeys.reduce((total, key) => total + categoryForMonth(ledger, key, left).amount, 0)
-    const rightTotal = monthKeys.reduce((total, key) => total + categoryForMonth(ledger, key, right).amount, 0)
-    return rightTotal - leftTotal || left.localeCompare(right)
-  })
+  return categoryIds
+    .filter((id) => monthKeys.some((key) => categoryForMonth(ledger, key, id).amount > 0))
+    .sort((left, right) => {
+      const leftTotal = monthKeys.reduce((total, key) => total + categoryForMonth(ledger, key, left).amount, 0)
+      const rightTotal = monthKeys.reduce((total, key) => total + categoryForMonth(ledger, key, right).amount, 0)
+      return rightTotal - leftTotal || left.localeCompare(right)
+    })
 }
 
 const entriesForLine = ({ line, primaryCurrencyCode }) => {

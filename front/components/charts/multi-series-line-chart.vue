@@ -311,7 +311,16 @@ const onKeydown = (event) => {
   selectIndex(index, { keyboard: true, notify: true })
 }
 
-const emitPoint = (item) => emit('select-point', { seriesId: item.seriesId, point: item.point })
+const emitPoint = (item) => {
+  const transactionIds = [...new Set((item.point.transactionIds ?? []).filter(Boolean))]
+  emit('select-point', {
+    seriesId: item.seriesId,
+    pointId: String(item.point.pointId ?? item.point.key ?? item.point.x),
+    transactionIds,
+    point: item.point,
+    metadata: item.point,
+  })
+}
 
 watch(pointCount, (count) => {
   if (count === 0) clearSelection()

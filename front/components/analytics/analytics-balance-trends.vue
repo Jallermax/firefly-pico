@@ -50,7 +50,7 @@
         <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
       </div>
 
-      <multi-series-line-chart v-if="chartSeries.length" :series="chartSeries" :value-formatter="formatNumberForDashboard" :aria-label="chartAriaLabel" />
+      <multi-series-line-chart v-if="chartSeries.length" :series="chartSeries" :value-formatter="formatNumberForDashboard" :aria-label="chartAriaLabel" @select-point="onSelectPoint" />
       <div v-else-if="selectedSourcesSettled && !hasUnavailableExpenses" class="analytics-card-state">{{ $t('analytics.balance.empty') }}</div>
 
       <div v-if="summaries.length" class="analytics-metric-summary-grid">
@@ -87,11 +87,13 @@
 
 <script setup>
 import { format, parseISO } from 'date-fns'
+import RouteConstants from '~/constants/RouteConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { buildFinancialTrendChartSeries, formatFinancialTrendForecastValue } from '~/utils/AnalyticsUtils.js'
 import { decorateLineChartPoint, projectSelectedBalanceWarnings, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
+import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
 const analyticsStore = useAnalyticsStore()
 const profileStore = useProfileStore()
@@ -159,13 +161,12 @@ const formatCurrency = (value) => (Number.isFinite(value) ? `${formatNumberForDa
 const formatSignedCurrency = (value) => (Number.isFinite(value) ? `${value > 0 ? '+' : ''}${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
 const formatMonthKey = (value) => new Intl.DateTimeFormat(profileStore.language, { month: 'short', year: 'numeric' }).format(parseISO(value.slice(0, 7) + '-01'))
 const currentMonthKey = computed(() => format(new Date(), 'yyyy-MM'))
-const toChartPoint = (point, isEstimated, remainingFromToday) =>
+const toChartPoint = (point, remainingFromToday) =>
   decorateLineChartPoint(point, {
     xLabel: point.xLabel ?? formatMonthKey(point.x),
     valueLabel: formatCurrency(point.value),
     secondaryLabel: point.kind === 'forecast' && Number.isFinite(remainingFromToday) ? t('analytics.common.from_today') : undefined,
     secondaryValueLabel: point.kind === 'forecast' && Number.isFinite(remainingFromToday) ? formatSignedCurrency(remainingFromToday) : undefined,
-    isEstimated,
   })
 
 const chartSeries = computed(() =>
@@ -179,11 +180,10 @@ const chartSeries = computed(() =>
   })
     .filter((series) => (series.id === 'expenses' ? hasExpenseResult.value && !hasUnavailableExpenses.value : hasBalanceResult.value))
     .map((series) => {
-      const isSeriesEstimated = series.id === 'expenses' ? analyticsStore.categorySummary.isEstimated : analyticsStore.balanceSeries.find((item) => item.id === series.id)?.isEstimated
       const source = series.id === 'expenses' ? analyticsStore.financialTrend.expenses : analyticsStore.financialTrend.series.find((item) => item.id === series.id)
       return {
         ...series,
-        points: series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, point.isEstimated || isSeriesEstimated, source?.remainingFromToday)),
+        points: series.points.filter((point) => Number.isFinite(point.value)).map((point) => toChartPoint(point, source?.remainingFromToday)),
       }
     })
     .filter((series) => series.points.length),
@@ -253,6 +253,10 @@ const expenseSummary = computed(() => {
 })
 const summaries = computed(() => [...accountSummaries.value, ...(expenseSummary.value ? [expenseSummary.value] : [])])
 const isSplitSavingsMetric = (id) => ['savingsIncluded', 'savingsExcluded'].includes(id)
+const onSelectPoint = async ({ transactionIds }) => {
+  if (!transactionIds?.length) return
+  await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + TransactionFilterUtils.filters.id.toUrl(transactionIds))
+}
 
 const validationWarnings = computed(() => projectSelectedBalanceWarnings({ warnings: analyticsStore.balanceWarnings, selectedMetrics: selectedAccountMetrics.value }))
 const warningMetricFormatter = computed(() => new Intl.ListFormat(profileStore.language, { style: 'long', type: 'conjunction' }))

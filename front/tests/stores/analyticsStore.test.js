@@ -786,6 +786,9 @@ test('derives financial trends from the shared ledger and reconstructed balances
   )
   assert.equal(store.financialTrend.expenses.currentActual, 10)
   assert.equal(store.financialTrend.expenses.currentForecast, expectedForecast)
+  assert.equal(store.financialTrend.forecast?.actualToDate?.expenses, 10)
+  assert.equal(store.financialTrend.forecast?.final?.expenses, expectedForecast)
+  assert.deepEqual(store.financialTrend.forecast?.actualTransactionIds?.expenses, ['current'])
 })
 
 test('withholds partial category and expense calculations while retaining balance metrics', async () => {
@@ -880,11 +883,11 @@ test('blocks category summaries only for relevant unavailable spending inside th
 
   await store.init()
 
-  assert.deepEqual(store.categorySummary.unclassified, { value: null, transactionIds: ['invalid-july-refund', 'invalid-june-expense'] })
+  assert.deepEqual(store.categorySummary.unclassified, { value: null, transactionIds: ['invalid-june-expense'] })
   assert.deepEqual(store.categorySummary.series, [])
 })
 
-test('exposes ranked category items with completed-window net totals', async () => {
+test('exposes ranked category items with completed-window gross spending totals', async () => {
   const checking = { attributes: { type: { fireflyCode: 'asset' } } }
   const expense = { attributes: { type: { fireflyCode: 'expense' } } }
   const split = (amount, date, categoryId, source = checking, destination = expense) => ({
@@ -910,7 +913,7 @@ test('exposes ranked category items with completed-window net totals', async () 
   assert.deepEqual(store.categoryRanking, ['rent', 'food'])
   assert.deepEqual(store.categoryRankingItems, [
     { id: 'rent', amount: 100 },
-    { id: 'food', amount: 70 },
+    { id: 'food', amount: 90 },
   ])
 })
 
@@ -983,7 +986,7 @@ test('shares one in-flight transaction request between non-forced initial loads'
   await Promise.all([firstLoad, secondLoad])
 })
 
-test('selects a current-only category and retains its actual with insufficient history', async () => {
+test('selects a current-only category and retains covered zero months in its history', async () => {
   transactionResult = [currentExpenseTransaction(42, 'new-category')]
   const store = (analyticsStore = useAnalyticsStore())
 
@@ -992,9 +995,9 @@ test('selects a current-only category and retains its actual with insufficient h
   assert.deepEqual(store.categoryRanking, [])
   assert.deepEqual(store.categoryRankingItems, [{ id: 'new-category', amount: 0 }])
   assert.deepEqual(store.selectedCategoryIds, ['new-category'])
-  assert.equal(store.categorySummary.usedMonths, 0)
+  assert.equal(store.categorySummary.usedMonths, 6)
   assert.equal(store.categorySummary.series[0].currentActual, 42)
-  assert.equal(store.categorySummary.series[0].forecastAvailable, false)
+  assert.equal(store.categorySummary.series[0].forecastAvailable, true)
 })
 
 test('keeps an unavailable persisted category visible as a zero-amount candidate', async () => {

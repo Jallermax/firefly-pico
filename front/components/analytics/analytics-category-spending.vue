@@ -137,7 +137,6 @@ const toChartPoint = (point, kind, remainingFromToday) =>
     formatNumber: formatNumberForDashboard,
     secondaryLabel: kind === 'forecast' ? t('analytics.common.from_today') : undefined,
     secondaryValueLabel: kind === 'forecast' && Number.isFinite(remainingFromToday) ? formatSignedCurrency(remainingFromToday) : undefined,
-    isEstimated: analyticsStore.categorySummary.isEstimated,
   })
 
 const chartSeries = computed(() =>
@@ -147,7 +146,6 @@ const chartSeries = computed(() =>
     color: CATEGORY_COLORS[index],
     points: [
       ...category.actualPoints.map((point) => toChartPoint(point, 'actual')),
-      toChartPoint({ x: currentMonthKey.value, value: category.currentActual, transactionIds: category.currentTransactionIds }, 'actual'),
       ...(category.forecastAvailable
         ? [
             toChartPoint(
@@ -155,7 +153,12 @@ const chartSeries = computed(() =>
                 x: currentMonthKey.value + ':forecast',
                 xLabel: currentMonthLabel.value,
                 value: category.currentForecast,
-                transactionIds: [],
+                transactionIds: category.currentTransactionIds,
+                actualToDate: category.actualToDate,
+                final: category.final,
+                progress: category.progress,
+                progressState: category.progressState,
+                projectedSources: category.projectedSources,
                 currentActual: category.currentActual,
                 average: category.average,
                 averageHistoricalRemainder: category.averageHistoricalRemainder,
@@ -231,14 +234,14 @@ const facetItems = computed(() => {
 })
 const hasRetainedData = computed(() => analyticsStore.categoryState.isStale && chartSeries.value.length > 0)
 
-const onSelectPoint = async ({ point }) => {
-  if (point.kind === 'forecast') {
+const onSelectPoint = async ({ point, transactionIds }) => {
+  if (point.kind === 'forecast' && !transactionIds?.length) {
     selectedForecastPoint.value = point
     forecastDetailsVisible.value = true
     return
   }
-  if (!point.transactionIds?.length) return
-  const ids = [...new Set(point.transactionIds)].join(',')
+  if (!transactionIds?.length) return
+  const ids = [...new Set(transactionIds)].join(',')
   const query = TransactionFilterUtils.filters.id.toUrl(ids)
   await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + query)
 }

@@ -53,9 +53,8 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
     const marker = item.marker ?? SERIES_MARKERS[seriesIndex % SERIES_MARKERS.length]
     const points = item.points.map((point) => ({ ...point, x: xAt(point.x), y: Number.isFinite(point.value) ? yAt(point.value) : null, key: point.x, marker }))
     const segments = points.flatMap((point, index) => {
-      const previous =
-        point.kind === 'forecast' ? points.slice(0, index).findLast((candidate) => candidate.y !== null && !candidate.inspectionOnly && candidate.kind !== 'forecast') : points[index - 1]
-      if (!previous || previous.y === null || point.y === null || previous.inspectionOnly || point.inspectionOnly) return []
+      const previous = point.kind === 'forecast' ? points.slice(0, index).findLast((candidate) => candidate.y !== null && candidate.kind !== 'forecast') : points[index - 1]
+      if (!previous || previous.y === null || point.y === null || point.inspectionOnly || (point.kind !== 'forecast' && previous.inspectionOnly)) return []
       if (point.kind !== 'forecast' && xValues.indexOf(point.key) - xValues.indexOf(previous.key) !== 1) return []
       return [{ path: 'M ' + previous.x + ' ' + previous.y + ' L ' + point.x + ' ' + point.y, dashed: point.kind === 'forecast' }]
     })

@@ -637,7 +637,7 @@ test('does not carry account totals before the first source point or forecast on
   assert.equal(result.series[2].currentTotal, 25)
 })
 
-test('builds localized balance and change chart series with real account forecast points', () => {
+test('builds balance today separately while change and expense charts contain completed months plus a forecast', () => {
   assert.equal(typeof AnalyticsUtils.buildFinancialTrendChartSeries, 'function')
   const metrics = [
     { id: 'netWorth', label: 'Localized net worth' },
@@ -683,7 +683,7 @@ test('builds localized balance and change chart series with real account forecas
       label: 'Localized net worth',
       points: [
         { x: '2026-07', value: 10, kind: 'actual' },
-        { x: '2026-08', value: 0, kind: 'partial' },
+        { x: '2026-08', value: 0, kind: 'partial', inspectionOnly: true },
         { x: '2026-08:forecast', value: 10, kind: 'forecast' },
       ],
     },
@@ -692,7 +692,7 @@ test('builds localized balance and change chart series with real account forecas
       label: 'Localized expenses',
       points: [
         { x: '2026-07', value: 30, kind: 'actual' },
-        { x: '2026-08', value: 10, kind: 'partial' },
+        { x: '2026-08', value: 10, kind: 'partial', inspectionOnly: true, transactionIds: [] },
         { x: '2026-08:forecast', value: 40, kind: 'forecast' },
       ],
     },
