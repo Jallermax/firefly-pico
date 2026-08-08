@@ -642,3 +642,151 @@ test('merge and occurrence matching are deterministic for shuffled candidates an
       .every((occurrence) => !('transactionId' in occurrence)),
   )
 })
+
+test('pairs compatible monthly repetitions while preserving other authoritative streams', () => {
+  const recurringTransactions = [
+    {
+      id: 'salary-and-weekly',
+      attributes: {
+        active: true,
+        type: 'deposit',
+        first_date: '2026-01-05',
+        repetitions: [
+          { type: 'weekly', moment: '1', occurrences: ['2026-08-03', '2026-08-10'] },
+          { type: 'monthly', moment: '31', occurrences: ['2026-08-31', '2026-09-30'] },
+          { type: 'monthly', moment: '15', occurrences: ['2026-08-14', '2026-09-15'] },
+        ],
+        transactions: [{ amount: '3000', description: 'Payroll', source_id: 'employer', destination_id: 'checking', category_id: 'salary' }],
+      },
+    },
+  ]
+
+  const defined = buildDefinedOccurrences({ recurringTransactions, startDate: '2026-08-01', endDate: '2026-09-30' })
+
+  assert.equal(defined.length, 2)
+  assert.deepEqual(defined.map(({ cadence }) => cadence.type).sort(), ['twiceMonthly', 'weekly'])
+  const twiceMonthly = defined.find(({ cadence }) => cadence.type === 'twiceMonthly')
+  assert.deepEqual(twiceMonthly.cadence, { type: 'twiceMonthly', days: [15], fromMonthEnd: [0] })
+  assert.deepEqual(twiceMonthly.expectedDates, ['2026-08-14', '2026-08-31', '2026-09-15', '2026-09-30'])
+
+  const inferred = detectRecurringCandidates({
+    entries: entriesForDates(['2026-01-15', '2026-01-31', '2026-02-15', '2026-02-28', '2026-03-15', '2026-03-31', '2026-04-15', '2026-04-30'], {
+      direction: 'income',
+      value: 3000,
+      sourceId: 'employer',
+      categoryId: 'salary',
+      description: 'Payroll',
+      idPrefix: 'multi-stream-salary',
+    }),
+    startDate: '2026-01-01',
+    endDate: '2026-05-10',
+  }).candidates
+  const merged = mergeRecurringCandidates({ defined, inferred })
+  assert.equal(merged.length, 2)
+  assert.equal(merged.find(({ cadence }) => cadence.type === 'twiceMonthly').inference.id, inferred[0].id)
+})
+
+test('derives an inclusive end for finite recurrence counts and never regenerates an exhausted occurrence', () => {
+  const recurrence = {
+    id: 'three-months-only',
+    attributes: {
+      active: true,
+      type: 'withdrawal',
+      first_date: '2026-01-01',
+      nr_of_repetitions: 3,
+      repetitions: [{ type: 'monthly', moment: '1' }],
+      transactions: [{ amount: '100', description: 'Three months', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+    },
+  }
+
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence], startDate: '2026-08-01', endDate: '2026-08-31' }), [])
+  const activeWindow = buildDefinedOccurrences({ recurringTransactions: [recurrence], startDate: '2026-01-01', endDate: '2026-03-31' })
+  assert.equal(activeWindow.length, 1)
+  assert.deepEqual(activeWindow[0].expectedDates, ['2026-01-01', '2026-02-01', '2026-03-01'])
+  assert.deepEqual(activeWindow[0].bounds, { start: '2026-01-01', end: '2026-03-01' })
+  assert.deepEqual(matchRecurringOccurrences({ candidates: activeWindow, actualEntries: [], today: '2026-08-01' }).remaining, [])
+})
+
+test('falls back to the last authoritative occurrence when a finite recurrence end cannot be reconstructed', () => {
+  const recurrence = {
+    id: 'finite-without-first-date',
+    attributes: {
+      active: true,
+      type: 'withdrawal',
+      nr_of_repetitions: 3,
+      repetitions: [{ type: 'monthly', moment: '1', occurrences: ['2026-01-01', '2026-02-01', '2026-03-01'] }],
+      transactions: [{ amount: '100', description: 'Finite history', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+    },
+  }
+
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence], startDate: '2026-08-01', endDate: '2026-08-31' }), [])
+  const authoritativeWindow = buildDefinedOccurrences({ recurringTransactions: [recurrence], startDate: '2026-01-01', endDate: '2026-03-31' })
+  assert.equal(authoritativeWindow.length, 1)
+  assert.deepEqual(authoritativeWindow[0].bounds, { start: null, end: '2026-03-01' })
+})
+
+test('augments an accepted primary with one exact observed external-endpoint variant when cadence and amount align', () => {
+  const primary = entriesForDates(['2026-01-05', '2026-02-05', '2026-03-05', '2026-04-05'], {
+    value: 100,
+    destinationId: 'utility-primary',
+    categoryId: 'utilities',
+    description: 'Utility bill',
+    idPrefix: 'utility-primary',
+  })
+  const minority = entry({ id: 'utility-minority', date: '2026-05-05', value: 100, destinationId: 'utility-secondary', categoryId: 'utilities', description: 'Utility bill' })
+
+  const result = detectRecurringCandidates({ entries: [...primary, minority], startDate: '2026-01-01', endDate: '2026-06-10' })
+
+  assert.equal(result.candidates.length, 1)
+  const candidate = result.candidates[0]
+  assert.deepEqual(candidate.evidence.transactionIds, [...primary.map(({ transactionId }) => transactionId), 'utility-minority'].sort())
+  assert.deepEqual(
+    candidate.identityVariants.map(({ identity, count }) => ({ destinationAccountId: identity.destinationAccountId, count })),
+    [
+      { destinationAccountId: 'utility-primary', count: 4 },
+      { destinationAccountId: 'utility-secondary', count: 1 },
+    ],
+  )
+  assert.equal(candidate.confidence.factors.identityStability, 0.8)
+  assert.equal(
+    result.audit.rejected.some(({ identity }) => identity.destinationAccountId === 'utility-secondary'),
+    false,
+  )
+
+  const observed = entry({ id: 'utility-observed', date: '2026-06-05', value: 100, destinationId: 'utility-secondary', categoryId: 'utilities', description: 'Utility bill' })
+  const unseen = entry({ id: 'utility-unseen', date: '2026-06-05', value: 100, destinationId: 'utility-third', categoryId: 'utilities', description: 'Utility bill' })
+  assert.equal(matchRecurringOccurrences({ candidates: [candidate], actualEntries: [observed], today: '2026-06-05' }).fulfilled.length, 1)
+  assert.equal(matchRecurringOccurrences({ candidates: [candidate], actualEntries: [unseen], today: '2026-06-05' }).fulfilled.length, 0)
+})
+
+test('does not augment an external-endpoint variant whose phase and amount conflict with the primary', () => {
+  const primary = entriesForDates(['2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01'], {
+    value: 100,
+    destinationId: 'safe-primary',
+    categoryId: 'service',
+    description: 'Same payee',
+    idPrefix: 'safe-primary',
+  })
+  const conflicting = entry({ id: 'unsafe-minority', date: '2026-05-20', value: 500, destinationId: 'unsafe-secondary', categoryId: 'service', description: 'Same payee' })
+
+  const result = detectRecurringCandidates({ entries: [...primary, conflicting], startDate: '2026-01-01', endDate: '2026-06-10' })
+
+  assert.equal(result.candidates.length, 1)
+  assert.deepEqual(
+    result.candidates[0].evidence.transactionIds,
+    primary.map(({ transactionId }) => transactionId),
+  )
+  assert.ok(result.audit.rejected.some(({ identity }) => identity.destinationAccountId === 'unsafe-secondary'))
+})
+
+test('never collapses interleaved day-1 $100 and day-20 $500 same-payee histories into one candidate', () => {
+  const entries = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'].flatMap((month, index) => [
+    entry({ id: `phase-one-${index}`, date: `${month}-01`, value: 100, destinationId: 'shared-service', categoryId: 'service', description: 'Shared service' }),
+    entry({ id: `phase-twenty-${index}`, date: `${month}-20`, value: 500, destinationId: 'shared-service', categoryId: 'service', description: 'Shared service' }),
+  ])
+
+  const result = detectRecurringCandidates({ entries, startDate: '2026-01-01', endDate: '2026-06-10' })
+
+  assert.equal(result.candidates.length, 0)
+  assert.ok(result.audit.rejected.length > 0)
+})
