@@ -87,11 +87,10 @@
 
 <script setup>
 import { format, parseISO } from 'date-fns'
-import RouteConstants from '~/constants/RouteConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { buildFinancialTrendChartSeries, formatFinancialTrendForecastValue } from '~/utils/AnalyticsUtils.js'
-import { decorateLineChartPoint, hasFinancialExpenseSummary, projectSelectedBalanceWarnings, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
+import { decorateLineChartPoint, hasFinancialExpenseSummary, projectLineChartSelection, projectSelectedBalanceWarnings, resolveFinancialTrendSourceState } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
@@ -261,9 +260,10 @@ const expenseSummary = computed(() => {
 })
 const summaries = computed(() => [...accountSummaries.value, ...(expenseSummary.value ? [expenseSummary.value] : [])])
 const isSplitSavingsMetric = (id) => ['savingsIncluded', 'savingsExcluded'].includes(id)
-const onSelectPoint = async ({ transactionIds, canNavigate }) => {
-  if (!canNavigate) return
-  await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + TransactionFilterUtils.filters.id.toUrl(transactionIds))
+const onSelectPoint = async ({ activation, point, transactionIds }) => {
+  const selection = projectLineChartSelection({ activation, transactionIds, kind: point?.kind, toUrl: TransactionFilterUtils.filters.id.toUrl })
+  if (!selection.route) return
+  await navigateTo(selection.route)
 }
 
 const validationWarnings = computed(() => projectSelectedBalanceWarnings({ warnings: analyticsStore.balanceWarnings, selectedMetrics: selectedAccountMetrics.value }))

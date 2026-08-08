@@ -921,6 +921,47 @@ test('keeps a selected category usable while an unselected gross expense makes o
   assert.equal(store.financialTrend.globalGrossExpenseUnavailableTransactionIds.length > 0 && !store.financialTrend.expenses, true)
 })
 
+test('includes projected-only null-category expense in default selectable Uncategorized candidates', async () => {
+  storageOverrides.set('analyticsSelectedCategoryIds', [])
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'subscription',
+        attributes: {
+          active: true,
+          amount_avg: '12',
+          currency_code: 'USD',
+          next_expected_match: format(new Date(now.getFullYear(), now.getMonth() + 1, 0), 'yyyy-MM-dd'),
+          transactions: [{ source_id: 'checking', destination_id: 'expense', amount: '12', currency_code: 'USD' }],
+        },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(
+    store.categoryRankingItems.some(({ id }) => id === 'uncategorized'),
+    true,
+  )
+  assert.equal(store.selectedCategoryIds.includes('uncategorized'), true)
+})
+
+test('derives each category Task 8 progress state independently of the global expense state', async () => {
+  storageOverrides.set('analyticsSelectedCategoryIds', ['food'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const category = store.categorySummary.series.find(({ id }) => id === 'food')
+  assert.equal(category?.status, 'ready')
+  assert.equal(category?.progressState, 'noExpectedActivity')
+  assert.equal(category?.progress, null)
+  assert.equal(category?.average, 0)
+})
+
 test('exposes ranked category items with completed-window gross spending totals', async () => {
   const checking = { attributes: { type: { fireflyCode: 'asset' } } }
   const expense = { attributes: { type: { fireflyCode: 'expense' } } }

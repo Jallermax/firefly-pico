@@ -74,7 +74,14 @@
 
     <div v-if="selectedIndex >= 0" class="analytics-chart-tooltip" :class="{ right: tooltipOnRight, interactive: isPinned || isKeyboardSelection }">
       <div class="font-weight-600">{{ selectedXLabel }}</div>
-      <button v-for="item in selectedValues" :key="item.seriesId" type="button" class="analytics-chart-tooltip-row" :tabindex="isPinned || isKeyboardSelection ? 0 : -1" @click="emitPoint(item)">
+      <button
+        v-for="item in selectedValues"
+        :key="item.seriesId"
+        type="button"
+        class="analytics-chart-tooltip-row"
+        :tabindex="isPinned || isKeyboardSelection ? 0 : -1"
+        @click="emitPoint(item, $event.detail === 0 ? 'keyboard' : 'pointer')"
+      >
         <span class="analytics-chart-legend-marker" :class="'analytics-chart-legend-marker-' + item.marker" :style="{ backgroundColor: item.color }" />
         <span class="flex-1">{{ item.label }}</span>
         <span class="analytics-chart-tooltip-amount">{{ item.point.valueLabel }}</span>
@@ -312,7 +319,7 @@ const onKeydown = (event) => {
   selectIndex(index, { keyboard: true, notify: true })
 }
 
-const emitPoint = (item) => emit('select-point', buildLineChartSelectionPayload({ seriesId: item.seriesId, point: item.point }))
+const emitPoint = (item, activation) => emit('select-point', buildLineChartSelectionPayload({ seriesId: item.seriesId, point: item.point, activation }))
 
 watch(pointCount, (count) => {
   if (count === 0) clearSelection()

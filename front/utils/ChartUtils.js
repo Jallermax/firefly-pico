@@ -1,6 +1,11 @@
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 const SERIES_MARKERS = ['circle', 'square', 'diamond', 'triangle', 'cross', 'hollow']
 
+export const projectLineChartSelection = ({ activation, transactionIds = [], kind, toUrl = (ids) => 'id=' + encodeURIComponent(ids.join(',')) }) => {
+  const ids = [...new Set(transactionIds.filter(Boolean))]
+  return { activation, transactionIds: ids, route: ids.length ? '/transactions/list?' + toUrl(ids) : null, forecastOnly: kind === 'forecast' && ids.length === 0 }
+}
+
 export function nearestPointIndex({ clientX, left, width, pointCount }) {
   if (pointCount <= 0 || width <= 0) return -1
   const ratio = clamp((clientX - left) / width, 0, 1)
@@ -72,7 +77,7 @@ export function buildLineChartGeometry({ series, width, height, padding }) {
   return { xValues, yMin, yMax, series: outputSeries }
 }
 
-export function buildLineChartSelectionPayload({ seriesId, point }) {
+export function buildLineChartSelectionPayload({ seriesId, point, activation = 'pointer' }) {
   const transactionIds = [...new Set((point?.transactionIds ?? []).filter(Boolean))]
   return {
     seriesId,
@@ -80,6 +85,7 @@ export function buildLineChartSelectionPayload({ seriesId, point }) {
     transactionIds,
     point,
     metadata: point,
+    activation,
     canNavigate: transactionIds.length > 0,
     forecastOnly: point?.kind === 'forecast' && transactionIds.length === 0,
   }

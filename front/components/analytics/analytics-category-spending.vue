@@ -94,7 +94,6 @@
 <script setup>
 import { format, parseISO } from 'date-fns'
 import Category from '~/models/Category.js'
-import RouteConstants from '~/constants/RouteConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useAppStore } from '~/stores/appStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
@@ -102,6 +101,7 @@ import { useProfileStore } from '~/stores/profileStore.js'
 import { buildCategoryForecastDetailsPresentation, buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '~/utils/AnalyticsCategoryPresentationUtils.js'
 import { ANALYTICS_UNCATEGORIZED_ID } from '~/utils/AnalyticsUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
+import { projectLineChartSelection } from '~/utils/ChartUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
 const CATEGORY_COLORS = [
@@ -161,7 +161,6 @@ const chartSeries = computed(() =>
                 projectedSources: category.projectedSources,
                 currentActual: category.currentActual,
                 average: category.average,
-                averageHistoricalRemainder: category.averageHistoricalRemainder,
                 currentForecast: category.currentForecast,
                 remainingFromToday: category.remainingFromToday,
                 usedMonths: summary.value.usedMonths,
@@ -230,15 +229,14 @@ const facetItems = computed(() => {
 })
 const hasRetainedData = computed(() => analyticsStore.categoryState.isStale && chartSeries.value.length > 0)
 
-const onSelectPoint = async ({ point, transactionIds, forecastOnly, canNavigate }) => {
-  if (forecastOnly) {
+const onSelectPoint = async ({ activation, point, transactionIds }) => {
+  const selection = projectLineChartSelection({ activation, transactionIds, kind: point?.kind, toUrl: TransactionFilterUtils.filters.id.toUrl })
+  if (selection.forecastOnly) {
     selectedForecastPoint.value = point
     forecastDetailsVisible.value = true
     return
   }
-  if (!canNavigate) return
-  const ids = [...new Set(transactionIds)].join(',')
-  const query = TransactionFilterUtils.filters.id.toUrl(ids)
-  await navigateTo(RouteConstants.ROUTE_TRANSACTION_LIST + '?' + query)
+  if (!selection.route) return
+  await navigateTo(selection.route)
 }
 </script>

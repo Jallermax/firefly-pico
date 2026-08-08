@@ -14,7 +14,7 @@ import {
   summarizeCategoryWindow,
   summarizeTotalExpenseWindow,
 } from '../utils/AnalyticsUtils.js'
-import { buildRemainingActivityForecast } from '../utils/AnalyticsForecastUtils.js'
+import { buildRemainingActivityForecast, projectMetricForecast } from '../utils/AnalyticsForecastUtils.js'
 import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../utils/AnalyticsRecurringUtils.js'
 
 const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt']
@@ -277,6 +277,9 @@ export function createAnalyticsStore(id, useDependencies) {
         endDate: forecastEndDate.value,
       })
     const categoryForecast = computed(() => buildForecast(categoryAverageMonths.value))
+    const projectedCategoryIds = computed(() => [
+      ...new Set(categoryForecast.value.dailyProjectedEntries.filter((entry) => entry.flowAmounts?.expenses !== 0).map((entry) => entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID)),
+    ])
     const categorySummary = computed(() => {
       const forecast = categoryForecast.value
       const available = forecast.statusByMetric.expenses !== 'unavailable' && Number.isFinite(forecast.final.expenses)
@@ -290,7 +293,14 @@ export function createAnalyticsStore(id, useDependencies) {
         ...categorySummaryBase.value,
         series: categorySummaryBase.value.series.map((series) => {
           const remainingFromToday = available ? (projectedByCategory.get(series.id) ?? 0) : null
-          const currentForecast = Number.isFinite(remainingFromToday) ? Math.max(series.currentActual, series.currentActual + remainingFromToday) : null
+          const projection = projectMetricForecast({
+            metric: 'expenses',
+            actual: series.currentActual,
+            historicalAverage: series.average,
+            remainingActivity: remainingFromToday,
+            currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
+          })
+          const currentForecast = Number.isFinite(remainingFromToday) ? projection.final : null
           return {
             ...series,
             currentForecast,
@@ -298,9 +308,9 @@ export function createAnalyticsStore(id, useDependencies) {
             forecastAvailable: available,
             final: currentForecast,
             actualToDate: series.currentActual,
-            progress: currentForecast > 0 ? series.currentActual / currentForecast : null,
-            progressState: forecast.progressState.expenses,
-            status: forecast.statusByMetric.expenses,
+            progress: projection.progress,
+            progressState: projection.progressState,
+            status: projection.status,
             projectedSources: forecast.dailyProjectedEntries.filter((entry) => (entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID) === series.id && Number.isFinite(entry.flowAmounts?.expenses)),
           }
         }),
@@ -313,10 +323,13 @@ export function createAnalyticsStore(id, useDependencies) {
           ? null
           : categorySummary.value.monthKeys.reduce((total, key) => total + (categoryLedger.value.months?.[key]?.categories?.[id]?.amount ?? 0), 0),
       }))
-      const candidateIds = new Set([...categoryRanking.value, ...currentMonthCategoryIds.value])
+      const candidateIds = new Set([...categoryRanking.value, ...currentMonthCategoryIds.value, ...projectedCategoryIds.value])
       return [
         ...rankedItems,
         ...currentMonthCategoryIds.value.map((id) => ({ id, amount: categoryBlockingTransactionIds.value.length ? null : 0 })),
+        ...projectedCategoryIds.value
+          .filter((id) => !categoryRanking.value.includes(id) && !currentMonthCategoryIds.value.includes(id))
+          .map((id) => ({ id, amount: categoryBlockingTransactionIds.value.length ? null : 0 })),
         ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: categoryBlockingTransactionIds.value.length ? null : 0 })),
       ]
     })
@@ -465,7 +478,11 @@ export function createAnalyticsStore(id, useDependencies) {
           progressState: flowKey ? forecast.progressState[flowKey] : 'notApplicable',
           status,
           actualTransactionIds: flowKey ? forecast.actualTransactionIds[flowKey] : (item.changePoints.find((point) => point.kind === 'partial')?.transactionIds ?? []),
-          projectedSources: forecast.dailyProjectedEntries.filter((entry) => (flowKey ? Number.isFinite(entry.flowAmounts?.[flowKey]) : true)),
+          projectedSources: forecast.dailyProjectedEntries.filter((entry) => {
+            if (flowKey) return entry.flowAmounts?.[flowKey] !== 0
+            const savingsKind = item.id === 'savingsIncluded' ? 'savingsAccessible' : 'savingsRestricted'
+            return (entry.destinationKind === savingsKind ? entry.amount : entry.sourceKind === savingsKind ? -entry.amount : 0) !== 0
+          }),
         }
       })
       const globalGrossExpenseUnavailableTransactionIds = categoryLedger.value.unclassified.transactionIds
@@ -487,7 +504,7 @@ export function createAnalyticsStore(id, useDependencies) {
             progressState: forecast.progressState.expenses,
             status: forecast.statusByMetric.expenses,
             actualTransactionIds: forecast.actualTransactionIds.expenses,
-            projectedSources: forecast.dailyProjectedEntries.filter((entry) => Number.isFinite(entry.flowAmounts?.expenses)),
+            projectedSources: forecast.dailyProjectedEntries.filter((entry) => entry.flowAmounts?.expenses !== 0),
           }
       return { ...trend, series, expenses, forecast, globalGrossExpenseUnavailableTransactionIds, unavailableRefundTransactionIds: categoryLedger.value.unavailableRefundTransactionIds }
     })
@@ -574,7 +591,8 @@ export function createAnalyticsStore(id, useDependencies) {
         }
 
         if (!categorySelectionInitialized.value) {
-          if (persistedSelectedCategoryIds.value.length === 0) selectedCategoryIds.value = (categoryRanking.value.length > 0 ? categoryRanking.value : currentMonthCategoryIds.value).slice(0, 5)
+          if (persistedSelectedCategoryIds.value.length === 0)
+            selectedCategoryIds.value = (categoryRanking.value.length > 0 ? categoryRanking.value : [...currentMonthCategoryIds.value, ...projectedCategoryIds.value]).slice(0, 5)
           categorySelectionInitialized.value = true
         }
       })()

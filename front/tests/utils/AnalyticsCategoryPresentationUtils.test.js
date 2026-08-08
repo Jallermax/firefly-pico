@@ -142,6 +142,25 @@ test('category forecast details use Task 8 values and only show ready progress',
   )
 })
 
+test('category detail retains non-ready Task 8 progress state without legacy averages or pacing', () => {
+  const presentation = CategoryPresentation.buildCategoryForecastDetailsPresentation({
+    point: { actualToDate: -10, final: -8, remainingFromToday: 2, progress: null, progressState: 'opposite', status: 'partial' },
+    labels: { currentActual: 'Actual', finalForecast: 'Final', remainingFromToday: 'Remaining', progress: 'Progress' },
+    formatValue: String,
+    formatSignedValue: String,
+  })
+  assert.deepEqual(presentation, [
+    { id: 'currentActual', label: 'Actual', value: '-10' },
+    { id: 'finalForecast', label: 'Final', value: '-8' },
+    { id: 'remainingFromToday', label: 'Remaining', value: '2' },
+    { id: 'progressState', value: 'opposite' },
+  ])
+  assert.equal(
+    presentation.some(({ id }) => ['average', 'pacedForecast', 'historicalRemainder'].includes(id)),
+    false,
+  )
+})
+
 test('category ready presentation keeps unavailable amounts blocking without owning FX disclosure', () => {
   const presentation = buildCategoryReadyPresentation({
     usedMonths: 2,

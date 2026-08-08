@@ -227,6 +227,7 @@ test('forecast geometry prefers the completed actual anchor and selection payloa
       transactionIds: ['actual-2', 'actual-1'],
       point: { x: '2026-08:forecast', kind: 'forecast', transactionIds: ['actual-2', 'actual-1', 'actual-2'], projectedSources: [{ id: 'projection' }] },
       metadata: { x: '2026-08:forecast', kind: 'forecast', transactionIds: ['actual-2', 'actual-1', 'actual-2'], projectedSources: [{ id: 'projection' }] },
+      activation: 'pointer',
       canNavigate: true,
       forecastOnly: false,
     },
@@ -237,6 +238,18 @@ test('forecast geometry prefers the completed actual anchor and selection payloa
 test('expense summary guard does not expose a null total-expense result', () => {
   assert.equal(ChartUtils.hasFinancialExpenseSummary({ expensesSelected: true, hasExpenseResult: true, unavailableTransactionIds: [], expenses: null }), false)
   assert.equal(ChartUtils.hasFinancialExpenseSummary({ expensesSelected: true, hasExpenseResult: true, unavailableTransactionIds: [], expenses: { currentActual: 2 } }), true)
+})
+
+test('selection route projection distinguishes pointer/keyboard actual forecasts from projected-only forecasts', () => {
+  assert.equal(typeof ChartUtils.projectLineChartSelection, 'function')
+  const pointer = ChartUtils.projectLineChartSelection({ activation: 'pointer', transactionIds: ['b', 'a', 'b'], kind: 'forecast' })
+  assert.deepEqual(pointer, { activation: 'pointer', transactionIds: ['b', 'a'], route: RouteConstants.ROUTE_TRANSACTION_LIST + '?id=b%2Ca', forecastOnly: false })
+  assert.deepEqual(ChartUtils.projectLineChartSelection({ activation: 'keyboard', transactionIds: [], kind: 'forecast' }), {
+    activation: 'keyboard',
+    transactionIds: [],
+    route: null,
+    forecastOnly: true,
+  })
 })
 
 test('financial trend omits unavailable expenses while retaining selected account metrics', () => {

@@ -4,6 +4,7 @@ import test from 'node:test'
 import * as AnalyticsUtils from '../../utils/AnalyticsUtils.js'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
+  buildFinancialTrendChartSeries,
   buildCategoryLedger,
   buildGrossCategoryLedger,
   buildMonthlyMoneyFlow,
@@ -493,7 +494,94 @@ test('builds completed and partial monthly account movement from month-end total
   )
 })
 
-test('balance forecast reports signed movement remaining from today', () => {
+test('uses adjacent cumulative-anchor differences for completed balance and change transaction IDs', () => {
+  const result = summarizeBalanceMovements({
+    months: 2,
+    today: new Date('2026-08-10T12:00:00Z'),
+    balanceSeries: [
+      {
+        id: 'netWorth',
+        points: [
+          { x: '2026-05-31', value: 100, transactionIds: ['may', 'june', 'july'] },
+          { x: '2026-06-30', value: 120, transactionIds: ['june', 'july'] },
+          { x: '2026-07-31', value: 130, transactionIds: ['july'] },
+        ],
+        currentPoint: { x: '2026-08-10', value: 140, transactionIds: ['august'] },
+      },
+    ],
+  }).series[0]
+
+  assert.deepEqual(
+    result.totalPoints.map(({ x, transactionIds }) => [x, transactionIds]),
+    [
+      ['2026-06', ['may']],
+      ['2026-07', ['june']],
+      ['2026-08', ['august']],
+    ],
+  )
+  assert.deepEqual(
+    result.changePoints.map(({ x, transactionIds }) => [x, transactionIds]),
+    [
+      ['2026-06', ['may']],
+      ['2026-07', ['june']],
+      ['2026-08', ['august']],
+    ],
+  )
+})
+
+test('keeps Task 8 metadata on Today and forecast points while omitting legacy utility forecasts', () => {
+  const trend = buildFinancialTrendChartSeries({
+    view: 'balances',
+    metrics: [{ id: 'netWorth' }],
+    selectedIds: ['netWorth'],
+    accountSeries: [
+      {
+        id: 'netWorth',
+        totalPoints: [
+          { x: '2026-07', value: 10, kind: 'actual' },
+          { x: '2026-08', value: 12, kind: 'partial' },
+        ],
+        forecastAvailable: true,
+        forecastTotal: 15,
+        actualTransactionIds: ['actual'],
+        actualToDate: 2,
+        final: 5,
+        remainingFromToday: 3,
+        progress: 0.4,
+        progressState: 'ready',
+        status: 'ready',
+        projectedSources: [
+          { id: 'zero', flowAmounts: { netWorthChange: 0 } },
+          { id: 'nonzero', flowAmounts: { netWorthChange: 3 } },
+        ],
+      },
+    ],
+    expenses: null,
+    currentMonthKey: '2026-08',
+  })[0].points
+  assert.deepEqual(trend.find(({ kind }) => kind === 'partial').transactionIds, ['actual'])
+  assert.deepEqual(
+    trend.find(({ kind }) => kind === 'forecast').projectedSources.map(({ id }) => id),
+    ['nonzero'],
+  )
+  const summary = summarizeCategoryWindow({ ledger: { ledgerStartMonth: '2026-07', months: {} }, categoryIds: ['food'], averageMonths: 1, today: new Date('2026-08-10') }).series[0]
+  assert.equal('pacedForecast' in summary, false)
+  assert.equal('currentForecast' in summary, false)
+})
+
+test('category summary utility exposes completed actual evidence only, never a legacy forecast', () => {
+  const summary = summarizeCategoryWindow({
+    ledger: { ledgerStartMonth: '2026-07', months: { '2026-07': { categories: { food: { amount: 4, byDay: {}, transactionIds: [], transactionIdsByDay: {} } } } } },
+    categoryIds: ['food'],
+    averageMonths: 1,
+    today: new Date('2026-08-10'),
+  }).series[0]
+  assert.equal('pacedForecast' in summary, false)
+  assert.equal('currentForecast' in summary, false)
+  assert.equal('remainingFromToday' in summary, false)
+})
+
+test('balance utility exposes actual movement evidence without a legacy forecast', () => {
   const result = summarizeBalanceMovements({
     balanceSeries: [
       {
@@ -511,11 +599,12 @@ test('balance forecast reports signed movement remaining from today', () => {
     today: new Date('2026-04-10T12:00:00'),
   }).series[0]
 
-  assert.equal(result.forecastTotal, 1400)
-  assert.equal(result.remainingFromToday, 50)
+  assert.equal(result.currentTotal, 1350)
+  assert.equal('forecastTotal' in result, false)
+  assert.equal('remainingFromToday' in result, false)
 })
 
-test('retains zero balance movement and remaining forecast as visible values', () => {
+test('retains zero balance movement while leaving forecasts to the store', () => {
   const result = summarizeBalanceMovements({
     balanceSeries: [
       {
@@ -534,8 +623,8 @@ test('retains zero balance movement and remaining forecast as visible values', (
   }).series[0]
 
   assert.equal(result.currentChange, 0)
-  assert.equal(result.forecastChange, 0)
-  assert.equal(result.remainingFromToday, 0)
+  assert.equal('forecastChange' in result, false)
+  assert.equal('remainingFromToday' in result, false)
 })
 
 test('omits monthly movement without a preceding baseline', () => {
@@ -585,7 +674,7 @@ test('uses the final weekly sample in a completed month and requires current poi
   ])
 })
 
-test('carries sparse account totals through completed months and forecasts from completed changes', () => {
+test('carries sparse account totals through completed months without a legacy forecast', () => {
   const result = summarizeBalanceMovements({
     months: 3,
     today: new Date('2026-08-10T12:00:00Z'),
@@ -627,15 +716,11 @@ test('carries sparse account totals through completed months and forecasts from 
       currentTotal: 130,
       currentChange: 0,
       averageChange: 10,
-      forecastChange: 10,
-      forecastTotal: 140,
-      remainingFromToday: 10,
-      forecastAvailable: true,
     },
   )
 })
 
-test('does not carry account totals before the first source point or forecast one completed movement', () => {
+test('does not carry account totals before the first source point', () => {
   const result = summarizeBalanceMovements({
     months: 3,
     today: new Date('2026-08-10T12:00:00Z'),
@@ -667,9 +752,9 @@ test('does not carry account totals before the first source point or forecast on
     { x: '2026-07', value: 0, kind: 'actual' },
     { x: '2026-08', value: 0, kind: 'partial' },
   ])
-  assert.equal(result.series[0].forecastAvailable, false)
-  assert.equal(result.series[0].forecastChange, null)
-  assert.equal(result.series[0].forecastTotal, null)
+  assert.equal('forecastAvailable' in result.series[0], false)
+  assert.equal('forecastChange' in result.series[0], false)
+  assert.equal('forecastTotal' in result.series[0], false)
   assert.deepEqual(result.series[1].totalPoints.map(withoutTransactionIds), [
     { x: '2026-05', value: 80, kind: 'actual' },
     { x: '2026-06', value: 80, kind: 'actual' },
@@ -739,6 +824,7 @@ test('builds balance today separately while change and expense charts contain co
         'expenses',
         [
           ['2026-07', 'actual'],
+          ['2026-08', 'partial'],
           ['2026-08:forecast', 'forecast'],
         ],
       ],
@@ -758,7 +844,7 @@ test('distinguishes insufficient forecast history from a genuinely missing forec
   assert.equal(AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: true, value: 25, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }), '25 USD')
 })
 
-test('summarizes total expense from every category and forecasts only with two completed months', () => {
+test('summarizes total expense from every category without a legacy forecast', () => {
   const result = summarizeTotalExpenseWindow({
     averageMonths: 3,
     today: new Date('2026-04-10T12:00:00Z'),
@@ -779,12 +865,12 @@ test('summarizes total expense from every category and forecasts only with two c
   )
   assert.equal(result.currentActual, 10)
   assert.equal(result.average, 50)
-  assert.equal(result.currentForecast, 60)
-  assert.equal(result.remainingFromToday, 50)
-  assert.equal(result.forecastAvailable, true)
+  assert.equal('currentForecast' in result, false)
+  assert.equal('remainingFromToday' in result, false)
+  assert.equal('forecastAvailable' in result, false)
 })
 
-test('total forecast sums every category forecast including current-only uncategorized', () => {
+test('total expense retains current-only uncategorized evidence without a legacy forecast', () => {
   const completedCategories = {
     housing: { amount: 2321, byDay: { 2: 2321 }, transactionIds: [], transactionIdsByDay: {} },
     food: { amount: 1000, byDay: { 25: 1000 }, transactionIds: [], transactionIdsByDay: {} },
@@ -811,11 +897,11 @@ test('total forecast sums every category forecast including current-only uncateg
   assert.equal(result.currentActual, 2140)
   assert.equal(result.average, 3321)
   assert.equal(
-    result.currentForecast,
-    result.categoryForecasts.reduce((sum, item) => sum + item.currentForecast, 0),
+    result.categoryForecasts.some((item) => item.id === ANALYTICS_UNCATEGORIZED_ID),
+    true,
   )
-  assert.equal(result.currentForecast, 5461)
-  assert.equal(result.remainingFromToday, 3321)
+  assert.equal('currentForecast' in result, false)
+  assert.equal('remainingFromToday' in result, false)
 })
 
 test('category ledger counts purchases, subtracts refunds, preserves uncategorized, and keeps group IDs', () => {
@@ -883,29 +969,29 @@ const pacedLedger = {
   },
 }
 
-test('category forecast preserves a recurring expense missing early this month', () => {
+test('category summary preserves a recurring expense as completed-history evidence', () => {
   const summary = summarizeCategoryWindow({ ledger: housingLedger, categoryIds: ['housing'], averageMonths: 3, today: new Date('2026-08-03T12:00:00') }).series[0]
   assert.equal(summary.currentActual, 0)
   assert.equal(summary.average, 2321)
-  assert.equal(summary.currentForecast, 2321)
-  assert.equal(summary.remainingFromToday, 2321)
+  assert.equal('currentForecast' in summary, false)
+  assert.equal('remainingFromToday' in summary, false)
 })
 
-test('category forecast never falls below spending already recorded', () => {
+test('category summary retains spending already recorded without a legacy forecast', () => {
   const summary = summarizeCategoryWindow({ ledger: overspentLedger, categoryIds: ['food'], averageMonths: 6, today: new Date('2026-08-25T12:00:00') }).series[0]
   assert.equal(summary.average, 7500)
   assert.equal(summary.currentActual, 9000)
-  assert.equal(summary.currentForecast >= 9000, true)
-  assert.equal(summary.remainingFromToday, summary.currentForecast - 9000)
+  assert.equal('currentForecast' in summary, false)
+  assert.equal('remainingFromToday' in summary, false)
 })
 
-test('category forecast preserves the historical remainder after today', () => {
+test('category summary does not calculate a historical pace forecast', () => {
   const summary = summarizeCategoryWindow({ ledger: pacedLedger, categoryIds: ['food'], averageMonths: 3, today: new Date('2026-08-03T12:00:00') }).series[0]
   assert.equal(summary.average, 1000)
   assert.equal(summary.currentActual, 1000)
-  assert.equal(summary.pacedForecast, 1400)
-  assert.equal(summary.currentForecast, 1400)
-  assert.equal(summary.remainingFromToday, 400)
+  assert.equal('pacedForecast' in summary, false)
+  assert.equal('currentForecast' in summary, false)
+  assert.equal('remainingFromToday' in summary, false)
 })
 
 test('completed-month averages count zero months only after ledger history begins', () => {
@@ -929,17 +1015,17 @@ test('completed-month averages count zero months only after ledger history begin
   assert.equal(summary.requestedMonths, 3)
   assert.equal(summary.usedMonths, 3)
   assert.deepEqual(summary.series[0].actualPoints, [
-    { x: '2026-01', value: 90, transactionIds: ['jan'] },
-    { x: '2026-02', value: 0, transactionIds: [] },
-    { x: '2026-03', value: 30, transactionIds: ['mar'] },
+    { x: '2026-01', value: 90, transactionIds: ['jan'], refundCoverage: { gross: 90, refunded: 0, netCost: 90, transactionIds: [], unavailableTransactionIds: [], status: 'none' } },
+    { x: '2026-02', value: 0, transactionIds: [], refundCoverage: { gross: 0, refunded: 0, netCost: 0, transactionIds: [], unavailableTransactionIds: [], status: 'none' } },
+    { x: '2026-03', value: 30, transactionIds: ['mar'], refundCoverage: { gross: 30, refunded: 0, netCost: 30, transactionIds: [], unavailableTransactionIds: [], status: 'none' } },
   ])
   assert.equal(summary.series[0].average, 40)
   assert.equal(summary.series[0].currentActual, 12)
   assert.deepEqual(summary.series[0].currentTransactionIds, ['apr'])
-  assert.ok(Math.abs(summary.series[0].pacedForecast - (12 + 70 / 3)) < 0.000001)
-  assert.equal(summary.series[0].currentForecast, 40)
-  assert.equal(summary.series[0].remainingFromToday, 28)
-  assert.equal(summary.series[0].forecastAvailable, true)
+  assert.equal('pacedForecast' in summary.series[0], false)
+  assert.equal('currentForecast' in summary.series[0], false)
+  assert.equal('remainingFromToday' in summary.series[0], false)
+  assert.equal('forecastAvailable' in summary.series[0], false)
 })
 
 for (const averageMonths of [3, 6, 12, 24]) {
@@ -959,7 +1045,7 @@ for (const averageMonths of [3, 6, 12, 24]) {
   })
 }
 
-test('forecast is absent with fewer than two completed months', () => {
+test('category summary exposes evidence only with fewer than two completed months', () => {
   const summary = summarizeCategoryWindow({
     ledger: {
       ledgerStartMonth: '2026-03',
@@ -974,11 +1060,11 @@ test('forecast is absent with fewer than two completed months', () => {
   })
 
   assert.equal(summary.usedMonths, 1)
-  assert.equal(summary.series[0].currentForecast, null)
-  assert.equal(summary.series[0].forecastAvailable, false)
+  assert.equal('currentForecast' in summary.series[0], false)
+  assert.equal('forecastAvailable' in summary.series[0], false)
 })
 
-test('current actual, drilldown IDs, and forecast base include only splits through today', () => {
+test('current actual and drilldown IDs include only splits through today', () => {
   const ledger = buildCategoryLedger({
     displayCurrencyCode: 'USD',
     primaryCurrencyCode: 'USD',
@@ -1000,7 +1086,7 @@ test('current actual, drilldown IDs, and forecast base include only splits throu
 
   assert.equal(summary.series[0].currentActual, 10)
   assert.deepEqual(summary.series[0].currentTransactionIds, ['current-past'])
-  assert.equal(summary.series[0].currentForecast, 30)
+  assert.equal('currentForecast' in summary.series[0], false)
 })
 
 test('category ranking uses the selected completed-month window', () => {
