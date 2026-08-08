@@ -781,6 +781,45 @@ test('deduplicates finite first_date evidence and preserves authoritative weeken
   assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence], startDate: '2026-03-03', endDate: '2026-08-31' }), [])
 })
 
+test('uses the configured weekday after a shifted first weekly or biweekly occurrence', () => {
+  const recurrence = ({ count, skip }) => ({
+    id: `${skip === 1 ? 'biweekly' : 'weekly'}-${count}`,
+    attributes: {
+      active: true,
+      type: 'withdrawal',
+      first_date: '2026-01-06',
+      nr_of_repetitions: count,
+      repetitions: [{ type: 'weekly', moment: '1', skip }],
+      transactions: [{ amount: '100', description: 'Shifted weekday', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+    },
+  })
+  const expected = {
+    weekly: {
+      1: ['2026-01-06'],
+      2: ['2026-01-06', '2026-01-12'],
+      3: ['2026-01-06', '2026-01-12', '2026-01-19'],
+    },
+    biweekly: {
+      1: ['2026-01-06'],
+      2: ['2026-01-06', '2026-01-19'],
+      3: ['2026-01-06', '2026-01-19', '2026-02-02'],
+    },
+  }
+
+  for (const [name, skip] of [
+    ['weekly', 0],
+    ['biweekly', 1],
+  ]) {
+    for (const count of [1, 2, 3]) {
+      const result = buildDefinedOccurrences({ recurringTransactions: [recurrence({ count, skip })], startDate: '2026-01-01', endDate: '2026-02-28' })
+      assert.equal(result.length, 1)
+      assert.deepEqual(result[0].expectedDates, expected[name][count])
+      assert.equal(result[0].bounds.end, expected[name][count].at(-1))
+      assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence({ count, skip })], startDate: '2026-02-03', endDate: '2026-08-31' }), [])
+    }
+  }
+})
+
 test('augments an accepted primary with one exact observed external-endpoint variant when cadence and amount align', () => {
   const primary = entriesForDates(['2026-01-05', '2026-02-05', '2026-03-05', '2026-04-05'], {
     value: 100,

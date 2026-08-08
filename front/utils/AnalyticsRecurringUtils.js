@@ -485,9 +485,16 @@ const expectedAmount = ({ value, min = value, max = value }) => {
 const cadenceDatesAfter = ({ cadence, start, count }) => {
   if (!cadence || !start || !Number.isInteger(count) || count < 1) return []
   const startParts = dateParts(start)
+  if (['weekly', 'biweekly'].includes(cadence.type)) {
+    const intervalDays = cadence.intervalWeeks * 7
+    const configuredWeekday = Number(cadence.weekday)
+    if (!Number.isInteger(intervalDays) || intervalDays < 7 || !Number.isInteger(configuredWeekday) || configuredWeekday < 1 || configuredWeekday > 7) return []
+    const startWeekday = startParts.date.getDay() || 7
+    const firstContinuation = addDays(startParts.date, intervalDays + configuredWeekday - startWeekday)
+    return Array.from({ length: count }, (_, index) => formatDate(addDays(firstContinuation, intervalDays * index)))
+  }
   let horizon
-  if (['weekly', 'biweekly'].includes(cadence.type)) horizon = formatDate(addDays(startParts.date, cadence.intervalWeeks * 7 * (count + 1)))
-  else if (['monthly', 'twiceMonthly'].includes(cadence.type)) {
+  if (['monthly', 'twiceMonthly'].includes(cadence.type)) {
     const occurrencesPerMonth = (cadence.days?.length ?? 0) + (cadence.fromMonthEnd?.length ?? 0)
     if (occurrencesPerMonth === 0) return []
     const months = Math.ceil(count / occurrencesPerMonth) + 2
