@@ -1019,3 +1019,26 @@ test('returns byte-for-byte deterministic forecasts for shuffled input without m
   assert.deepEqual(candidates, originalCandidates)
   assert.ok(ordered.dailyProjectedEntries.every((item) => item.id && item.sourceId && Array.isArray(item.evidenceIds) && !('transactionId' in item)))
 })
+
+test('exports the normalized actual-flow classifier used by daily projections', async () => {
+  const module = await import('../../utils/AnalyticsForecastUtils.js')
+  assert.equal(typeof module.classifyForecastFlowAmounts, 'function')
+  const result = module.classifyForecastFlowAmounts({
+    entry: {
+      value: 25,
+      direction: 'transfer',
+      sourceKind: 'available',
+      destinationKind: 'savingsAccessible',
+      sourceAccount: { id: 'checking', attributes: { include_net_worth: true } },
+      destinationAccount: { id: 'savings', attributes: { include_net_worth: true } },
+    },
+    currencyDecimalPlaces: 2,
+  })
+
+  assert.equal(result.status, 'ready')
+  assert.equal(result.amount, 25)
+  assert.deepEqual(result.affectedMetricIds, ['savingsDeposits', 'savingsChange', 'availableCashChange'])
+  assert.equal(result.flowAmounts.savingsDeposits, 25)
+  assert.equal(result.flowAmounts.savingsWithdrawals, 0)
+  assert.equal(result.flowAmounts.availableCashChange, -25)
+})

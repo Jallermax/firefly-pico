@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import test, { afterEach, beforeEach } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, reactive, ref } from 'vue'
@@ -195,6 +195,36 @@ const currentExpenseTransaction = (amount, categoryId = 'food') => ({
         destination_id: 'expense',
         accountSource: { attributes: { type: { fireflyCode: 'asset' } } },
         accountDestination: { attributes: { type: { fireflyCode: 'expense' } } },
+      },
+    ],
+  },
+})
+const analyticsAccount = (id, type, role = null, includeNetWorth = false) => ({
+  id,
+  attributes: {
+    active: true,
+    type: { fireflyCode: type },
+    ...(role ? { account_role: { fireflyCode: role } } : {}),
+    include_net_worth: includeNetWorth,
+    currency_code: 'USD',
+    current_balance: type === 'asset' ? '0' : null,
+  },
+})
+const dailyTransaction = ({ id, date, amount, source, destination, categoryId = null, tags = [] }) => ({
+  id,
+  attributes: {
+    transactions: [
+      {
+        transaction_journal_id: `${id}-journal`,
+        amount: String(amount),
+        currency_code: 'USD',
+        date,
+        category_id: categoryId,
+        source_id: source.id,
+        destination_id: destination.id,
+        accountSource: source,
+        accountDestination: destination,
+        tags,
       },
     ],
   },
@@ -1455,4 +1485,213 @@ test('retains structured projected cash-use unavailability separately from actua
       statuses: [{ metricId: 'expenses', status: 'unavailable' }],
     },
   ])
+})
+
+test('projects every local calendar day with a persisted 3/6/12 history selector and explicit zero days across DST', async () => {
+  now = new Date(2026, 2, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const revenue = analyticsAccount('revenue', 'revenue')
+  accountStore.accountList = [checking, revenue]
+  transactionResult = [dailyTransaction({ id: 'dst-income', date: new Date(2026, 2, 8, 0, 30), amount: 12, source: revenue, destination: checking })]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.dailyForecastMonths, 6)
+  assert.equal(store.dailyForecast?.monthKey, '2026-03')
+  assert.equal(store.dailyForecast?.dateKeys.length, 31)
+  assert.equal(store.dailyForecast?.dateKeys[0], '2026-03-01')
+  assert.equal(store.dailyForecast?.dateKeys.at(-1), '2026-03-31')
+  assert.equal(store.dailyForecast?.todayIndex, 9)
+  assert.equal(store.dailyForecast?.days[7].date, '2026-03-08')
+  assert.equal(store.dailyForecast?.days[7].actual.components.income, 12)
+  assert.equal(store.dailyForecast?.days[8].actual.sources, 0)
+  assert.equal(store.dailyForecast?.days[8].actual.uses, 0)
+  assert.equal(store.dailyForecast?.days[8].availableCashChange, 0)
+  assert.equal(store.dailyForecast?.days[9].isToday, true)
+  assert.equal(store.dailyForecast?.days[10].actual, null)
+  store.dailyForecastMonths = 12
+  assert.equal(store.dailyForecastMonths, 12)
+  store.dailyForecastMonths = 24
+  assert.equal(store.dailyForecastMonths, 6)
+})
+
+test('uses the seven authoritative flows for precise daily source, use, and cumulative Available change', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const savings = analyticsAccount('savings', 'asset', 'savingAsset', true)
+  const liability = analyticsAccount('loan', 'liabilities')
+  const revenue = analyticsAccount('revenue', 'revenue')
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, savings, liability, revenue, expense]
+  const date = new Date(2026, 7, 5, 12)
+  transactionResult = [
+    dailyTransaction({ id: 'income', date, amount: 100.1, source: revenue, destination: checking }),
+    dailyTransaction({ id: 'refund', date, amount: 10.2, source: expense, destination: checking, tags: ['#refund'] }),
+    dailyTransaction({ id: 'savings-withdrawal', date, amount: 20.3, source: savings, destination: checking }),
+    dailyTransaction({ id: 'new-debt', date, amount: 30.4, source: liability, destination: checking }),
+    dailyTransaction({ id: 'expense', date, amount: 40.1, source: checking, destination: expense, categoryId: 'food' }),
+    dailyTransaction({ id: 'savings-deposit', date, amount: 15.2, source: checking, destination: savings }),
+    dailyTransaction({ id: 'debt-repayment', date, amount: 5.3, source: checking, destination: liability }),
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const day = store.dailyForecast?.days.find(({ date: key }) => key === '2026-08-05')
+  assert.deepEqual(day?.actual.components, {
+    income: 100.1,
+    refunds: 10.2,
+    expenses: 40.1,
+    savingsDeposits: 15.2,
+    savingsWithdrawals: 20.3,
+    debtRepayments: 5.3,
+    newDebt: 30.4,
+  })
+  assert.equal(day?.actual.sources, 161)
+  assert.equal(day?.actual.uses, 60.6)
+  assert.equal(day?.actual.availableCashChange, 100.4)
+  assert.equal(day?.availableCashChange, 100.4)
+  assert.equal(day?.cumulativeAvailableCashChange, 100.4)
+  assert.equal(store.dailyForecast?.openingValue, 0)
+  assert.equal(store.dailyForecast?.days.at(-1).cumulativeAvailableCashChange, 100.4)
+  assert.deepEqual(day?.actual.transactionIds, ['debt-repayment', 'expense', 'income', 'new-debt', 'refund', 'savings-deposit', 'savings-withdrawal'])
+  assert.deepEqual(day?.projectedEvidenceIds, [])
+  assert.equal(store.dailyForecast?.reconciliation.status, 'ok')
+  assert.deepEqual(store.dailyForecast?.reconciliation.componentDeltas, {
+    income: 0,
+    refunds: 0,
+    expenses: 0,
+    savingsDeposits: 0,
+    savingsWithdrawals: 0,
+    debtRepayments: 0,
+    newDebt: 0,
+  })
+  assert.equal(store.dailyForecast?.reconciliation.availableCashDelta, 0)
+})
+
+test('keeps actual rows through today and deterministic defined, inferred, and variable evidence strictly after today', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const revenue = analyticsAccount('revenue', 'revenue')
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, revenue, expense]
+  const history = ['2026-04-15', '2026-05-15', '2026-06-15', '2026-07-15'].map((date, index) =>
+    dailyTransaction({ id: `inferred-${index + 1}`, date, amount: 45, source: checking, destination: expense, categoryId: 'regular' }),
+  )
+  transactionResult = [
+    ...history,
+    dailyTransaction({ id: 'variable-history', date: '2026-07-24', amount: 18, source: checking, destination: expense, categoryId: 'variable' }),
+    dailyTransaction({ id: 'actual-today', date: new Date(2026, 7, 10, 8), amount: 7, source: revenue, destination: checking }),
+    dailyTransaction({ id: 'future-ledger-row', date: new Date(2026, 7, 11, 8), amount: 999, source: revenue, destination: checking }),
+  ]
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'defined-rent',
+        attributes: {
+          active: true,
+          amount_avg: '60',
+          currency_code: 'USD',
+          next_expected_match: '2026-08-20',
+          transactions: [{ source_id: checking.id, destination_id: expense.id, category_id: 'rent', amount: '60', currency_code: 'USD' }],
+        },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const actualEntries = store.dailyForecast?.days.flatMap(({ actual }) => actual?.entries ?? []) ?? []
+  const projectedEntries = store.dailyForecast?.days.flatMap(({ projected }) => projected?.entries ?? []) ?? []
+  assert.deepEqual(actualEntries.map(({ transactionId }) => transactionId), ['actual-today'])
+  assert.equal(projectedEntries.every(({ date }) => date > '2026-08-10'), true)
+  assert.equal(projectedEntries.some(({ transactionId }) => transactionId === 'future-ledger-row'), false)
+  assert.deepEqual([...new Set(projectedEntries.map(({ sourceKind }) => sourceKind))].sort(), ['defined', 'inferred', 'variable'])
+  const defined = projectedEntries.find(({ sourceKind }) => sourceKind === 'defined')
+  assert.equal(defined?.sourceId, 'defined-rent')
+  assert.equal(typeof defined?.candidateId, 'string')
+  assert.equal(typeof defined?.expectedId, 'string')
+  assert.deepEqual(defined?.transactionIds, [])
+  assert.equal(Array.isArray(defined?.evidenceIds), true)
+  assert.equal(typeof defined?.confidence?.level, 'string')
+  assert.equal(Array.isArray(defined?.reasons), true)
+  assert.equal(typeof defined?.overdue, 'boolean')
+  assert.equal(defined?.conversion.mode, 'exact')
+  assert.deepEqual(
+    store.dailyForecast?.barGroups.map(({ id }) => id),
+    ['actual:sources', 'actual:uses', 'defined:sources', 'defined:uses', 'inferred:sources', 'inferred:uses', 'variable:sources', 'variable:uses'],
+  )
+  assert.equal(store.dailyForecast?.reconciliation.status, 'ok')
+  assert.equal(store.dailyForecast?.audit.fulfilledExpectedIds.length, store.financialTrend.forecast.audit.recurring.fulfilledExpectedIds.length)
+  assert.equal(store.dailyForecast?.audit.remainingExpectedIds.length, store.financialTrend.forecast.audit.recurring.remainingExpectedIds.length)
+})
+
+test('suppresses fulfilled recurring activity from projected daily rows without losing its actual transaction ID', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, expense]
+  transactionResult = [dailyTransaction({ id: 'paid-rent', date: '2026-08-05', amount: 60, source: checking, destination: expense, categoryId: 'rent' })]
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'rent-subscription',
+        attributes: {
+          active: true,
+          amount_avg: '60',
+          currency_code: 'USD',
+          next_expected_match: '2026-08-05',
+          transactions: [{ source_id: checking.id, destination_id: expense.id, category_id: 'rent', amount: '60', currency_code: 'USD' }],
+        },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.dailyForecast?.audit.fulfilledExpectedIds.length, 1)
+  assert.equal(store.dailyForecast?.days.flatMap(({ projected }) => projected?.entries ?? []).some(({ sourceId }) => sourceId === 'rent-subscription'), false)
+  assert.deepEqual(store.dailyForecast?.days.find(({ date }) => date === '2026-08-05').actual.transactionIds, ['paid-rent'])
+})
+
+test('isolates unavailable daily evidence and never turns the affected flow into zero', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, expense]
+  transactionResult = [dailyTransaction({ id: 'unavailable-expense', date: '2026-08-05', amount: 'not-an-amount', source: checking, destination: expense, categoryId: 'food' })]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const day = store.dailyForecast?.days.find(({ date }) => date === '2026-08-05')
+  assert.equal(day?.actual.components.expenses, null)
+  assert.equal(day?.actual.uses, null)
+  assert.equal(day?.availableCashChange, null)
+  assert.equal(day?.cumulativeAvailableCashChange, null)
+  assert.equal(store.dailyForecastState?.isUnavailable, true)
+  assert.deepEqual(store.dailyForecastState?.unavailableTransactionIds, ['unavailable-expense'])
+  assert.equal(store.dailyForecast?.reconciliation.status, 'unavailable')
+  assert.equal(store.categoryState.status, 'ready')
+  assert.equal(store.flowState.status, 'ready')
+})
+
+test('keeps the daily card and combination-chart selection contract exact without inventing projected transaction routes', () => {
+  const dailyPath = new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url)
+  const dailySource = existsSync(dailyPath) ? readFileSync(dailyPath, 'utf8') : ''
+  const chartSource = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+
+  assert.match(dailySource, /TransactionFilterUtils\.filters\.id\.toUrl/)
+  assert.match(dailySource, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
+  assert.match(dailySource, /projectLineChartSelection/)
+  assert.match(dailySource, /kind:\s*point\?\.kind/)
+  assert.match(chartSource, /series\.barGroups/)
+  assert.match(chartSource, /reduceCombinationChartInteraction/)
+  assert.match(chartSource, /minHeight:\s*'44px'/)
+  assert.match(chartSource, /emit\('select-point'/)
 })
