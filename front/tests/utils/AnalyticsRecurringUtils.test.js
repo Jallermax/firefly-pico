@@ -725,6 +725,62 @@ test('falls back to the last authoritative occurrence when a finite recurrence e
   assert.deepEqual(authoritativeWindow[0].bounds, { start: null, end: '2026-03-01' })
 })
 
+test('treats first_date as occurrence one for missing, null, zero, one, and three finite repetitions', () => {
+  const recurrence = (count, includeCount = true) => ({
+    id: `shifted-${includeCount ? count : 'missing'}`,
+    attributes: {
+      active: true,
+      type: 'withdrawal',
+      first_date: '2026-01-03',
+      ...(includeCount ? { nr_of_repetitions: count } : {}),
+      repetitions: [{ type: 'monthly', moment: '1' }],
+      transactions: [{ amount: '100', description: 'Shifted finite', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+    },
+  })
+
+  for (const unbounded of [recurrence(null), recurrence(null, false)]) {
+    const august = buildDefinedOccurrences({ recurringTransactions: [unbounded], startDate: '2026-08-01', endDate: '2026-08-31' })
+    assert.equal(august.length, 1)
+    assert.deepEqual(august[0].bounds, { start: '2026-01-03', end: null })
+    assert.deepEqual(august[0].expectedDates, ['2026-08-01'])
+  }
+
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence(0)], startDate: '2026-01-01', endDate: '2026-12-31' }), [])
+
+  const once = buildDefinedOccurrences({ recurringTransactions: [recurrence(1)], startDate: '2026-01-01', endDate: '2026-01-31' })
+  assert.equal(once.length, 1)
+  assert.deepEqual(once[0].bounds, { start: '2026-01-03', end: '2026-01-03' })
+  assert.deepEqual(once[0].expectedDates, ['2026-01-03'])
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence(1)], startDate: '2026-02-01', endDate: '2026-02-28' }), [])
+
+  const three = buildDefinedOccurrences({ recurringTransactions: [recurrence(3)], startDate: '2026-01-01', endDate: '2026-03-31' })
+  assert.equal(three.length, 1)
+  assert.deepEqual(three[0].bounds, { start: '2026-01-03', end: '2026-03-01' })
+  assert.deepEqual(three[0].expectedDates, ['2026-01-03', '2026-02-01', '2026-03-01'])
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence(3)], startDate: '2026-03-02', endDate: '2026-08-31' }), [])
+})
+
+test('deduplicates finite first_date evidence and preserves authoritative weekend shifts', () => {
+  const recurrence = {
+    id: 'weekend-shifted-finite',
+    attributes: {
+      active: true,
+      type: 'withdrawal',
+      first_date: '2026-01-03',
+      nr_of_repetitions: 3,
+      repetitions: [{ type: 'monthly', moment: '1', occurrences: ['2026-03-02', '2026-01-03', '2026-02-02', '2026-01-03T12:00:00-05:00'] }],
+      transactions: [{ amount: '100', description: 'Weekend finite', source_id: 'checking', destination_id: 'service', category_id: 'service' }],
+    },
+  }
+
+  const result = buildDefinedOccurrences({ recurringTransactions: [recurrence], startDate: '2026-01-01', endDate: '2026-03-31' })
+
+  assert.equal(result.length, 1)
+  assert.deepEqual(result[0].bounds, { start: '2026-01-03', end: '2026-03-02' })
+  assert.deepEqual(result[0].expectedDates, ['2026-01-03', '2026-02-02', '2026-03-02'])
+  assert.deepEqual(buildDefinedOccurrences({ recurringTransactions: [recurrence], startDate: '2026-03-03', endDate: '2026-08-31' }), [])
+})
+
 test('augments an accepted primary with one exact observed external-endpoint variant when cadence and amount align', () => {
   const primary = entriesForDates(['2026-01-05', '2026-02-05', '2026-03-05', '2026-04-05'], {
     value: 100,
@@ -789,4 +845,38 @@ test('never collapses interleaved day-1 $100 and day-20 $500 same-payee historie
 
   assert.equal(result.candidates.length, 0)
   assert.ok(result.audit.rejected.length > 0)
+})
+
+test('canonicalizes ambiguous and duplicate monthly streams byte-for-byte under shuffled input', () => {
+  const repetitions = [
+    { type: 'monthly', moment: '15', occurrences: ['2026-09-15', '2026-08-15'] },
+    { type: 'monthly', moment: '31', occurrences: ['2026-08-31', '2026-09-30'] },
+    { type: 'monthly', moment: '16', occurrences: ['2026-08-16', '2026-09-16'] },
+    { type: 'monthly', moment: '15', occurrences: ['2026-08-15', '2026-09-15'] },
+  ]
+  const recurrence = (orderedRepetitions) => ({
+    id: 'ambiguous-monthly',
+    attributes: {
+      active: true,
+      type: 'deposit',
+      first_date: '2026-08-15',
+      repetitions: orderedRepetitions,
+      transactions: [{ amount: '3000', description: 'Ambiguous payroll', source_id: 'employer', destination_id: 'checking', category_id: 'salary' }],
+    },
+  })
+
+  const ordered = buildDefinedOccurrences({ recurringTransactions: [recurrence(repetitions)], startDate: '2026-08-01', endDate: '2026-09-30' })
+  const shuffled = buildDefinedOccurrences({ recurringTransactions: [recurrence([repetitions[3], repetitions[2], repetitions[0], repetitions[1]])], startDate: '2026-08-01', endDate: '2026-09-30' })
+
+  assert.equal(ordered.length, 3)
+  assert.ok(ordered.every(({ cadence }) => cadence.type === 'monthly'))
+  assert.equal(new Set(ordered.map(({ id }) => id)).size, 3)
+  assert.equal(JSON.stringify(shuffled), JSON.stringify(ordered))
+  const dayFifteen = ordered.find(({ cadence }) => cadence.days[0] === 15)
+  assert.deepEqual(dayFifteen.definitionAudit, {
+    authoritativeOccurrenceDates: ['2026-08-15', '2026-09-15'],
+    canonicalStreams: [{ cadence: { type: 'monthly', days: [15] }, authoritativeOccurrenceDates: ['2026-08-15', '2026-09-15'] }],
+    sourceRepetitionCount: 2,
+    duplicateRepetitionCount: 1,
+  })
 })
