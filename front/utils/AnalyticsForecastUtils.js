@@ -149,6 +149,56 @@ const primaryFlow = (amounts) => ['refunds', 'income', 'expenses', 'savingsDepos
 
 const candidateEligible = (candidate) => candidate?.source?.authoritative === true || (candidate?.source?.type === 'inferred' && Number(candidate?.confidence?.score) >= 0.6)
 
+const canonicalSemanticValue = (value) => {
+  if (value instanceof Date) return dateKey(value)
+  if (Array.isArray(value)) return value.map(canonicalSemanticValue).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, canonicalSemanticValue(value[key])]),
+  )
+}
+
+const canonicalizeCandidates = (candidates) => {
+  const groups = new Map()
+  for (const candidate of candidates) {
+    const candidateId = String(candidate?.id ?? '')
+    const canonical = canonicalSemanticValue(candidate)
+    const fingerprint = JSON.stringify(canonical)
+    const group = groups.get(candidateId) ?? { fingerprints: new Map(), count: 0 }
+    group.fingerprints.set(fingerprint, canonical)
+    group.count += 1
+    groups.set(candidateId, group)
+  }
+
+  const accepted = []
+  const deduplicatedCandidateIds = []
+  const conflictingCandidateIds = []
+  for (const candidateId of [...groups.keys()].sort()) {
+    const group = groups.get(candidateId)
+    if (group.fingerprints.size > 1) conflictingCandidateIds.push(candidateId)
+    else {
+      accepted.push([...group.fingerprints.values()][0])
+      if (group.count > 1) deduplicatedCandidateIds.push(candidateId)
+    }
+  }
+  return { candidates: accepted, deduplicatedCandidateIds, conflictingCandidateIds }
+}
+
+const nonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0
+const usableAuthoritativeConversion = (conversion) => {
+  if (
+    !conversion ||
+    !['exact', 'exactPrimary', 'rate'].includes(conversion.mode) ||
+    !nonEmptyString(conversion.sourceCurrency) ||
+    !nonEmptyString(conversion.displayCurrency) ||
+    conversion.missingCurrency
+  )
+    return false
+  return conversion.mode !== 'rate' || (Number.isFinite(conversion.rate) && conversion.rate > 0 && conversion.isEstimated === true)
+}
+
 const candidateProjectionInput = ({ candidate, candidateAmounts, accountContexts }) => {
   const authoritative = candidate?.source?.authoritative === true
   const { context, missingAccountIds, missingAccountEndpoints } = projectionContext(candidate, accountContexts, authoritative)
@@ -156,7 +206,12 @@ const candidateProjectionInput = ({ candidate, candidateAmounts, accountContexts
   const reasons = []
   const missingCurrencies = unique([amountEvidence?.conversion?.missingCurrency]).sort()
   if (!amountEvidence) reasons.push('missingAmountEvidence')
-  else if (amountEvidence?.conversion?.mode === 'unavailable' || amountEvidence?.conversion?.missingCurrency || !Number.isFinite(amountEvidence.value) || amountEvidence.value <= 0)
+  else if (
+    !Number.isFinite(amountEvidence.value) ||
+    amountEvidence.value <= 0 ||
+    (authoritative && !usableAuthoritativeConversion(amountEvidence.conversion)) ||
+    (!authoritative && (amountEvidence?.conversion?.mode === 'unavailable' || amountEvidence?.conversion?.missingCurrency))
+  )
     reasons.push('unavailableAmount')
   if (missingAccountEndpoints.length > 0 || !context.sourceKind || !context.destinationKind) reasons.push('missingAccountContext')
   return {
@@ -372,7 +427,16 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
       actualTransactionIds: Object.fromEntries(FLOW_KEYS.map((key) => [key, []])),
       audit: {
         history: { months, coverage: 'unavailable', samples: null, variableRemainderSamples: null },
-        recurring: { fulfilledExpectedIds: [], remainingExpectedIds: [], removedHistoryEntryIds: [], suppressedCandidateIds: [], unresolvedCandidates: [], candidateConversions: [] },
+        recurring: {
+          fulfilledExpectedIds: [],
+          remainingExpectedIds: [],
+          removedHistoryEntryIds: [],
+          suppressedCandidateIds: [],
+          unresolvedCandidates: [],
+          candidateConversions: [],
+          deduplicatedCandidateIds: [],
+          conflictingCandidateIds: [],
+        },
         unavailable: { affectedMetricIds: [...FLOW_KEYS], missingCurrencies: [], entryIds: [], candidateIds: [] },
         missingCurrencies: [],
         unavailableEntryIds: [],
@@ -385,8 +449,9 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   const coverageStart = fetchCoverage?.startMonth ?? null
   const coverageEnd = dateKey(fetchCoverage?.endDate)
   const historyReady = Boolean(historyFirst && historyEnd && coverageStart && coverageEnd && coverageStart <= historyFirst && coverageEnd >= historyEnd)
-  const eligibleCandidates = [...candidates].filter(candidateEligible).sort((left, right) => String(left.id).localeCompare(String(right.id)))
-  const suppressedCandidateIds = candidates
+  const canonicalCandidates = canonicalizeCandidates(candidates)
+  const eligibleCandidates = canonicalCandidates.candidates.filter(candidateEligible).sort((left, right) => String(left.id).localeCompare(String(right.id)))
+  const suppressedCandidateIds = canonicalCandidates.candidates
     .filter((candidate) => !candidateEligible(candidate))
     .map(({ id }) => String(id))
     .sort()
@@ -407,6 +472,27 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   const unavailableEntryIds = []
   const unavailableCandidateIds = new Set()
   const missingCurrencies = new Set()
+  const unresolvedCandidates = []
+  const candidateConversions = new Map()
+  for (const candidateId of canonicalCandidates.conflictingCandidateIds) {
+    for (const key of FLOW_KEYS) {
+      affectedMetricIds.add(key)
+      forecastUnavailableMetricIds.add(key)
+    }
+    unavailableCandidateIds.add(candidateId)
+    const conversion = candidateAmounts?.[candidateId]?.conversion ?? null
+    if (conversion?.missingCurrency) missingCurrencies.add(String(conversion.missingCurrency))
+    candidateConversions.set(candidateId, candidateConversionAudit({ candidateId, conversion, resolution: 'unresolved' }))
+    unresolvedCandidates.push({
+      candidateId,
+      sourceId: null,
+      reasons: ['duplicateCandidateId'],
+      affectedMetricIds: [...FLOW_KEYS],
+      missingCurrencies: unique([conversion?.missingCurrency]).sort(),
+      missingAccountIds: [],
+      missingAccountEndpoints: [],
+    })
+  }
   for (const entry of unavailableEntries) {
     const { context } = projectionContext(entry)
     for (const key of affectedMetricsFor(context, currencyDecimalPlaces)) {
@@ -455,8 +541,6 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   }
 
   const projected = []
-  const unresolvedCandidates = []
-  const candidateConversions = new Map()
   for (const occurrence of recurring.remaining.sort((left, right) => left.expectedDate.localeCompare(right.expectedDate) || left.expectedId.localeCompare(right.expectedId))) {
     const candidate = candidateById.get(occurrence.candidateId)
     if (!candidate) continue
@@ -532,7 +616,14 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   const hasProjectedSource = projected.some(({ sourceKind }) => sourceKind !== 'variable')
   const sourceStatus = historyReady ? 'ready' : hasProjectedSource || recurring.fulfilled.length > 0 ? 'partial' : 'insufficientHistory'
   const orderedAffectedMetricIds = FLOW_KEYS.filter((key) => affectedMetricIds.has(key))
-  const status = orderedAffectedMetricIds.length === FLOW_KEYS.length ? 'unavailable' : orderedAffectedMetricIds.length > 0 ? 'partial' : sourceStatus
+  const status =
+    canonicalCandidates.conflictingCandidateIds.length > 0
+      ? 'partial'
+      : orderedAffectedMetricIds.length === FLOW_KEYS.length
+        ? 'unavailable'
+        : orderedAffectedMetricIds.length > 0
+          ? 'partial'
+          : sourceStatus
   const final = emptyTotals(null)
   const progress = emptyTotals(null)
   const progressState = Object.fromEntries(FLOW_KEYS.map((key) => [key, sourceStatus === 'insufficientHistory' ? 'insufficientHistory' : 'notApplicable']))
@@ -600,6 +691,8 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
         suppressedCandidateIds,
         unresolvedCandidates: unresolvedCandidates.sort((left, right) => left.candidateId.localeCompare(right.candidateId)),
         candidateConversions: [...candidateConversions.values()].sort((left, right) => left.candidateId.localeCompare(right.candidateId)),
+        deduplicatedCandidateIds: canonicalCandidates.deduplicatedCandidateIds,
+        conflictingCandidateIds: canonicalCandidates.conflictingCandidateIds,
       },
       unavailable: {
         affectedMetricIds: orderedAffectedMetricIds,

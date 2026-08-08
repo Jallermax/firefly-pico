@@ -108,6 +108,16 @@ const definedCandidate = ({ id, sourceAccountId, destinationAccountId, direction
   expectedDates: [date],
 })
 
+const reorderSemanticValue = (value) => {
+  if (Array.isArray(value)) return [...value].reverse().map(reorderSemanticValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .reverse()
+      .map(([key, item]) => [key, reorderSemanticValue(item)]),
+  )
+}
+
 const expensesForMonths = (months, value, day = 20, options = {}) =>
   months.map((month, index) => entry({ id: `${options.idPrefix ?? 'expense'}-${index + 1}`, date: `${month}-${String(day).padStart(2, '0')}`, value, ...options }))
 
@@ -394,7 +404,7 @@ test('uses explicit currency precision for projected amounts and exact residual 
       ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
       candidates: [recurring],
       candidateAmounts: {
-        [recurring.id]: { value: 10.556, conversion: { mode: 'rate', sourceCurrency: 'EUR', displayCurrency: 'USD', isEstimated: true } },
+        [recurring.id]: { value: 10.556, conversion: { mode: 'rate', sourceCurrency: 'EUR', displayCurrency: 'USD', rate: 1, isEstimated: true } },
       },
       accountContexts,
       fetchCoverage: null,
@@ -409,6 +419,7 @@ test('uses explicit currency precision for projected amounts and exact residual 
       mode: 'rate',
       sourceCurrency: 'EUR',
       displayCurrency: 'USD',
+      rate: 1,
       isEstimated: true,
     })
 
@@ -715,6 +726,122 @@ test('rejects finite candidate values with unavailable conversion evidence and a
     },
   ])
   assert.deepEqual(shuffled.audit.recurring.candidateConversions, ordered.audit.recurring.candidateConversions)
+})
+
+test('canonicalizes semantically equivalent duplicate candidate IDs before matching and projection', () => {
+  const candidate = definedCandidate({ id: 'duplicate-equivalent', sourceAccountId: 'checking', destinationAccountId: 'landlord' })
+  candidate.evidence = {
+    entryIds: ['entry-b', 'entry-a'],
+    transactionIds: ['transaction-b', 'transaction-a'],
+    dates: ['2026-07-20', '2026-06-20'],
+  }
+  const duplicate = reorderSemanticValue(candidate)
+  const options = {
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+    candidateAmounts: {
+      [candidate.id]: { value: 100, conversion: { mode: 'exact', sourceCurrency: 'USD', displayCurrency: 'USD', isEstimated: false } },
+    },
+    accountContexts,
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+  const ordered = buildForecastCore({ ...options, candidates: [candidate, duplicate] })
+  const reversed = buildForecastCore({ ...options, candidates: [duplicate, candidate] })
+
+  assert.equal(ordered.remainingFromToday.expenses, 100)
+  assert.equal(ordered.dailyProjectedEntries.length, 1)
+  assert.deepEqual(ordered.audit.recurring.deduplicatedCandidateIds, [candidate.id])
+  assert.deepEqual(ordered.audit.recurring.conflictingCandidateIds, [])
+  assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+})
+
+test('excludes conflicting duplicate candidate IDs without choosing an input-order winner', () => {
+  const expense = definedCandidate({ id: 'duplicate-conflict', sourceAccountId: 'checking', destinationAccountId: 'landlord' })
+  const income = definedCandidate({ id: 'duplicate-conflict', sourceAccountId: 'employer', destinationAccountId: 'checking', direction: 'income' })
+  const options = {
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+    candidateAmounts: {
+      [expense.id]: { value: 100, conversion: { mode: 'exact', sourceCurrency: 'USD', displayCurrency: 'USD', isEstimated: false } },
+    },
+    accountContexts,
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+  const expenseFirst = buildForecastCore({ ...options, candidates: [expense, income] })
+  const incomeFirst = buildForecastCore({ ...options, candidates: [income, expense] })
+
+  assert.equal(expenseFirst.status, 'partial')
+  assert.deepEqual(expenseFirst.dailyProjectedEntries, [])
+  assert.equal(expenseFirst.final.expenses, null)
+  assert.equal(expenseFirst.final.income, null)
+  assert.deepEqual(expenseFirst.audit.recurring.deduplicatedCandidateIds, [])
+  assert.deepEqual(expenseFirst.audit.recurring.conflictingCandidateIds, [expense.id])
+  assert.deepEqual(expenseFirst.audit.recurring.unresolvedCandidates, [
+    {
+      candidateId: expense.id,
+      sourceId: null,
+      reasons: ['duplicateCandidateId'],
+      affectedMetricIds: [
+        'income',
+        'refunds',
+        'expenses',
+        'savingsDeposits',
+        'savingsWithdrawals',
+        'debtRepayments',
+        'newDebt',
+        'savingsChange',
+        'debtChange',
+        'netWorthChange',
+        'availableCashChange',
+      ],
+      missingCurrencies: [],
+      missingAccountIds: [],
+      missingAccountEndpoints: [],
+    },
+  ])
+  assert.equal(JSON.stringify(incomeFirst), JSON.stringify(expenseFirst))
+})
+
+test('requires usable authoritative conversion provenance before accepting a finite amount', () => {
+  const candidate = definedCandidate({ id: 'conversion-contract', sourceAccountId: 'checking', destinationAccountId: 'landlord' })
+  const invalidEvidence = [
+    { value: 100 },
+    { value: 100, conversion: { mode: 'unknown', sourceCurrency: 'USD', displayCurrency: 'USD', isEstimated: false } },
+    { value: 100, conversion: { mode: 'exact', sourceCurrency: '', displayCurrency: 'USD', isEstimated: false } },
+    { value: 100, conversion: { mode: 'exact', sourceCurrency: 'USD', displayCurrency: ' ', isEstimated: false } },
+    { value: 100, conversion: { mode: 'rate', sourceCurrency: 'EUR', displayCurrency: 'USD', rate: 0, isEstimated: true } },
+    { value: 100, conversion: { mode: 'rate', sourceCurrency: 'EUR', displayCurrency: 'USD', rate: 1.1, isEstimated: false } },
+  ]
+  const build = (amountEvidence) =>
+    buildForecastCore({
+      ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+      candidates: [candidate],
+      candidateAmounts: { [candidate.id]: amountEvidence },
+      accountContexts,
+      fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+      currencyDecimalPlaces: 2,
+      historyMonths: 6,
+      today: '2026-08-10',
+      endDate: '2026-08-31',
+    })
+
+  for (const evidence of invalidEvidence) {
+    const result = build(evidence)
+    assert.equal(result.status, 'partial')
+    assert.equal(result.final.expenses, null)
+    assert.deepEqual(result.dailyProjectedEntries, [])
+    assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].reasons, ['unavailableAmount'])
+  }
+
+  const exactPrimary = build({ value: 100, conversion: { mode: 'exactPrimary', sourceCurrency: 'USD', displayCurrency: 'USD', isEstimated: false } })
+  assert.equal(exactPrimary.remainingFromToday.expenses, 100)
+  assert.equal(exactPrimary.dailyProjectedEntries.length, 1)
 })
 
 test('keeps authoritative candidates with missing amount or account classification unresolved', () => {
