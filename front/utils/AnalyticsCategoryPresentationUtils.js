@@ -2,7 +2,8 @@ export const buildCategorySummaryPresentation = ({ summaries, isDesktopLayout, l
   layout: isDesktopLayout ? 'desktop' : 'mobile',
   labels,
   rows: summaries.map((item) => {
-    const currentForecastLabel = item.forecastAvailable ? item.forecastLabel : labels.insufficientHistory
+    const unavailableLabel = item.status === 'insufficientHistory' ? labels.insufficientHistory : labels.unavailable
+    const currentForecastLabel = item.forecastAvailable ? item.forecastLabel : unavailableLabel
     return {
       ...item,
       currentForecastLabel,
@@ -10,7 +11,7 @@ export const buildCategorySummaryPresentation = ({ summaries, isDesktopLayout, l
         { id: 'average', label: labels.average, value: item.averageLabel },
         { id: 'currentActual', label: labels.currentActual, value: item.currentActualLabel },
         { id: 'currentForecast', label: labels.currentForecast, value: currentForecastLabel },
-        { id: 'remainingFromToday', label: labels.remainingFromToday, value: item.forecastAvailable ? item.remainingFromTodayLabel : labels.insufficientHistory },
+        { id: 'remainingFromToday', label: labels.remainingFromToday, value: item.forecastAvailable ? item.remainingFromTodayLabel : unavailableLabel },
       ],
     }
   }),

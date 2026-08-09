@@ -27,6 +27,8 @@
       "retry": "Tentar novamente",
       "stale": "Exibindo o resultado completo anterior durante a atualização",
       "details": "Detalhes",
+      "unavailable_evidence_count": "Não foi possível verificar {count} entradas da previsão.",
+      "more_items": "Mais {count}",
       "partial": "Parcial",
       "how_calculated": "Como isso é calculado",
       "exact_values": "Valores exatos"

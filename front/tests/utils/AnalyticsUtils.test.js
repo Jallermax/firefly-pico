@@ -863,8 +863,26 @@ test('distinguishes insufficient forecast history from a genuinely missing forec
   const formatValue = (value) => (Number.isFinite(value) ? `${value} USD` : '—')
 
   assert.equal(
-    AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: false, value: null, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }),
+    AnalyticsUtils.formatFinancialTrendForecastValue({
+      forecastAvailable: false,
+      status: 'insufficientHistory',
+      value: null,
+      formatValue,
+      insufficientHistoryLabel: 'Localized two-month minimum',
+      unavailableLabel: 'Localized unavailable input',
+    }),
     'Localized two-month minimum',
+  )
+  assert.equal(
+    AnalyticsUtils.formatFinancialTrendForecastValue({
+      forecastAvailable: false,
+      status: 'unavailable',
+      value: null,
+      formatValue,
+      insufficientHistoryLabel: 'Localized two-month minimum',
+      unavailableLabel: 'Localized unavailable input',
+    }),
+    'Localized unavailable input',
   )
   assert.equal(AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: true, value: null, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }), '—')
   assert.equal(AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: true, value: 25, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }), '25 USD')

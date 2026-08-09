@@ -202,6 +202,7 @@ const summaryPresentation = computed(() =>
       currentForecast: t('analytics.common.end_of_month'),
       remainingFromToday: t('analytics.common.from_today'),
       insufficientHistory: t('analytics.category.insufficient_history'),
+      unavailable: t('analytics.common.partial'),
     },
   }),
 )

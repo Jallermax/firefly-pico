@@ -2601,6 +2601,18 @@ body {
     color: var(--van-danger-color);
 }
 
+.analytics-warning-details summary {
+    min-height: 44px;
+    padding: 12px 0 8px;
+    cursor: pointer;
+}
+
+.analytics-warning-evidence {
+    max-height: 96px;
+    overflow: auto;
+    overflow-wrap: anywhere;
+}
+
 .analytics-grouped-warning {
     display: flex;
     align-items: center;

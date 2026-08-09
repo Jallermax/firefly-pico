@@ -25,7 +25,12 @@
       <div>{{ $t('analytics.daily_forecast.unavailable') }}</div>
       <div v-if="dailyState.unavailableTransactionIds.length">{{ $t('analytics.common.unavailable_amounts', { ids: dailyState.unavailableTransactionIds.join(', ') }) }}</div>
       <div v-if="dailyState.unclassifiedTransactionIds.length">{{ $t('analytics.common.unavailable_amounts', { ids: dailyState.unclassifiedTransactionIds.join(', ') }) }}</div>
-      <div v-if="dailyState.unavailableCandidateIds.length">{{ $t('analytics.daily_forecast.unavailable_sources', { ids: dailyState.unavailableCandidateIds.join(', ') }) }}</div>
+      <div v-if="unavailableEvidenceSummary.count">{{ $t('analytics.common.unavailable_evidence_count', { count: unavailableEvidenceSummary.count }) }}</div>
+      <details v-if="unavailableEvidenceSummary.previewIds.length" class="analytics-warning-details">
+        <summary>{{ $t('analytics.common.details') }}</summary>
+        <div class="analytics-warning-evidence">{{ unavailableEvidenceSummary.previewIds.join(', ') }}</div>
+        <div v-if="unavailableEvidenceSummary.omittedCount">{{ $t('analytics.common.more_items', { count: unavailableEvidenceSummary.omittedCount }) }}</div>
+      </details>
     </div>
     <template v-else>
       <div v-if="dailyState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
@@ -36,7 +41,12 @@
       <div v-if="dailyState.isPartiallyUnavailable" class="analytics-warning" role="status">
         <div>{{ $t(`analytics.daily_forecast.${dailyState.forecastStatus}`) }}</div>
         <div v-if="dailyState.unavailableTransactionIds.length">{{ $t('analytics.common.unavailable_amounts', { ids: dailyState.unavailableTransactionIds.join(', ') }) }}</div>
-        <div v-if="dailyState.unavailableCandidateIds.length">{{ $t('analytics.daily_forecast.unavailable_sources', { ids: dailyState.unavailableCandidateIds.join(', ') }) }}</div>
+        <div v-if="unavailableEvidenceSummary.count">{{ $t('analytics.common.unavailable_evidence_count', { count: unavailableEvidenceSummary.count }) }}</div>
+        <details v-if="unavailableEvidenceSummary.previewIds.length" class="analytics-warning-details">
+          <summary>{{ $t('analytics.common.details') }}</summary>
+          <div class="analytics-warning-evidence">{{ unavailableEvidenceSummary.previewIds.join(', ') }}</div>
+          <div v-if="unavailableEvidenceSummary.omittedCount">{{ $t('analytics.common.more_items', { count: unavailableEvidenceSummary.omittedCount }) }}</div>
+        </details>
         <div v-if="dailyState.sourceErrors.length">
           <div v-for="sourceError in dailyState.sourceErrors" :key="sourceError.source">{{ $t('analytics.daily_forecast.error') }} ({{ sourceError.source }})</div>
           <van-button size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
@@ -103,6 +113,7 @@ const chartSeries = computed(() => ({
 }))
 const hasActivity = computed(() => daily.value.barGroups.some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)))
 const hasRetainedData = computed(() => dailyState.value.isStale && daily.value.dateKeys.length > 0)
+const unavailableEvidenceSummary = computed(() => dailyState.value.unavailableEvidenceSummary ?? { count: 0, previewIds: [], omittedCount: 0 })
 const legendItems = computed(() => [
   { id: 'actual', label: sourceLabel('actual'), color: 'var(--transfer2)' },
   { id: 'defined', label: sourceLabel('defined'), color: 'var(--income2)' },

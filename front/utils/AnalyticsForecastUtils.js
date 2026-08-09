@@ -137,6 +137,35 @@ const flowAmountsFor = (context, amount, currencyDecimalPlaces) => {
 
 const affectedMetricsFor = (context, currencyDecimalPlaces) => FLOW_KEYS.filter((key) => flowAmountsFor(context, 1, currencyDecimalPlaces)[key] !== 0)
 
+const possibleEndpointKinds = (direction, endpoint) => {
+  if (direction === 'expense') return endpoint === 'source' ? [...MONEY_KINDS] : ['expense']
+  if (direction === 'income') return endpoint === 'source' ? ['revenue'] : [...MONEY_KINDS]
+  if (direction === 'refund') return endpoint === 'source' ? ['expense'] : [...MONEY_KINDS]
+  if (direction === 'transfer') return [...MONEY_KINDS]
+  return []
+}
+
+const affectedMetricsForMissingAccountContext = (context, currencyDecimalPlaces) => {
+  const sourceKinds = context.sourceKind ? [context.sourceKind] : possibleEndpointKinds(context.direction, 'source')
+  const destinationKinds = context.destinationKind ? [context.destinationKind] : possibleEndpointKinds(context.direction, 'destination')
+  if (sourceKinds.length === 0 || destinationKinds.length === 0) return [...FLOW_KEYS]
+
+  const affected = new Set()
+  for (const sourceKind of sourceKinds) {
+    for (const destinationKind of destinationKinds) {
+      const possibleContext = {
+        ...context,
+        sourceKind,
+        destinationKind,
+        sourceIncluded: context.sourceKind ? context.sourceIncluded : accountIncluded(null, sourceKind),
+        destinationIncluded: context.destinationKind ? context.destinationIncluded : accountIncluded(null, destinationKind),
+      }
+      for (const key of affectedMetricsFor(possibleContext, currencyDecimalPlaces)) affected.add(key)
+    }
+  }
+  return FLOW_KEYS.filter((key) => affected.has(key))
+}
+
 export function classifyForecastFlowAmounts({ entry, accountContexts = null, currencyDecimalPlaces }) {
   const { context } = projectionContext(entry, accountContexts)
   const amount = amountOf(entry)
@@ -700,7 +729,9 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     const input = candidateProjectionInput({ candidate, candidateAmounts, accountContexts })
     if (input.reasons.length > 0) {
       candidateConversions.set(String(candidate.id), candidateConversionAudit({ candidateId: candidate.id, conversion: input.conversion, resolution: 'unresolved' }))
-      const candidateAffectedMetrics = input.reasons.includes('missingAccountContext') ? [...FLOW_KEYS] : affectedMetricsFor(input.context, currencyDecimalPlaces)
+      const candidateAffectedMetrics = input.reasons.includes('missingAccountContext')
+        ? affectedMetricsForMissingAccountContext(input.context, currencyDecimalPlaces)
+        : affectedMetricsFor(input.context, currencyDecimalPlaces)
       for (const key of candidateAffectedMetrics) {
         affectedMetricIds.add(key)
         forecastUnavailableMetricIds.add(key)

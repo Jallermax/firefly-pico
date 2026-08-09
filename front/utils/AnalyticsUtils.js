@@ -1005,8 +1005,9 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
   })
 }
 
-export function formatFinancialTrendForecastValue({ forecastAvailable, value, formatValue, insufficientHistoryLabel }) {
-  return forecastAvailable ? formatValue(value) : insufficientHistoryLabel
+export function formatFinancialTrendForecastValue({ forecastAvailable, status, value, formatValue, insufficientHistoryLabel, unavailableLabel = insufficientHistoryLabel }) {
+  if (forecastAvailable) return formatValue(value)
+  return status === 'insufficientHistory' ? insufficientHistoryLabel : unavailableLabel
 }
 
 export function rankCategoryIds({ ledger, averageMonths, today }) {

@@ -6,7 +6,7 @@ import { createSSRApp, h, nextTick, reactive, ref } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { parse as parseSfc } from '@vue/compiler-sfc'
 import { format, subMonths } from 'date-fns'
-import { createAnalyticsStore } from '../../stores/analyticsStoreFactory.js'
+import { createAnalyticsStore, summarizeUnavailableEvidence } from '../../stores/analyticsStoreFactory.js'
 import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 
@@ -31,6 +31,7 @@ let transactionLinkTypeResult = async () => ({ ok: true, data: [] })
 let subscriptionResult = async () => ({ ok: true, data: [] })
 let recurringTransactionResult = async () => ({ ok: true, data: [] })
 let exchangeRateResponse = async () => {}
+let transformAnalyticsTransactions = (transactions) => transactions
 let analyticsStore = null
 let now = new Date()
 const ledgerBuilds = []
@@ -143,7 +144,7 @@ const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   transactionLinkTypeRepository: new TransactionLinkTypeRepository(),
   subscriptionRepository: new SubscriptionRepository(),
   recurringTransactionRepository: new RecurringTransactionRepository(),
-  transformTransactions: (transactions) => transactions,
+  transformTransactions: (transactions) => transformAnalyticsTransactions(transactions),
   getCurrencyCode: (value) => Currency.getCode(value),
   getCurrencyDecimalPlaces: (value) => Currency.getDecimalPlaces(value),
   getExcludedTransactionFilters: () => [],
@@ -293,6 +294,7 @@ beforeEach(() => {
   subscriptionResult = async () => ({ ok: true, data: [] })
   recurringTransactionResult = async () => ({ ok: true, data: [] })
   exchangeRateResponse = async () => {}
+  transformAnalyticsTransactions = (transactions) => transactions
   currencyStore.fetchExchangeRate = async () => exchangeRateResponse()
 })
 
@@ -371,6 +373,25 @@ test('builds one coherent ledger and feeds the same entries to every balance pro
   )
   assert.equal(store.categorySummary.series[0].currentActual, 25)
   assert.equal(store.selectedFlow.audit.totalDestinations, 25)
+})
+
+test('preserves raw repository amounts instead of applying the transaction form transformer', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  transactionResult = [currentExpenseTransaction(25)]
+  transformAnalyticsTransactions = (transactions) =>
+    transactions.map((transaction) => ({
+      ...transaction,
+      attributes: {
+        ...transaction.attributes,
+        transactions: transaction.attributes.transactions.map((split) => ({ ...split, amount: null })),
+      },
+    }))
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.ledger.entries[0].value, 25)
+  assert.equal(store.financialTrend.expenses.currentActual, 25)
 })
 
 test('feeds linked refund metadata from the shared ledger directly into Money flow', async () => {
@@ -1393,6 +1414,7 @@ test('cash use keeps refund-source retry visible with blocking audit evidence', 
     },
     hasRetainedData: true,
     projectedUnavailableIds: [],
+    projectedUnavailableSummary: { count: 0, previewIds: [], omittedCount: 0 },
   })
 
   assert.match(html, /analytics\.common\.unavailable_amounts/)
@@ -1627,6 +1649,132 @@ test('retains structured projected cash-use unavailability separately from actua
       statuses: [{ metricId: 'expenses', status: 'unavailable' }],
     },
   ])
+})
+
+test('uses subscription-linked history to classify definitions whose endpoint fields are omitted', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, expense]
+  const dates = ['2026-02-20', '2026-03-20', '2026-04-20', '2026-05-20', '2026-06-20', '2026-07-20']
+  transactionResult = dates.map((date, index) => dailyTransaction({ id: `paid-rent-${index}`, date, amount: 60, source: checking, destination: expense, categoryId: 'rent' }))
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'rent-without-endpoints',
+        attributes: {
+          active: true,
+          name: 'Rent',
+          repeat_freq: 'monthly',
+          amount_avg: '60',
+          currency_code: 'USD',
+          pay_dates: dates.map((date, index) => ({ date, transaction_group_id: `paid-rent-${index}` })),
+          next_expected_match: '2026-08-20',
+        },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.financialTrend.forecast.audit.unavailable.candidateIds, [])
+  assert.equal(
+    store.financialTrend.forecast.dailyProjectedEntries.some(({ sourceId, sourceKind }) => sourceId === 'rent-without-endpoints' && sourceKind === 'defined'),
+    true,
+  )
+  assert.equal(
+    store.financialTrend.forecast.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind !== 'variable').reduce((total, { flowAmounts }) => total + flowAmounts.expenses, 0),
+    60,
+  )
+  assert.equal(
+    store.financialTrend.forecast.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable').reduce((total, { flowAmounts }) => total + flowAmounts.expenses, 0),
+    0,
+  )
+  assert.equal(store.financialTrend.forecast.audit.recurring.removedHistoryEntryIds.length, store.financialTrend.forecast.audit.history.months.length)
+  assert.equal(store.financialTrend.forecast.final.expenses, 60)
+  assert.equal(store.dailyForecastState.isPartiallyUnavailable, false)
+})
+
+test('analytics warnings summarize projected audit evidence without rendering every daily evidence ID', async () => {
+  const cashUseHtml = await renderAnalyticsCard('../../components/analytics/analytics-cash-use.vue', {
+    analyticsStore: { selectedCategoryIds: [], balancePeriod: 3, cashUseMode: 'spending', cashUseDetail: 5, retryCashUse: () => {} },
+    facetItems: [],
+    modeItems: [],
+    periodItems: [],
+    detailItems: [],
+    cashUseState: {
+      status: 'ready',
+      error: null,
+      isStale: false,
+      isUnavailable: true,
+      sourceErrors: [],
+      unavailableTransactionIds: [],
+      auditStatus: 'unavailable',
+      projectedUnavailability: [],
+    },
+    hasRetainedData: false,
+    projectedUnavailableIds: ['projected:variable:should-not-render'],
+    projectedUnavailableSummary: { count: 23, previewIds: ['defined:subscription:rent'], omittedCount: 22 },
+  })
+  const dailyHtml = await renderAnalyticsCard('../../components/analytics/analytics-daily-forecast.vue', {
+    analyticsStore: { dailyForecastMonths: 6, retryDailyForecast: () => {} },
+    monthTitle: 'August 2026',
+    periodItems: [],
+    dailyState: {
+      status: 'partial',
+      forecastStatus: 'partial',
+      isStale: false,
+      isBlockingUnavailable: false,
+      isPartiallyUnavailable: true,
+      unavailableTransactionIds: [],
+      unclassifiedTransactionIds: [],
+      unavailableCandidateIds: ['defined:subscription:rent'],
+      sourceErrors: [],
+    },
+    unavailableEvidenceSummary: { count: 1, previewIds: ['defined:subscription:rent'], omittedCount: 0 },
+    chartSeries: { barGroups: [], availableLine: {} },
+    legendItems: [],
+    selectedProjectedSources: [],
+    hasRetainedData: false,
+    hasActivity: false,
+    formatCurrency: String,
+    onSelect: () => {},
+    onSelectPoint: () => {},
+  })
+
+  for (const html of [cashUseHtml, dailyHtml]) {
+    assert.match(html, /analytics\.common\.unavailable_evidence_count/)
+    assert.match(html, /<details[^>]+analytics-warning-details/)
+    assert.match(html, /defined:subscription:rent/)
+    assert.doesNotMatch(html, /projected:variable:/)
+  }
+
+  for (const locale of localeNames) {
+    const common = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.common
+    assert.equal(typeof common.unavailable_evidence_count, 'string', locale)
+    assert.equal(typeof common.more_items, 'string', locale)
+  }
+})
+
+test('forecast warning summaries exclude per-day projected row IDs', () => {
+  assert.deepEqual(
+    summarizeUnavailableEvidence([
+      {
+        metricIds: ['expenses'],
+        sourceIds: ['subscription-rent', 'projected:variable:expense:2026-08-20'],
+        candidateIds: ['defined:subscription:rent'],
+        evidenceIds: ['projected:variable:expense:2026-08-20'],
+      },
+    ]),
+    {
+      count: 3,
+      metricIds: ['expenses'],
+      previewIds: ['defined:subscription:rent', 'subscription-rent'],
+      omittedCount: 0,
+    },
+  )
 })
 
 test('projects every local calendar day with a persisted 3/6/12 history selector and explicit zero days across DST', async () => {
@@ -2107,6 +2255,34 @@ test('applies per-metric unavailability to future daily components without blank
   assert.equal(store.dailyForecastState.isUnavailable, false)
   assert.deepEqual(store.dailyForecastState.unavailableMetricIds, ['expenses'])
   assert.deepEqual(store.dailyForecastState.unavailableCandidateIds, ['defined:subscription:foreign-expense'])
+})
+
+test('labels a defensible chart with account-dependent unresolved forecast inputs as partial', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const revenue = analyticsAccount('revenue', 'revenue')
+  accountStore.accountList = [checking, revenue]
+  transactionResult = [dailyTransaction({ id: 'actual-income', date: '2026-08-05', amount: 100, source: revenue, destination: checking })]
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'unclassified-subscription',
+        attributes: { active: true, name: 'Unknown schedule', repeat_freq: 'monthly', amount_avg: '60', currency_code: 'USD', next_expected_match: '2026-08-20' },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.dailyForecast.status, 'partial')
+  assert.equal(store.dailyForecast.statusByMetric.income, 'ready')
+  assert.equal(store.dailyForecast.statusByMetric.refunds, 'ready')
+  assert.equal(store.dailyForecast.statusByMetric.expenses, 'unavailable')
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+  assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
+  assert.equal(store.dailyForecastState.forecastStatus, 'partial')
 })
 
 test('keeps selected-history missing-FX Firefly transaction IDs separate from entry and projected evidence IDs', async () => {

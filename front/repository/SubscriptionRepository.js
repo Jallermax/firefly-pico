@@ -2,7 +2,7 @@ import BaseRepository from './BaseRepository.js'
 
 export default class SubscriptionRepository extends BaseRepository {
   constructor() {
-    super('subscriptions')
+    super('api/subscriptions')
   }
 
   getParams(startDate, endDate) {

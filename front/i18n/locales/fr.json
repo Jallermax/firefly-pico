@@ -27,6 +27,8 @@
       "retry": "Réessayer",
       "stale": "Affichage du dernier résultat complet pendant l’actualisation",
       "details": "Détails",
+      "unavailable_evidence_count": "{count} données de prévision n’ont pas pu être vérifiées.",
+      "more_items": "{count} autres",
       "partial": "Partiel",
       "how_calculated": "Méthode de calcul",
       "exact_values": "Valeurs exactes"

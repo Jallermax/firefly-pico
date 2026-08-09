@@ -27,6 +27,8 @@
       "retry": "Erneut versuchen",
       "stale": "Während der Aktualisierung wird das vorherige vollständige Ergebnis angezeigt",
       "details": "Details",
+      "unavailable_evidence_count": "{count} Prognoseeingaben konnten nicht verifiziert werden.",
+      "more_items": "{count} weitere",
       "partial": "Teilweise",
       "how_calculated": "So wird dies berechnet",
       "exact_values": "Exakte Werte"

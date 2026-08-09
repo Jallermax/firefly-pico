@@ -15,7 +15,7 @@ import {
   summarizeTotalExpenseWindow,
 } from '../utils/AnalyticsUtils.js'
 import { buildRemainingActivityForecast, classifyForecastFlowAmounts, projectMetricForecast } from '../utils/AnalyticsForecastUtils.js'
-import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../utils/AnalyticsRecurringUtils.js'
+import { buildDefinedOccurrences, detectRecurringCandidates, enrichRecurringCandidatesFromEvidence, mergeRecurringCandidates } from '../utils/AnalyticsRecurringUtils.js'
 import { buildCashUseSeries } from '../utils/AnalyticsCashUseUtils.js'
 
 const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt']
@@ -30,6 +30,7 @@ const DAILY_SOURCE_KEYS = ['income', 'refunds', 'savingsWithdrawals', 'newDebt']
 const DAILY_USE_KEYS = ['expenses', 'savingsDeposits', 'debtRepayments']
 const DAILY_SOURCE_KINDS = ['actual', 'defined', 'inferred', 'variable']
 const CATEGORY_SERIES_LIMIT = 6
+const UNAVAILABLE_EVIDENCE_PREVIEW_LIMIT = 20
 
 const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
 const financialMetricIdsForSavingsView = (view) => [...balanceMetricIdsForSavingsView(view), 'expenses']
@@ -71,6 +72,16 @@ const dailyConfidence = (confidence) => {
   return { ...confidence, level }
 }
 const dailyEntryContributes = (entry, keys) => keys.some((key) => entry.flowAmounts?.[key] !== 0)
+export const summarizeUnavailableEvidence = (records) => {
+  const metricIds = [...new Set(records.flatMap(({ metricIds = [] }) => metricIds).map(String))].sort()
+  const sourceIds = [...new Set(records.flatMap(({ sourceIds = [], candidateIds = [] }) => [...sourceIds, ...candidateIds]).map(String))].filter((id) => !id.startsWith('projected:')).sort()
+  return {
+    count: metricIds.length + sourceIds.length,
+    metricIds,
+    previewIds: sourceIds.slice(0, UNAVAILABLE_EVIDENCE_PREVIEW_LIMIT),
+    omittedCount: Math.max(0, sourceIds.length - UNAVAILABLE_EVIDENCE_PREVIEW_LIMIT),
+  }
+}
 
 const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, currencyDecimalPlaces }) => {
   const dateKeys = dailyDates(today)
@@ -366,7 +377,6 @@ export function createAnalyticsStore(id, useDependencies) {
       transactionLinkTypeRepository,
       subscriptionRepository,
       recurringTransactionRepository,
-      transformTransactions,
       getCurrencyCode,
       getCurrencyDecimalPlaces,
       getExcludedTransactionFilters,
@@ -556,21 +566,26 @@ export function createAnalyticsStore(id, useDependencies) {
         endDate: forecastEndDate.value,
       }),
     )
+    const enrichCandidates = (candidates) => enrichRecurringCandidatesFromEvidence({ candidates, entries: ledger.value.entries })
     const forecastCandidates = computed(() =>
-      mergeRecurringCandidates({
-        defined: forecastDefinedCandidates.value,
-        inferred: detectRecurringCandidates({ entries: ledger.value.entries, startDate: forecastStartDate.value, endDate: DateUtils.dateToString(getNow()) }).candidates,
-      }),
+      enrichCandidates(
+        mergeRecurringCandidates({
+          defined: enrichCandidates(forecastDefinedCandidates.value),
+          inferred: detectRecurringCandidates({ entries: ledger.value.entries, startDate: forecastStartDate.value, endDate: DateUtils.dateToString(getNow()) }).candidates,
+        }),
+      ),
     )
     const dailyForecastCandidates = (historyMonths) => {
       const currentMonth = startOfMonth(getNow())
       const startDate = DateUtils.dateToString(startOfMonth(subMonths(currentMonth, Number(historyMonths))))
       const endDate = DateUtils.dateToString(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 0))
       const entries = ledger.value.entries.filter(({ date }) => date >= startDate && date <= endDate)
-      return mergeRecurringCandidates({
-        defined: forecastDefinedCandidates.value,
-        inferred: detectRecurringCandidates({ entries, startDate, endDate }).candidates,
-      })
+      return enrichCandidates(
+        mergeRecurringCandidates({
+          defined: enrichCandidates(forecastDefinedCandidates.value),
+          inferred: detectRecurringCandidates({ entries, startDate, endDate }).candidates,
+        }),
+      )
     }
     const forecastAccountContexts = computed(() =>
       Object.fromEntries(
@@ -912,13 +927,17 @@ export function createAnalyticsStore(id, useDependencies) {
       const ids = new Set(items.map(({ id }) => id))
       return [...items, ...persistedSelectedCategoryIds.value.filter((id) => !ids.has(id)).map((id) => ({ id, amount: 0 }))]
     })
-    const cashUseState = computed(() => ({
-      ...categoryState,
-      isUnavailable: !['ok', 'partial'].includes(cashUseSeries.value.audit.status),
-      auditStatus: cashUseSeries.value.audit.status,
-      unavailableTransactionIds: [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort(),
-      projectedUnavailability: cashUseSeries.value.audit.unavailable.flatMap(({ monthKey, projected }) => (projected ? [{ monthKey, ...projected }] : [])),
-    }))
+    const cashUseState = computed(() => {
+      const projectedUnavailability = cashUseSeries.value.audit.unavailable.flatMap(({ monthKey, projected }) => (projected ? [{ monthKey, ...projected }] : []))
+      return {
+        ...categoryState,
+        isUnavailable: !['ok', 'partial'].includes(cashUseSeries.value.audit.status),
+        auditStatus: cashUseSeries.value.audit.status,
+        unavailableTransactionIds: [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort(),
+        projectedUnavailability,
+        projectedUnavailableSummary: summarizeUnavailableEvidence(projectedUnavailability),
+      }
+    })
     const dailyForecast = computed(() => {
       const candidates = dailyForecastCandidates(dailyForecastMonths.value)
       return buildDailyForecastProjection({
@@ -957,7 +976,7 @@ export function createAnalyticsStore(id, useDependencies) {
           dailyForecast.value.reconciliation.status === 'unavailable')
       return {
         ...categoryState,
-        forecastStatus,
+        forecastStatus: isPartiallyUnavailable && forecastStatus === 'unavailable' ? 'partial' : forecastStatus,
         isPartial: isPartiallyUnavailable,
         isUnavailable: isBlockingUnavailable,
         isBlockingUnavailable,
@@ -967,6 +986,7 @@ export function createAnalyticsStore(id, useDependencies) {
         unavailableCandidateIds: dailyForecast.value.audit.unavailableCandidateIds,
         unclassifiedTransactionIds: dailyForecast.value.audit.unclassifiedTransactionIds,
         missingCurrencies: dailyForecast.value.audit.missingCurrencies,
+        unavailableEvidenceSummary: summarizeUnavailableEvidence([{ metricIds: unavailableMetricIds, candidateIds: dailyForecast.value.audit.unavailableCandidateIds }]),
         sourceErrors,
       }
     })
@@ -976,7 +996,7 @@ export function createAnalyticsStore(id, useDependencies) {
       const filters = [{ field: 'query', value: query.join(' ') }]
       const getAll = (options) => transactionRepository.searchTransaction({ ...options, showLoading: false, showErrorToast: false })
       const result = await transactionRepository.getAllWithMergeResult({ filters, getAll, pageSize: 200 })
-      return result.ok ? { ok: true, data: transformTransactions(result.data) } : { ok: false, data: [] }
+      return result.ok ? { ok: true, data: result.data } : { ok: false, data: [] }
     }
 
     async function loadSnapshot({ force = false } = {}) {

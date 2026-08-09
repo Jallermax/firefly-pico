@@ -845,7 +845,8 @@ test('combination chart and card wire accessible interaction targets and exact e
   assert.match(card, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
   assert.match(card, /TransactionFilterUtils\.filters\.id\.toUrl/)
   assert.match(card, /projectLineChartSelection/)
-  assert.match(card, /projectedUnavailability/)
+  assert.match(card, /projectedUnavailableSummary/)
+  assert.doesNotMatch(card, /flatMap\(\(\{ metricIds, sourceIds, candidateIds, evidenceIds \}\)/)
 
   assert.deepEqual(
     projectLineChartSelection({ activation: 'pointer', transactionIds: ['actual-2', 'actual-1'], kind: 'forecast', route: '/transactions/list', toUrl: (ids) => `id=${ids.join(',')}` }),

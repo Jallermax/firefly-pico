@@ -443,8 +443,10 @@ const cadenceFromDefinition = ({ attributes, repetition = {}, dates, sourceType 
   return null
 }
 
+const subscriptionPaidDates = (attributes) => [...(attributes.paid_dates ?? []), ...(attributes.pay_dates ?? [])]
+
 const datesFromDefinition = ({ attributes, repetition = null, sourceType }) => {
-  const values = repetition ? (repetition.occurrences ?? []) : sourceType === 'subscription' ? [...(attributes.pay_dates ?? []), attributes.next_expected_match] : (attributes.occurrences ?? [])
+  const values = repetition ? (repetition.occurrences ?? []) : sourceType === 'subscription' ? [...subscriptionPaidDates(attributes), attributes.next_expected_match] : (attributes.occurrences ?? [])
   return unique(values.map(dateKey)).sort()
 }
 
@@ -658,7 +660,8 @@ const definedCandidate = ({ item, sourceType, startDate, endDate, schedule, incl
     sourceType === 'subscription'
       ? expectedAmount({ value: attributes.pc_amount_avg ?? attributes.amount_avg, min: attributes.pc_amount_min ?? attributes.amount_min, max: attributes.pc_amount_max ?? attributes.amount_max })
       : expectedAmount({ value: transaction.amount ?? attributes.amount })
-  const paidTransactionIds = unique((attributes.paid_dates ?? []).map(({ transaction_group_id }) => idOf(transaction_group_id))).sort()
+  const paidDates = subscriptionPaidDates(attributes)
+  const paidTransactionIds = unique(paidDates.map((item) => idOf(item?.transaction_group_id))).sort()
   const definitionAudit = {
     authoritativeOccurrenceDates: [...schedule.dates],
     canonicalStreams: schedule.canonicalStreams,
@@ -676,7 +679,7 @@ const definedCandidate = ({ item, sourceType, startDate, endDate, schedule, incl
     cadence,
     expectedAmount: amount,
     source: { type: sourceType, id: sourceId, authoritative: true },
-    evidence: { entryIds: [], transactionIds: paidTransactionIds, dates: unique((attributes.paid_dates ?? []).map(({ date }) => dateKey(date))).sort() },
+    evidence: { entryIds: [], transactionIds: paidTransactionIds, dates: unique(paidDates.map((item) => dateKey(item?.date ?? item))).sort() },
     confidence: { score: 1, factors: { authoritative: true }, reasons: ['Authoritative Firefly schedule'] },
     matching: { dateWindowDays: ['monthly', 'twiceMonthly'].includes(cadence?.type) ? 4 : 2, amountTolerance: THRESHOLDS.relativeAmountMad, amountEnvelope },
     bounds,
@@ -702,7 +705,7 @@ export function buildDefinedOccurrences({ recurringTransactions = [], subscripti
 
 const compatibleIdentity = (left, right) => {
   if (left.direction !== right.direction) return false
-  for (const key of ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId', 'payee']) if (left[key] && right[key] && left[key] !== right[key]) return false
+  for (const key of ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId']) if (left[key] && right[key] && left[key] !== right[key]) return false
   const leftExternal = left.direction === 'income' ? left.sourceAccountId : left.destinationAccountId
   const rightExternal = right.direction === 'income' ? right.sourceAccountId : right.destinationAccountId
   return Boolean((left.payee && right.payee && left.payee === right.payee) || (leftExternal && rightExternal && leftExternal === rightExternal))
@@ -764,6 +767,32 @@ export function mergeRecurringCandidates({ defined = [], inferred = [] }) {
     match.inference = { id: candidate.id, confidence: candidate.confidence }
   }
   return result.sort((left, right) => Number(right.source.authoritative) - Number(left.source.authoritative) || right.confidence.score - left.confidence.score || left.id.localeCompare(right.id))
+}
+
+export function enrichRecurringCandidatesFromEvidence({ candidates = [], entries = [] }) {
+  const entriesByTransactionId = new Map()
+  for (const entry of entries) {
+    const transactionId = idOf(entry?.transactionId)
+    if (transactionId) entriesByTransactionId.set(transactionId, [...(entriesByTransactionId.get(transactionId) ?? []), entry])
+  }
+  const identityKeys = ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId']
+  return candidates.map((candidate) => {
+    if (!candidate?.source?.authoritative) return structuredClone(candidate)
+    const linkedEntries = unique(candidate?.evidence?.transactionIds ?? [])
+      .flatMap((transactionId) => entriesByTransactionId.get(String(transactionId)) ?? [])
+      .map(identityOf)
+      .filter(
+        (identity) =>
+          identity.direction === candidate.identity.direction && identityKeys.every((key) => !candidate.identity[key] || !identity[key] || String(candidate.identity[key]) === String(identity[key])),
+      )
+    const identity = { ...candidate.identity }
+    for (const key of identityKeys) {
+      if (identity[key]) continue
+      const values = unique(linkedEntries.map((entryIdentity) => entryIdentity[key]))
+      if (values.length === 1) identity[key] = values[0]
+    }
+    return { ...structuredClone(candidate), identity, signature: signatureOf(identity) }
+  })
 }
 
 const currentExpectedDates = (candidate, today) => {

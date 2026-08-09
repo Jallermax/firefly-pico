@@ -27,6 +27,8 @@
       "retry": "Reîncearcă",
       "stale": "Se afișează rezultatul complet anterior în timpul actualizării",
       "details": "Detalii",
+      "unavailable_evidence_count": "Nu au putut fi verificate {count} date de prognoză.",
+      "more_items": "Încă {count}",
       "partial": "Parțial",
       "how_calculated": "Cum se calculează",
       "exact_values": "Valori exacte"

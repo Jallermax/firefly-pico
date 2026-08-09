@@ -1135,9 +1135,14 @@ test('keeps authoritative candidates with missing amount or account classificati
   assert.equal(amountResult.final.expenses, null)
   assert.equal(amountResult.progressState.expenses, 'notApplicable')
   assert.deepEqual(amountResult.audit.recurring.unresolvedCandidates[0].reasons, ['missingAmountEvidence'])
-  assert.equal(classificationResult.status, 'unavailable')
-  assert.ok(Object.values(classificationResult.final).every((value) => value === null))
+  assert.equal(classificationResult.status, 'partial')
+  assert.equal(classificationResult.final.income, 0)
+  assert.equal(classificationResult.final.refunds, 0)
+  assert.equal(classificationResult.final.savingsDeposits, 0)
+  assert.equal(classificationResult.final.debtRepayments, 0)
+  assert.equal(classificationResult.final.expenses, null)
   assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].reasons, ['missingAccountContext'])
+  assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].affectedMetricIds, ['expenses', 'netWorthChange', 'availableCashChange'])
   assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].missingAccountIds, ['unknown-account'])
 })
 
@@ -1159,9 +1164,23 @@ test('rejects authoritative embedded kinds when endpoint IDs are absent', () => 
     endDate: '2026-08-31',
   })
 
-  assert.equal(result.status, 'unavailable')
+  assert.equal(result.status, 'partial')
+  assert.equal(result.final.income, 0)
+  assert.equal(result.final.refunds, 0)
+  assert.equal(result.final.savingsDeposits, 0)
+  assert.equal(result.final.debtRepayments, 0)
+  assert.equal(result.final.expenses, null)
   assert.deepEqual(result.dailyProjectedEntries, [])
   assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].reasons, ['missingAccountContext'])
+  assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].affectedMetricIds, [
+    'expenses',
+    'savingsWithdrawals',
+    'newDebt',
+    'savingsChange',
+    'debtChange',
+    'netWorthChange',
+    'availableCashChange',
+  ])
   assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].missingAccountIds, [])
   assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].missingAccountEndpoints, ['source', 'destination'])
 })

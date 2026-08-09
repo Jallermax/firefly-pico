@@ -8,7 +8,6 @@ import TransactionLinkRepository from '~/repository/TransactionLinkRepository.js
 import TransactionLinkTypeRepository from '~/repository/TransactionLinkTypeRepository.js'
 import SubscriptionRepository from '~/repository/SubscriptionRepository.js'
 import RecurringTransactionRepository from '~/repository/RecurringTransactionRepository.js'
-import TransactionTransformer from '~/transformers/TransactionTransformer.js'
 import Currency from '~/models/Currency.js'
 import { reconstructBalanceSeries } from '~/utils/AnalyticsBalanceUtils.js'
 import { buildAnalyticsLedger } from '~/utils/AnalyticsLedgerUtils.js'
@@ -26,7 +25,6 @@ export const useAnalyticsStore = createAnalyticsStore('analytics', () => ({
   transactionLinkTypeRepository: new TransactionLinkTypeRepository(),
   subscriptionRepository: new SubscriptionRepository(),
   recurringTransactionRepository: new RecurringTransactionRepository(),
-  transformTransactions: (transactions) => TransactionTransformer.transformFromApiList(transactions),
   getCurrencyCode: (currency) => Currency.getCode(currency),
   getCurrencyDecimalPlaces: (currency) => Currency.getDecimalPlaces(currency),
   getExcludedTransactionFilters,

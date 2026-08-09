@@ -2,7 +2,7 @@ import BaseRepository from './BaseRepository.js'
 
 export default class TransactionLinkRepository extends BaseRepository {
   constructor() {
-    super('transaction-links')
+    super('api/transaction-links')
   }
 
   async getAll() {

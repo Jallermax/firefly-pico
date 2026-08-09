@@ -27,6 +27,8 @@
       "retry": "Spróbuj ponownie",
       "stale": "Podczas odświeżania wyświetlany jest poprzedni kompletny wynik",
       "details": "Szczegóły",
+      "unavailable_evidence_count": "Nie można zweryfikować {count} danych prognozy.",
+      "more_items": "Jeszcze {count}",
       "partial": "Częściowe",
       "how_calculated": "Jak to jest obliczane",
       "exact_values": "Dokładne wartości"

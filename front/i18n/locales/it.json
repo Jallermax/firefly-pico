@@ -27,6 +27,8 @@
       "retry": "Riprova",
       "stale": "Durante l’aggiornamento viene mostrato il precedente risultato completo",
       "details": "Dettagli",
+      "unavailable_evidence_count": "Impossibile verificare {count} input di previsione.",
+      "more_items": "Altri {count}",
       "partial": "Parziale",
       "how_calculated": "Come viene calcolato",
       "exact_values": "Valori esatti"

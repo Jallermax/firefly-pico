@@ -55,7 +55,7 @@ test('transaction links request the Firefly transaction-links endpoint with the 
   const [url] = await captureRequests(() => new TransactionLinkRepository().getAll())
   const request = { url: url.pathname.slice(1), params: { page: Number(url.searchParams.get('page')) } }
 
-  assert.equal(request.url, 'transaction-links')
+  assert.equal(request.url, 'api/transaction-links')
   assert.deepEqual(request.params, { page: 1 })
 })
 
@@ -63,7 +63,7 @@ test('transaction link types request the Firefly link-types endpoint with the fi
   const [url] = await captureRequests(() => new TransactionLinkTypeRepository().getAll())
   const request = { url: url.pathname.slice(1), params: { page: Number(url.searchParams.get('page')) } }
 
-  assert.equal(request.url, 'link-types')
+  assert.equal(request.url, 'api/link-types')
   assert.deepEqual(request.params, { page: 1 })
 })
 
@@ -74,7 +74,7 @@ test('subscriptions request the supplied date window', async () => {
     params: { start: url.searchParams.get('start'), end: url.searchParams.get('end') },
   }
 
-  assert.equal(subscriptionRequest.url, 'subscriptions')
+  assert.equal(subscriptionRequest.url, 'api/subscriptions')
   assert.equal(subscriptionRequest.params.start, '2026-07-01')
   assert.equal(subscriptionRequest.params.end, '2026-08-31')
 })

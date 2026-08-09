@@ -27,6 +27,8 @@
       "retry": "Retry",
       "stale": "Showing the previous complete result while refreshing",
       "details": "Details",
+      "unavailable_evidence_count": "{count} forecast inputs could not be verified.",
+      "more_items": "{count} more",
       "partial": "Partial",
       "how_calculated": "How this is calculated",
       "exact_values": "Exact values"

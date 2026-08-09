@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildDefinedOccurrences, detectRecurringCandidates, matchRecurringOccurrences, mergeRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
+import { buildDefinedOccurrences, detectRecurringCandidates, enrichRecurringCandidatesFromEvidence, matchRecurringOccurrences, mergeRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
 
 const entry = ({
   id,
@@ -84,6 +84,46 @@ test('normalizes usable recurring transactions and subscriptions as authoritativ
     result.flatMap(({ evidence }) => evidence.transactionIds),
     [],
   )
+})
+
+test('recovers missing subscription account identity only from consistent linked transaction evidence', () => {
+  const candidates = buildDefinedOccurrences({
+    subscriptions: [
+      {
+        id: 'subscription-rent',
+        attributes: {
+          active: true,
+          name: 'Rent',
+          repeat_freq: 'monthly',
+          amount_avg: '100',
+          pay_dates: [{ date: '2026-07-01', transaction_group_id: 'paid-rent' }],
+          next_expected_match: '2026-08-01',
+        },
+      },
+    ],
+    startDate: '2026-07-01',
+    endDate: '2026-08-31',
+  })
+  const paidRent = entry({ id: 'paid-rent', date: '2026-07-01', sourceId: 'checking', destinationId: 'landlord', categoryId: 'housing', description: 'Landlord' })
+
+  const enriched = enrichRecurringCandidatesFromEvidence({ candidates, entries: [paidRent] })
+
+  assert.deepEqual(enriched[0].identity, {
+    direction: 'expense',
+    sourceAccountId: 'checking',
+    sourceKind: 'available',
+    destinationAccountId: 'landlord',
+    destinationKind: 'expense',
+    categoryId: 'housing',
+    payee: 'rent',
+  })
+  assert.equal(candidates[0].identity.sourceAccountId, null)
+
+  const conflicting = enrichRecurringCandidatesFromEvidence({
+    candidates,
+    entries: [paidRent, entry({ id: 'paid-rent', date: '2026-07-01', sourceId: 'credit-card', destinationId: 'landlord', categoryId: 'housing', description: 'Landlord' })],
+  })
+  assert.equal(conflicting[0].identity.sourceAccountId, null)
 })
 
 test('infers monthly rent despite local weekend shifts and retains exact evidence', () => {

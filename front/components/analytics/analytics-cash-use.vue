@@ -30,8 +30,13 @@
     </div>
     <div v-else-if="cashUseState.isUnavailable" class="analytics-warning" role="alert">
       <div v-if="cashUseState.unavailableTransactionIds.length">{{ $t('analytics.common.unavailable_amounts', { ids: cashUseState.unavailableTransactionIds.join(', ') }) }}</div>
-      <div v-if="projectedUnavailableIds.length">{{ $t('analytics.cash_use.forecast_unavailable', { ids: projectedUnavailableIds.join(', ') }) }}</div>
-      <template v-if="!cashUseState.unavailableTransactionIds.length && !projectedUnavailableIds.length">{{
+      <div v-if="projectedUnavailableSummary.count">{{ $t('analytics.common.unavailable_evidence_count', { count: projectedUnavailableSummary.count }) }}</div>
+      <details v-if="projectedUnavailableSummary.previewIds.length" class="analytics-warning-details">
+        <summary>{{ $t('analytics.common.details') }}</summary>
+        <div class="analytics-warning-evidence">{{ projectedUnavailableSummary.previewIds.join(', ') }}</div>
+        <div v-if="projectedUnavailableSummary.omittedCount">{{ $t('analytics.common.more_items', { count: projectedUnavailableSummary.omittedCount }) }}</div>
+      </details>
+      <template v-if="!cashUseState.unavailableTransactionIds.length && !projectedUnavailableSummary.count">{{
         $t('analytics.cash_use.forecast_unavailable', { ids: cashUseState.auditStatus })
       }}</template>
     </div>
@@ -134,9 +139,7 @@ const hasActivity = computed(() =>
   [...cashUse.value.useLayers, cashUse.value.ordinaryIncome, ...cashUse.value.sourceBands].some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)),
 )
 const hasRetainedData = computed(() => cashUseState.value.isStale && hasActivity.value)
-const projectedUnavailableIds = computed(() => [
-  ...new Set((cashUseState.value.projectedUnavailability ?? []).flatMap(({ metricIds, sourceIds, candidateIds, evidenceIds }) => [...metricIds, ...sourceIds, ...candidateIds, ...evidenceIds])),
-])
+const projectedUnavailableSummary = computed(() => cashUseState.value.projectedUnavailableSummary ?? { count: 0, previewIds: [], omittedCount: 0 })
 
 const onSelectPoint = async ({ activation, point, transactionIds }) => {
   const selection = projectLineChartSelection({

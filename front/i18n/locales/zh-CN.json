@@ -27,6 +27,8 @@
       "retry": "重试",
       "stale": "刷新时显示上一次完整结果",
       "details": "详情",
+      "unavailable_evidence_count": "有 {count} 项预测输入无法验证。",
+      "more_items": "还有 {count} 项",
       "partial": "部分",
       "how_calculated": "计算方式",
       "exact_values": "精确值"

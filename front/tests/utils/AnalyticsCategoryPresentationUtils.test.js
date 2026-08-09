@@ -24,6 +24,7 @@ const labels = {
   currentForecast: 'End-of-month forecast',
   remainingFromToday: 'From today',
   insufficientHistory: 'Not enough history',
+  unavailable: 'Forecast input unavailable',
 }
 
 test('category summary presentation selects the desktop table branch', () => {
@@ -59,16 +60,23 @@ test('category summary presentation selects mobile localized values including re
   assert.equal(presentation.rows[0].values?.find(({ id }) => id === 'remainingFromToday')?.value, '+2,181 USD')
 })
 
-test('category summary presentation uses insufficient history for unavailable forecast values', () => {
+test('category summary presentation distinguishes insufficient history from unavailable forecast input', () => {
   const presentation = buildCategorySummaryPresentation({
-    summaries: [{ ...summaries[0], forecastLabel: null, remainingFromTodayLabel: null, forecastAvailable: false }],
+    summaries: [{ ...summaries[0], status: 'unavailable', forecastLabel: null, remainingFromTodayLabel: null, forecastAvailable: false }],
     isDesktopLayout: false,
     labels,
   })
 
-  assert.equal(presentation.rows[0].currentForecastLabel, 'Not enough history')
-  assert.equal(presentation.rows[0].values?.find(({ id }) => id === 'currentForecast')?.value, 'Not enough history')
-  assert.equal(presentation.rows[0].values?.find(({ id }) => id === 'remainingFromToday')?.value, 'Not enough history')
+  assert.equal(presentation.rows[0].currentForecastLabel, 'Forecast input unavailable')
+  assert.equal(presentation.rows[0].values?.find(({ id }) => id === 'currentForecast')?.value, 'Forecast input unavailable')
+  assert.equal(presentation.rows[0].values?.find(({ id }) => id === 'remainingFromToday')?.value, 'Forecast input unavailable')
+
+  const insufficient = buildCategorySummaryPresentation({
+    summaries: [{ ...summaries[0], status: 'insufficientHistory', forecastLabel: null, remainingFromTodayLabel: null, forecastAvailable: false }],
+    isDesktopLayout: false,
+    labels,
+  })
+  assert.equal(insufficient.rows[0].currentForecastLabel, 'Not enough history')
 })
 
 test('category chart point decoration includes currency and forecast metadata', () => {
