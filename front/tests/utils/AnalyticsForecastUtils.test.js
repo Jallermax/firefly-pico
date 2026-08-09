@@ -334,6 +334,105 @@ test('removes the union of recurring entry and transaction evidence from histori
   assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, rent.map(({ id }) => id).sort())
 })
 
+test('removes matching authoritative history from the variable remainder without inferred evidence', () => {
+  const history = expensesForMonths(['2026-06', '2026-07'], 100, 20, { destinationId: 'landlord', categoryId: 'general', description: 'Rent', idPrefix: 'defined-history' })
+  const candidate = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 100 })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+  const defined = result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'defined')
+  const variable = result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable')
+
+  assert.equal(result.remainingFromToday.expenses, 100)
+  assert.equal(result.final.expenses, 100)
+  assert.equal(defined.length, 1)
+  assert.equal(defined[0].amount, 100)
+  assert.deepEqual(variable, [])
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, history.map(({ id }) => id).sort())
+  assert.equal(
+    result.dailyProjectedEntries.some(({ candidateId }) => candidateId?.startsWith('inferred:')),
+    false,
+  )
+  assert.equal(
+    result.dailyProjectedEntries.some(({ evidenceIds }) => evidenceIds.some((id) => id.startsWith('inferred:'))),
+    false,
+  )
+})
+
+test('does not restore authoritative history to the variable remainder after the current occurrence is fulfilled', () => {
+  const history = expensesForMonths(['2026-06', '2026-07'], 100, 20, { destinationId: 'landlord', categoryId: 'general', description: 'Rent', idPrefix: 'fulfilled-defined-history' })
+  const actual = entry({ id: 'fulfilled-defined-current', date: '2026-08-20', value: 100, destinationId: 'landlord', categoryId: 'general', description: 'Rent' })
+  const candidate = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 100 })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, actual], { endDate: '2026-08-20' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 6,
+    today: '2026-08-20',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.actualToDate.expenses, 100)
+  assert.equal(result.remainingFromToday.expenses, 0)
+  assert.equal(result.final.expenses, 100)
+  assert.deepEqual(result.dailyProjectedEntries, [])
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, history.map(({ id }) => id).sort())
+  assert.deepEqual(result.audit.recurring.fulfilledExpectedIds, [`expected:${candidate.id}:2026-08-20`])
+})
+
+test('keeps unrelated same-payee activity in the variable baseline when removing authoritative history', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const rent = expensesForMonths(months, 100, 20, { destinationId: 'landlord', categoryId: 'general', description: 'Rent', idPrefix: 'protected-rent' })
+  const differentAmount = expensesForMonths(months, 20, 20, { destinationId: 'landlord', categoryId: 'general', description: 'Rent', idPrefix: 'same-payee-other-amount' })
+  const differentAccount = expensesForMonths(months, 100, 20, { sourceId: 'cash', destinationId: 'landlord', categoryId: 'general', description: 'Rent', idPrefix: 'same-payee-other-account' })
+  const candidate = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 100 })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...rent, ...differentAmount, ...differentAccount]),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+  const variable = result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable')
+
+  assert.equal(result.remainingFromToday.expenses, 220)
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, rent.map(({ id }) => id).sort())
+  assert.ok(variable.length > 0)
+  assert.deepEqual(
+    [...new Set(variable.flatMap(({ evidenceIds }) => evidenceIds))].sort(),
+    [...differentAmount, ...differentAccount]
+      .flatMap(({ id, transactionId }) => [id, transactionId])
+      .filter((id, index, values) => values.indexOf(id) === index)
+      .sort(),
+  )
+})
+
+test('matches authoritative history by calendar-day distance across a daylight-saving transition', () => {
+  const history = [entry({ id: 'dst-shifted-rent', date: '2026-11-01', value: 100, destinationId: 'landlord', categoryId: 'general', description: 'Rent' })]
+  const candidate = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', date: '2026-12-05', amount: 100 })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-11', endDate: '2026-12-01' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 1,
+    today: '2026-12-01',
+    endDate: '2026-12-31',
+  })
+
+  assert.equal(result.remainingFromToday.expenses, 100)
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, ['dst-shifted-rent'])
+})
+
 test('floors cumulative expense at actual and exposes above-average and empty states', () => {
   assert.deepEqual(projectMetricForecast({ metric: 'expenses', actual: 9000, historicalAverage: 7500, remainingActivity: -1200 }), {
     metric: 'expenses',

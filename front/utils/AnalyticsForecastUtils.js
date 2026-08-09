@@ -27,6 +27,7 @@ const dateParts = (value) => {
 
 const formatDate = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
 const addDays = (value, count) => new Date(value.getFullYear(), value.getMonth(), value.getDate() + count)
+const calendarDayDistance = (left, right) => Math.abs(Math.round((dateParts(left).date - dateParts(right).date) / 86400000))
 const daysInMonth = (year, month) => new Date(year, month, 0).getDate()
 const monthIndex = ({ year, month }) => year * 12 + month - 1
 const monthKeyAt = (index) => `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`
@@ -259,6 +260,120 @@ const recurringHistoryIds = (candidates) => {
   return { entryIds, transactionIds }
 }
 
+const normalizeIdentityText = (value) =>
+  String(value ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+
+const historyIdentityFor = (entry) => {
+  const { context } = projectionContext(entry)
+  const external = context.direction === 'income' ? entry?.sourceAccount : context.direction === 'expense' ? entry?.destinationAccount : null
+  return {
+    direction: context.direction,
+    sourceAccountId: context.sourceAccountId,
+    sourceKind: context.sourceKind,
+    destinationAccountId: context.destinationAccountId,
+    destinationKind: context.destinationKind,
+    categoryId: context.categoryId,
+    payee: normalizeIdentityText(entry?.payee ?? entry?.description ?? external?.attributes?.name ?? external?.name ?? external?.id),
+  }
+}
+
+const authoritativeIdentityMatches = (candidate, entry) => {
+  const expected = candidate?.identity ?? {}
+  const actual = historyIdentityFor(entry)
+  if (expected.direction !== actual.direction) return false
+  for (const key of ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId']) {
+    if (expected[key] && String(expected[key]) !== String(actual[key] ?? '')) return false
+  }
+  if (expected.payee && normalizeIdentityText(expected.payee) !== actual.payee) return false
+  const externalKey = expected.direction === 'income' ? 'sourceAccountId' : expected.direction === 'expense' ? 'destinationAccountId' : null
+  return Boolean((externalKey && expected[externalKey] && String(expected[externalKey]) === String(actual[externalKey])) || (expected.payee && normalizeIdentityText(expected.payee) === actual.payee))
+}
+
+const authoritativeAmountRange = ({ candidate, amount }) => {
+  if (!Number.isFinite(amount) || amount <= 0) return null
+  const original = candidate?.expectedAmount?.value
+  const originalMin = candidate?.expectedAmount?.min
+  const originalMax = candidate?.expectedAmount?.max
+  if (Number.isFinite(original) && original > 0 && Number.isFinite(originalMin) && Number.isFinite(originalMax)) {
+    return { min: amount * (Math.min(originalMin, originalMax) / original), max: amount * (Math.max(originalMin, originalMax) / original) }
+  }
+  const tolerance = Number(candidate?.matching?.amountTolerance)
+  const ratio = Number.isFinite(tolerance) && tolerance >= 0 ? tolerance : 0
+  return { min: amount * (1 - ratio), max: amount * (1 + ratio) }
+}
+
+const authoritativeHistoryDates = (candidate, months) => {
+  const cadence = candidate?.cadence
+  if (!cadence || months.length === 0) return []
+  if (['monthly', 'twiceMonthly'].includes(cadence.type)) {
+    const dates = []
+    for (const month of months) {
+      const [year, monthNumber] = month.split('-').map(Number)
+      for (const day of cadence.days ?? []) {
+        if (Number.isInteger(day) && day > 0) dates.push(`${month}-${String(Math.min(day, daysInMonth(year, monthNumber))).padStart(2, '0')}`)
+      }
+      for (const offset of cadence.fromMonthEnd ?? []) {
+        if (Number.isInteger(offset) && offset >= 0 && offset < daysInMonth(year, monthNumber)) dates.push(`${month}-${String(daysInMonth(year, monthNumber) - offset).padStart(2, '0')}`)
+      }
+    }
+    return unique(dates).sort()
+  }
+  if (!['weekly', 'biweekly'].includes(cadence.type)) return []
+  const intervalDays = Number(cadence.intervalWeeks) * 7
+  const first = dateParts(`${months[0]}-01`)
+  const last = dateParts(monthEnd(months.at(-1)))
+  const anchor = dateParts(cadence.anchorDate ?? candidate?.expectedDates?.[0] ?? candidate?.bounds?.start)
+  if (!first || !last || !anchor || !Number.isInteger(intervalDays) || intervalDays < 7) return []
+  let cursor = anchor.date
+  while (formatDate(cursor) > first.key) cursor = addDays(cursor, -intervalDays)
+  while (formatDate(cursor) < first.key) cursor = addDays(cursor, intervalDays)
+  const dates = []
+  for (; formatDate(cursor) <= last.key; cursor = addDays(cursor, intervalDays)) dates.push(formatDate(cursor))
+  return dates
+}
+
+const matchedAuthoritativeHistoryIds = ({ candidates, entries, months, candidateAmounts, accountContexts, currencyDecimalPlaces, excludedEntryIds }) => {
+  const usedEntryIds = new Set(excludedEntryIds)
+  const matchedEntryIds = []
+  const historyEntries = entries.filter(({ id, monthKey, value }) => months.includes(monthKey) && Number.isFinite(value) && !usedEntryIds.has(String(id)))
+  for (const candidate of candidates.filter(({ source }) => source?.authoritative === true).sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
+    const input = candidateProjectionInput({ candidate, candidateAmounts, accountContexts })
+    if (input.reasons.length > 0) continue
+    const range = authoritativeAmountRange({ candidate, amount: input.amount })
+    if (!range) continue
+    const roundingTolerance = 1 / 10 ** currencyDecimalPlaces
+    const expectedDates = authoritativeHistoryDates(candidate, months)
+    for (const expectedDate of expectedDates) {
+      const match = historyEntries
+        .filter(
+          (entry) =>
+            !usedEntryIds.has(String(entry.id)) &&
+            authoritativeIdentityMatches(candidate, entry) &&
+            amountOf(entry) >= range.min - roundingTolerance &&
+            amountOf(entry) <= range.max + roundingTolerance &&
+            calendarDayDistance(entry.date, expectedDate) <= (candidate?.matching?.dateWindowDays ?? 4),
+        )
+        .sort(
+          (left, right) =>
+            calendarDayDistance(left.date, expectedDate) - calendarDayDistance(right.date, expectedDate) ||
+            Math.abs(amountOf(left) - input.amount) - Math.abs(amountOf(right) - input.amount) ||
+            String(left.date).localeCompare(String(right.date)) ||
+            String(left.id).localeCompare(String(right.id)),
+        )[0]
+      if (!match) continue
+      usedEntryIds.add(String(match.id))
+      matchedEntryIds.push(String(match.id))
+    }
+  }
+  return matchedEntryIds.sort()
+}
+
 const nextOverdueDate = ({ candidate, today, endDate }) => {
   const future = datesAfter(today, endDate)
   if (future.length === 0) return null
@@ -467,10 +582,20 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   const recurring = matchRecurringOccurrences({ candidates: eligibleCandidates, actualEntries: currentEntries, today: todayKey })
   const candidateById = new Map(eligibleCandidates.map((candidate) => [candidate.id, candidate]))
   const recurringIds = recurringHistoryIds(eligibleCandidates)
-  const removedHistoryEntryIds = entries
+  const evidencedHistoryEntryIds = entries
     .filter((entry) => months.includes(entry.monthKey) && (recurringIds.entryIds.has(String(entry.id)) || recurringIds.transactionIds.has(String(entry.transactionId))))
     .map(({ id }) => String(id))
     .sort()
+  const matchedHistoryEntryIds = matchedAuthoritativeHistoryIds({
+    candidates: eligibleCandidates,
+    entries,
+    months,
+    candidateAmounts,
+    accountContexts,
+    currencyDecimalPlaces,
+    excludedEntryIds: evidencedHistoryEntryIds,
+  })
+  const removedHistoryEntryIds = unique([...evidencedHistoryEntryIds, ...matchedHistoryEntryIds]).sort()
   const removedHistorySet = new Set(removedHistoryEntryIds)
 
   const affectedMetricIds = new Set()
