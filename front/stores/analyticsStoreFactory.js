@@ -70,7 +70,6 @@ const dailyConfidence = (confidence) => {
   const level = confidence.level ?? (!Number.isFinite(score) ? 'unavailable' : score >= 0.8 ? 'high' : score >= 0.5 ? 'medium' : 'low')
   return { ...confidence, level }
 }
-const unavailableDailyMetric = (status) => ['unavailable', 'insufficientHistory'].includes(status)
 const dailyEntryContributes = (entry, keys) => keys.some((key) => entry.flowAmounts?.[key] !== 0)
 
 const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, currencyDecimalPlaces }) => {
@@ -126,15 +125,6 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     })
   }
 
-  dateKeys
-    .filter((date) => date > todayKey)
-    .forEach((date) => {
-      const components = dayByDate.get(date).projected.components
-      DAILY_FLOW_KEYS.forEach((key) => {
-        if (unavailableDailyMetric(forecast.statusByMetric[key])) components[key] = null
-      })
-    })
-
   const futureDates = dateKeys.filter((date) => date > todayKey)
   const projectedUnavailableFlowKeys = Object.fromEntries(DAILY_SOURCE_KINDS.filter((kind) => kind !== 'actual').map((kind) => [kind, new Map(futureDates.map((date) => [date, new Set()]))]))
   const addProjectedUnavailableFlowKeys = (sourceKind, dates, keys) => {
@@ -163,6 +153,12 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     futureDates,
     DAILY_FLOW_KEYS.filter((key) => forecast.statusByMetric[key] === 'insufficientHistory'),
   )
+  futureDates.forEach((date) => {
+    const components = dayByDate.get(date).projected.components
+    DAILY_FLOW_KEYS.forEach((key) => {
+      if (Object.values(projectedUnavailableFlowKeys).some((dates) => dates.get(date)?.has(key))) components[key] = null
+    })
+  })
 
   const days = dateKeys.map((date) => {
     const day = dayByDate.get(date)
@@ -232,8 +228,13 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     })),
   )
 
-  const actualUnavailableTransactionIds = [
+  const unavailableTransactionIds = [
     ...new Set(days.flatMap(({ actual }) => (actual?.entries ?? []).filter(({ status }) => status === 'unavailable').flatMap(({ transactionIds }) => transactionIds))),
+    ...ledger.entries
+      .filter(({ id, monthKey: entryMonth }) => unavailableEntryIds.has(String(id)) && (entryMonth === monthKey || historyMonths.has(entryMonth)))
+      .map(({ transactionId }) => transactionId)
+      .filter(Boolean)
+      .map(String),
   ].sort()
   const componentDeltas = Object.fromEntries(
     DAILY_FLOW_KEYS.map((key) => {
@@ -343,7 +344,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     audit: {
       fulfilledExpectedIds: forecast.audit.recurring.fulfilledExpectedIds,
       remainingExpectedIds: forecast.audit.recurring.remainingExpectedIds,
-      unavailableTransactionIds: actualUnavailableTransactionIds,
+      unavailableTransactionIds: [...new Set(unavailableTransactionIds)],
       unavailableEntryIds: forecast.audit.unavailable.entryIds,
       unavailableCandidateIds: forecast.audit.unavailable.candidateIds,
       missingCurrencies: forecast.audit.unavailable.missingCurrencies,
