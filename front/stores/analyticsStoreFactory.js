@@ -70,6 +70,8 @@ const dailyConfidence = (confidence) => {
   const level = confidence.level ?? (!Number.isFinite(score) ? 'unavailable' : score >= 0.8 ? 'high' : score >= 0.5 ? 'medium' : 'low')
   return { ...confidence, level }
 }
+const unavailableDailyMetric = (status) => ['unavailable', 'insufficientHistory'].includes(status)
+const dailyEntryContributes = (entry, keys) => keys.some((key) => entry.flowAmounts?.[key] !== 0)
 
 const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimalPlaces }) => {
   const dateKeys = dailyDates(today)
@@ -124,13 +126,14 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
     })
   }
 
-  if (forecast.status === 'insufficientHistory') {
-    dateKeys
-      .filter((date) => date > todayKey)
-      .forEach((date) => {
-        dayByDate.get(date).projected.components = emptyDailyComponents(null)
+  dateKeys
+    .filter((date) => date > todayKey)
+    .forEach((date) => {
+      const components = dayByDate.get(date).projected.components
+      DAILY_FLOW_KEYS.forEach((key) => {
+        if (unavailableDailyMetric(forecast.statusByMetric[key])) components[key] = null
       })
-  }
+    })
 
   const days = dateKeys.map((date) => {
     const day = dayByDate.get(date)
@@ -174,13 +177,12 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
       points: days.map((day) => {
         const bucket = sourceKind === 'actual' ? day.actual : day.projected
         const applicable = sourceKind === 'actual' ? day.date <= todayKey : day.date > todayKey
-        const entries = applicable ? (bucket?.entries ?? []).filter((entry) => entry.sourceKind === sourceKind) : []
+        const directionKeys = direction === 'sources' ? DAILY_SOURCE_KEYS : DAILY_USE_KEYS
+        const entries = applicable ? (bucket?.entries ?? []).filter((entry) => entry.sourceKind === sourceKind && dailyEntryContributes(entry, directionKeys)) : []
         const components = emptyDailyComponents()
         entries.forEach((entry) => addDailyComponents(components, entry.flowAmounts, currencyDecimalPlaces))
-        const rawValue =
-          applicable && !(sourceKind !== 'actual' && forecast.status === 'insufficientHistory')
-            ? dailyTotal(components, direction === 'sources' ? DAILY_SOURCE_KEYS : DAILY_USE_KEYS, currencyDecimalPlaces)
-            : null
+        const hasUnavailableMetric = sourceKind !== 'actual' && directionKeys.some((key) => unavailableDailyMetric(forecast.statusByMetric[key]))
+        const rawValue = applicable && !hasUnavailableMetric ? dailyTotal(components, directionKeys, currencyDecimalPlaces) : null
         const transactionIds = [...new Set(entries.flatMap((entry) => entry.transactionIds ?? []))].sort()
         const evidenceIds = [...new Set(entries.flatMap(projectedEvidenceIds))].sort()
         return {
@@ -195,6 +197,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
           evidenceIds,
           projectedSources: sourceKind === 'actual' ? [] : entries,
           status: sourceKind === 'actual' ? (entries.some(({ status }) => status === 'unavailable') ? 'unavailable' : 'ready') : forecast.status,
+          showInTooltip: (Number.isFinite(rawValue) && rawValue !== 0) || transactionIds.length > 0 || evidenceIds.length > 0,
         }
       }),
     })),
@@ -222,8 +225,10 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
     : roundDaily(forecast.actualToDate.availableCashChange + forecast.remainingFromToday.availableCashChange, currencyDecimalPlaces)
   const actualAvailable = days.at(-1)?.cumulativeAvailableCashChange ?? 0
   const availableCashDelta = expectedAvailable === null || actualAvailable === null ? null : roundDaily(actualAvailable - expectedAvailable, currencyDecimalPlaces)
+  const hasUnclassifiedActivity = ledger.audit?.unclassifiedValue === null || Number(ledger.audit?.unclassifiedValue) !== 0
+  const unclassifiedTransactionIds = hasUnclassifiedActivity ? [...(ledger.audit?.transactionIds ?? [])].map(String).sort() : []
   const reconciliationStatus =
-    Object.values(componentDeltas).some((value) => value === null) || availableCashDelta === null
+    hasUnclassifiedActivity || Object.values(componentDeltas).some((value) => value === null) || availableCashDelta === null
       ? 'unavailable'
       : Object.values(componentDeltas).some((value) => value !== 0) || availableCashDelta !== 0
         ? 'mismatch'
@@ -294,6 +299,8 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
       unavailableEntryIds: forecast.audit.unavailable.entryIds,
       unavailableCandidateIds: forecast.audit.unavailable.candidateIds,
       missingCurrencies: forecast.audit.unavailable.missingCurrencies,
+      unclassifiedValue: hasUnclassifiedActivity ? (ledger.audit?.unclassifiedValue ?? null) : 0,
+      unclassifiedTransactionIds,
     },
   }
 }
@@ -492,17 +499,30 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const forecastStartDate = computed(() => `${rawSnapshot.value.transactionCoverage?.startMonth ?? format(startOfMonth(subMonths(getNow(), 24)), 'yyyy-MM')}-01`)
     const forecastEndDate = computed(() => format(new Date(getNow().getFullYear(), getNow().getMonth() + 1, 0), 'yyyy-MM-dd'))
+    const forecastDefinedCandidates = computed(() =>
+      buildDefinedOccurrences({
+        recurringTransactions: recurringTransactions.value,
+        subscriptions: subscriptions.value,
+        startDate: forecastStartDate.value,
+        endDate: forecastEndDate.value,
+      }),
+    )
     const forecastCandidates = computed(() =>
       mergeRecurringCandidates({
-        defined: buildDefinedOccurrences({
-          recurringTransactions: recurringTransactions.value,
-          subscriptions: subscriptions.value,
-          startDate: forecastStartDate.value,
-          endDate: forecastEndDate.value,
-        }),
+        defined: forecastDefinedCandidates.value,
         inferred: detectRecurringCandidates({ entries: ledger.value.entries, startDate: forecastStartDate.value, endDate: DateUtils.dateToString(getNow()) }).candidates,
       }),
     )
+    const dailyForecastCandidates = (historyMonths) => {
+      const currentMonth = startOfMonth(getNow())
+      const startDate = DateUtils.dateToString(startOfMonth(subMonths(currentMonth, Number(historyMonths))))
+      const endDate = DateUtils.dateToString(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 0))
+      const entries = ledger.value.entries.filter(({ date }) => date >= startDate && date <= endDate)
+      return mergeRecurringCandidates({
+        defined: forecastDefinedCandidates.value,
+        inferred: detectRecurringCandidates({ entries, startDate, endDate }).candidates,
+      })
+    }
     const forecastAccountContexts = computed(() =>
       Object.fromEntries(
         accounts.value.map((account) => {
@@ -517,13 +537,13 @@ export function createAnalyticsStore(id, useDependencies) {
         }),
       ),
     )
-    const forecastCandidateAmounts = computed(() => {
+    const candidateAmountsFor = (candidates) => {
       const definitionFor = (candidate) => {
         const collection = candidate.source.type === 'subscription' ? subscriptions.value : recurringTransactions.value
         return collection.find((item) => String(item?.id) === String(candidate.source.id))?.attributes ?? {}
       }
       return Object.fromEntries(
-        forecastCandidates.value.map((candidate) => {
+        candidates.map((candidate) => {
           if (!candidate.source.authoritative)
             return [
               candidate.id,
@@ -555,12 +575,13 @@ export function createAnalyticsStore(id, useDependencies) {
           ]
         }),
       )
-    })
-    const buildForecast = (historyMonths) =>
+    }
+    const forecastCandidateAmounts = computed(() => candidateAmountsFor(forecastCandidates.value))
+    const buildForecast = (historyMonths, candidates = forecastCandidates.value) =>
       buildRemainingActivityForecast({
         ledger: ledger.value,
-        candidates: forecastCandidates.value,
-        candidateAmounts: forecastCandidateAmounts.value,
+        candidates,
+        candidateAmounts: candidates === forecastCandidates.value ? forecastCandidateAmounts.value : candidateAmountsFor(candidates),
         accountContexts: forecastAccountContexts.value,
         fetchCoverage: rawSnapshot.value.transactionCoverage,
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
@@ -849,23 +870,39 @@ export function createAnalyticsStore(id, useDependencies) {
       unavailableTransactionIds: [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort(),
       projectedUnavailability: cashUseSeries.value.audit.unavailable.flatMap(({ monthKey, projected }) => (projected ? [{ monthKey, ...projected }] : [])),
     }))
-    const dailyForecast = computed(() =>
-      buildDailyForecastProjection({ ledger: ledger.value, forecast: buildForecast(dailyForecastMonths.value), today: getNow(), currencyDecimalPlaces: displayCurrencyDecimalPlaces.value }),
+    const dailyForecast = computed(() => {
+      const candidates = dailyForecastCandidates(dailyForecastMonths.value)
+      return buildDailyForecastProjection({
+        ledger: ledger.value,
+        forecast: buildForecast(dailyForecastMonths.value, candidates),
+        today: getNow(),
+        currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
+      })
+    })
+    const dailyForecastSourceErrors = computed(() =>
+      ['recurringTransactions', 'subscriptions'].filter((source) => ancillaryState[source].status === 'error').map((source) => ({ source, message: ancillaryState[source].error?.message ?? '' })),
     )
-    const dailyForecastState = computed(() => ({
-      ...categoryState,
-      forecastStatus: dailyForecast.value.status,
-      isPartial: ['partial', 'insufficientHistory'].includes(dailyForecast.value.status),
-      isUnavailable:
-        dailyForecast.value.status === 'unavailable' ||
-        dailyForecast.value.reconciliation.status === 'mismatch' ||
-        dailyForecast.value.audit.unavailableTransactionIds.length > 0 ||
-        dailyForecast.value.audit.unavailableCandidateIds.length > 0 ||
-        dailyForecast.value.audit.missingCurrencies.length > 0,
-      unavailableTransactionIds: dailyForecast.value.audit.unavailableTransactionIds,
-      unavailableCandidateIds: dailyForecast.value.audit.unavailableCandidateIds,
-      missingCurrencies: dailyForecast.value.audit.missingCurrencies,
-    }))
+    const dailyForecastState = computed(() => {
+      const sourceErrors = dailyForecastSourceErrors.value
+      const forecastStatus = sourceErrors.length > 0 && dailyForecast.value.status !== 'unavailable' ? 'partial' : dailyForecast.value.status
+      return {
+        ...categoryState,
+        forecastStatus,
+        isPartial: sourceErrors.length > 0 || ['partial', 'insufficientHistory'].includes(dailyForecast.value.status),
+        isUnavailable:
+          dailyForecast.value.status === 'unavailable' ||
+          dailyForecast.value.reconciliation.status === 'mismatch' ||
+          dailyForecast.value.audit.unavailableTransactionIds.length > 0 ||
+          dailyForecast.value.audit.unavailableCandidateIds.length > 0 ||
+          dailyForecast.value.audit.missingCurrencies.length > 0 ||
+          dailyForecast.value.audit.unclassifiedTransactionIds.length > 0,
+        unavailableTransactionIds: dailyForecast.value.audit.unavailableTransactionIds,
+        unavailableCandidateIds: dailyForecast.value.audit.unavailableCandidateIds,
+        unclassifiedTransactionIds: dailyForecast.value.audit.unclassifiedTransactionIds,
+        missingCurrencies: dailyForecast.value.audit.missingCurrencies,
+        sourceErrors,
+      }
+    })
 
     async function loadTransactions(startDate, endDate) {
       const query = [`date_after:${startDate}`, `date_before:${endDate}`, ...getExcludedTransactionFilters()]

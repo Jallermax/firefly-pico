@@ -24,6 +24,7 @@
     <div v-else-if="dailyState.isUnavailable" class="analytics-warning" role="alert">
       <div>{{ $t('analytics.daily_forecast.unavailable') }}</div>
       <div v-if="dailyState.unavailableTransactionIds.length">{{ $t('analytics.common.unavailable_amounts', { ids: dailyState.unavailableTransactionIds.join(', ') }) }}</div>
+      <div v-if="dailyState.unclassifiedTransactionIds.length">{{ $t('analytics.common.unavailable_amounts', { ids: dailyState.unclassifiedTransactionIds.join(', ') }) }}</div>
       <div v-if="dailyState.unavailableCandidateIds.length">{{ $t('analytics.daily_forecast.unavailable_sources', { ids: dailyState.unavailableCandidateIds.join(', ') }) }}</div>
     </div>
     <template v-else>
@@ -33,6 +34,7 @@
       </div>
       <div v-else-if="dailyState.status === 'loading' && dailyState.isStale" class="analytics-assumption-note">{{ $t('analytics.common.stale') }}</div>
       <div v-if="dailyState.isPartial" class="analytics-assumption-note">{{ $t(`analytics.daily_forecast.${dailyState.forecastStatus}`) }}</div>
+      <div v-for="sourceError in dailyState.sourceErrors" :key="sourceError.source" class="analytics-assumption-note">{{ $t('analytics.daily_forecast.error') }} ({{ sourceError.source }})</div>
 
       <div class="analytics-chart-legend analytics-daily-forecast-legend">
         <span v-for="item in legendItems" :key="item.id" class="flex-center-vertical gap-1">

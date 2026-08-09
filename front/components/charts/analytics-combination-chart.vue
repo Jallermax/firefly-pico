@@ -1,5 +1,5 @@
 <template>
-  <div ref="root" class="analytics-line-chart analytics-combination-chart">
+  <div ref="root" class="analytics-line-chart analytics-combination-chart" @keydown="onRootKeydown">
     <svg
       class="analytics-line-chart-svg analytics-combination-chart-svg"
       :viewBox="layout.viewBox"
@@ -11,7 +11,7 @@
       @pointerup="onPointerUp"
       @pointercancel="applyInteraction({ type: 'pointerCancel' })"
       @pointerleave="onPointerLeave"
-      @keydown="onKeydown"
+      @keydown="onChartKeydown"
     >
       <defs>
         <pattern id="analytics-combination-forecast" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -63,6 +63,19 @@
           {{ label.label }}
         </text>
       </g>
+
+      <line
+        v-if="todayX !== null"
+        class="analytics-combination-today-marker"
+        :x1="todayX"
+        :x2="todayX"
+        :y1="layout.crosshairY1"
+        :y2="layout.crosshairY2"
+        stroke="var(--transfer2)"
+        stroke-width="1.5"
+        stroke-dasharray="3 3"
+        aria-hidden="true"
+      />
 
       <g aria-hidden="true">
         <rect
@@ -316,6 +329,7 @@ const selectedXValue = computed(() => xValues.value[selectedIndex.value])
 const selectedX = computed(() => (selectedIndex.value < 0 ? 0 : xAt(selectedIndex.value)))
 const selectedXLabel = computed(() => (selectedXValue.value ? xLabelAt(selectedXValue.value) : ''))
 const tooltipOnRight = computed(() => selectedIndex.value < pointCount.value / 2)
+const todayX = computed(() => (Number.isInteger(props.series.todayIndex) && props.series.todayIndex >= 0 ? xAt(props.series.todayIndex) : null))
 
 const row = ({ seriesId, label, color, point, value = point?.value, yValue = value }) => ({
   seriesId,
@@ -333,7 +347,7 @@ const selectedRows = computed(() => {
         const point = pointAt(group.points, key)
         return row({ seriesId: group.id, label: point?.label ?? group.label ?? group.id, color: group.color, point })
       })
-      .filter(({ point }) => Number.isFinite(point?.value))
+      .filter(({ point }) => point?.showInTooltip !== false && Number.isFinite(point?.value))
     const linePoint = pointAt(availableLine.value.points, key)
     return [...bars, row({ seriesId: availableLine.value.id, label: availableLine.value.label ?? availableLine.value.id, color: availableLine.value.color, point: linePoint })]
   }
@@ -406,6 +420,7 @@ const emitSelection = () => {
 const applyInteraction = (event) => {
   interaction.value = reduceCombinationChartInteraction(interaction.value, { ...event, pointCount: pointCount.value })
   if (interaction.value.effect?.type === 'select') emitSelection()
+  if (interaction.value.effect?.type === 'clear') emit('select', null)
   if (interaction.value.effect?.type === 'selectRow') {
     const { item, activation } = interaction.value.effect
     emit('select-point', buildLineChartSelectionPayload({ seriesId: item.seriesId, point: item.point, activation }))
@@ -432,8 +447,13 @@ const onPointerUp = (event) => {
   applyInteraction({ type: 'pointerUp', index })
 }
 const onPointerLeave = () => applyInteraction({ type: 'pointerLeave' })
-const onKeydown = (event) => {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', 'Escape'].includes(event.key)) return
+const onChartKeydown = (event) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return
+  event.preventDefault()
+  applyInteraction({ type: 'key', key: event.key })
+}
+const onRootKeydown = (event) => {
+  if (event.key !== 'Escape') return
   event.preventDefault()
   applyInteraction({ type: 'key', key: event.key })
 }

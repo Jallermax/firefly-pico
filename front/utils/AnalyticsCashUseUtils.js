@@ -64,7 +64,8 @@ export function buildCombinationAreaGeometry({ points = [], xValues = [], xAt, y
   return paths
 }
 
-const clearedInteraction = () => ({ selectedIndex: -1, isPinned: false, isKeyboardSelection: false, isDragging: false, pointerStartedOnPinnedIndex: -1, effect: null })
+const clearedInteraction = (effect = null) => ({ selectedIndex: -1, isPinned: false, isKeyboardSelection: false, isDragging: false, pointerStartedOnPinnedIndex: -1, effect })
+const dismissedInteraction = () => clearedInteraction({ type: 'clear' })
 const interactionIndex = (index, pointCount) => (pointCount > 0 ? Math.min(pointCount - 1, Math.max(0, index)) : -1)
 
 export function reduceCombinationChartInteraction(state, event) {
@@ -72,7 +73,7 @@ export function reduceCombinationChartInteraction(state, event) {
   const pointCount = Number(event?.pointCount) || 0
   const rawIndex = Number(event?.index)
   const index = Number.isInteger(rawIndex) && rawIndex >= 0 ? interactionIndex(rawIndex, pointCount) : -1
-  if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return clearedInteraction()
+  if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return dismissedInteraction()
   if (event?.type === 'pointCountChanged') {
     if (pointCount === 0) return clearedInteraction()
     return current.selectedIndex >= pointCount ? { ...current, selectedIndex: pointCount - 1 } : current
@@ -96,11 +97,11 @@ export function reduceCombinationChartInteraction(state, event) {
   if (event?.type === 'pointerUp') {
     if (!current.isDragging) return current
     const selectedIndex = index < 0 ? current.selectedIndex : index
-    if (current.pointerStartedOnPinnedIndex === selectedIndex) return clearedInteraction()
+    if (current.pointerStartedOnPinnedIndex === selectedIndex) return dismissedInteraction()
     return { ...current, selectedIndex, isPinned: selectedIndex >= 0, isDragging: false, pointerStartedOnPinnedIndex: -1, effect: selectedIndex >= 0 ? { type: 'select' } : null }
   }
   if (event?.type === 'key') {
-    if (event.key === 'Escape') return clearedInteraction()
+    if (event.key === 'Escape') return dismissedInteraction()
     if (pointCount === 0) return current
     if (event.key === 'Enter') {
       const selectedIndex = current.selectedIndex < 0 ? 0 : current.selectedIndex
