@@ -73,7 +73,7 @@ const dailyConfidence = (confidence) => {
 const unavailableDailyMetric = (status) => ['unavailable', 'insufficientHistory'].includes(status)
 const dailyEntryContributes = (entry, keys) => keys.some((key) => entry.flowAmounts?.[key] !== 0)
 
-const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimalPlaces }) => {
+const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, currencyDecimalPlaces }) => {
   const dateKeys = dailyDates(today)
   const todayKey = format(today, 'yyyy-MM-dd')
   const monthKey = todayKey.slice(0, 7)
@@ -135,6 +135,35 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
       })
     })
 
+  const futureDates = dateKeys.filter((date) => date > todayKey)
+  const projectedUnavailableFlowKeys = Object.fromEntries(DAILY_SOURCE_KINDS.filter((kind) => kind !== 'actual').map((kind) => [kind, new Map(futureDates.map((date) => [date, new Set()]))]))
+  const addProjectedUnavailableFlowKeys = (sourceKind, dates, keys) => {
+    dates.forEach((date) => keys.filter((key) => DAILY_FLOW_KEYS.includes(key)).forEach((key) => projectedUnavailableFlowKeys[sourceKind].get(date)?.add(key)))
+  }
+  const candidateById = new Map(candidates.map((candidate) => [String(candidate.id), candidate]))
+  const unresolvedByCandidateId = new Map((forecast.audit.recurring.unresolvedCandidates ?? []).map((candidate) => [String(candidate.candidateId), candidate]))
+  const fulfilledExpectedIds = new Set(forecast.audit.recurring.fulfilledExpectedIds ?? [])
+  for (const candidateId of forecast.audit.unavailable.candidateIds) {
+    const candidate = candidateById.get(String(candidateId))
+    const sourceKind = candidate?.source?.authoritative ? 'defined' : 'inferred'
+    const affectedMetricIds = unresolvedByCandidateId.get(String(candidateId))?.affectedMetricIds ?? DAILY_FLOW_KEYS
+    const expectedDates = (candidate?.expectedDates ?? [])
+      .filter((date) => date.startsWith(monthKey) && !fulfilledExpectedIds.has(`expected:${candidate.id}:${date}`))
+      .map((date) => (date <= todayKey ? futureDates[0] : date))
+      .filter(Boolean)
+    addProjectedUnavailableFlowKeys(sourceKind, expectedDates.length > 0 ? [...new Set(expectedDates)] : futureDates, affectedMetricIds)
+  }
+  const historyMonths = new Set(forecast.audit.history.months ?? [])
+  const unavailableEntryIds = new Set(forecast.audit.unavailable.entryIds ?? [])
+  for (const entry of ledger.entries.filter((item) => historyMonths.has(item.monthKey) && unavailableEntryIds.has(String(item.id)))) {
+    addProjectedUnavailableFlowKeys('variable', futureDates, classifyForecastFlowAmounts({ entry, currencyDecimalPlaces }).affectedMetricIds)
+  }
+  addProjectedUnavailableFlowKeys(
+    'variable',
+    futureDates,
+    DAILY_FLOW_KEYS.filter((key) => forecast.statusByMetric[key] === 'insufficientHistory'),
+  )
+
   const days = dateKeys.map((date) => {
     const day = dayByDate.get(date)
     if (day.actual) finishDailyBucket(day.actual, currencyDecimalPlaces)
@@ -181,7 +210,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
         const entries = applicable ? (bucket?.entries ?? []).filter((entry) => entry.sourceKind === sourceKind && dailyEntryContributes(entry, directionKeys)) : []
         const components = emptyDailyComponents()
         entries.forEach((entry) => addDailyComponents(components, entry.flowAmounts, currencyDecimalPlaces))
-        const hasUnavailableMetric = sourceKind !== 'actual' && directionKeys.some((key) => unavailableDailyMetric(forecast.statusByMetric[key]))
+        const hasUnavailableMetric = sourceKind !== 'actual' && directionKeys.some((key) => projectedUnavailableFlowKeys[sourceKind].get(day.date)?.has(key))
         const rawValue = applicable && !hasUnavailableMetric ? dailyTotal(components, directionKeys, currencyDecimalPlaces) : null
         const transactionIds = [...new Set(entries.flatMap((entry) => entry.transactionIds ?? []))].sort()
         const evidenceIds = [...new Set(entries.flatMap(projectedEvidenceIds))].sort()
@@ -225,8 +254,27 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
     : roundDaily(forecast.actualToDate.availableCashChange + forecast.remainingFromToday.availableCashChange, currencyDecimalPlaces)
   const actualAvailable = days.at(-1)?.cumulativeAvailableCashChange ?? 0
   const availableCashDelta = expectedAvailable === null || actualAvailable === null ? null : roundDaily(actualAvailable - expectedAvailable, currencyDecimalPlaces)
-  const hasUnclassifiedActivity = ledger.audit?.unclassifiedValue === null || Number(ledger.audit?.unclassifiedValue) !== 0
-  const unclassifiedTransactionIds = hasUnclassifiedActivity ? [...(ledger.audit?.transactionIds ?? [])].map(String).sort() : []
+  const relevantUnclassifiedMonths = new Set([monthKey, ...(forecast.audit.history.months ?? [])])
+  const relevantUnclassifiedEntries = ledger.entries.filter(
+    ({ monthKey: entryMonth, sourceKind, destinationKind }) => relevantUnclassifiedMonths.has(entryMonth) && (sourceKind === 'unknown' || destinationKind === 'unknown'),
+  )
+  const unclassifiedValue = relevantUnclassifiedEntries.some(({ value }) => !Number.isFinite(value))
+    ? null
+    : roundDaily(
+        relevantUnclassifiedEntries.reduce((total, { value }) => total + Math.abs(value), 0),
+        currencyDecimalPlaces,
+      )
+  const hasUnclassifiedActivity = unclassifiedValue === null || unclassifiedValue !== 0
+  const unclassifiedTransactionIds = hasUnclassifiedActivity
+    ? [
+        ...new Set(
+          relevantUnclassifiedEntries
+            .map(({ transactionId }) => transactionId)
+            .filter(Boolean)
+            .map(String),
+        ),
+      ].sort()
+    : []
   const reconciliationStatus =
     hasUnclassifiedActivity || Object.values(componentDeltas).some((value) => value === null) || availableCashDelta === null
       ? 'unavailable'
@@ -299,7 +347,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimal
       unavailableEntryIds: forecast.audit.unavailable.entryIds,
       unavailableCandidateIds: forecast.audit.unavailable.candidateIds,
       missingCurrencies: forecast.audit.unavailable.missingCurrencies,
-      unclassifiedValue: hasUnclassifiedActivity ? (ledger.audit?.unclassifiedValue ?? null) : 0,
+      unclassifiedValue: hasUnclassifiedActivity ? unclassifiedValue : 0,
       unclassifiedTransactionIds,
     },
   }
@@ -875,6 +923,7 @@ export function createAnalyticsStore(id, useDependencies) {
       return buildDailyForecastProjection({
         ledger: ledger.value,
         forecast: buildForecast(dailyForecastMonths.value, candidates),
+        candidates,
         today: getNow(),
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
       })
@@ -885,17 +934,31 @@ export function createAnalyticsStore(id, useDependencies) {
     const dailyForecastState = computed(() => {
       const sourceErrors = dailyForecastSourceErrors.value
       const forecastStatus = sourceErrors.length > 0 && dailyForecast.value.status !== 'unavailable' ? 'partial' : dailyForecast.value.status
+      const unavailableMetricIds = DAILY_FLOW_KEYS.filter((key) => dailyForecast.value.statusByMetric[key] === 'unavailable')
+      const hasDefensibleChartData = dailyForecast.value.barGroups.some(({ points }) =>
+        points.some(({ value, transactionIds, evidenceIds }) => Number.isFinite(value) && (value !== 0 || transactionIds.length > 0 || evidenceIds.length > 0)),
+      )
+      const hasUnavailableEvidence =
+        dailyForecast.value.audit.unavailableTransactionIds.length > 0 || dailyForecast.value.audit.unavailableCandidateIds.length > 0 || dailyForecast.value.audit.missingCurrencies.length > 0
+      const isBlockingUnavailable =
+        dailyForecast.value.audit.unclassifiedTransactionIds.length > 0 ||
+        dailyForecast.value.reconciliation.status === 'mismatch' ||
+        (!hasDefensibleChartData && (dailyForecast.value.status === 'unavailable' || hasUnavailableEvidence))
+      const isPartiallyUnavailable =
+        !isBlockingUnavailable &&
+        (sourceErrors.length > 0 ||
+          unavailableMetricIds.length > 0 ||
+          hasUnavailableEvidence ||
+          ['partial', 'insufficientHistory', 'unavailable'].includes(dailyForecast.value.status) ||
+          dailyForecast.value.reconciliation.status === 'unavailable')
       return {
         ...categoryState,
         forecastStatus,
-        isPartial: sourceErrors.length > 0 || ['partial', 'insufficientHistory'].includes(dailyForecast.value.status),
-        isUnavailable:
-          dailyForecast.value.status === 'unavailable' ||
-          dailyForecast.value.reconciliation.status === 'mismatch' ||
-          dailyForecast.value.audit.unavailableTransactionIds.length > 0 ||
-          dailyForecast.value.audit.unavailableCandidateIds.length > 0 ||
-          dailyForecast.value.audit.missingCurrencies.length > 0 ||
-          dailyForecast.value.audit.unclassifiedTransactionIds.length > 0,
+        isPartial: isPartiallyUnavailable,
+        isUnavailable: isBlockingUnavailable,
+        isBlockingUnavailable,
+        isPartiallyUnavailable,
+        unavailableMetricIds,
         unavailableTransactionIds: dailyForecast.value.audit.unavailableTransactionIds,
         unavailableCandidateIds: dailyForecast.value.audit.unavailableCandidateIds,
         unclassifiedTransactionIds: dailyForecast.value.audit.unclassifiedTransactionIds,

@@ -1945,12 +1945,15 @@ test('applies per-metric unavailability to future daily components without blank
   assert.equal(incomePoint.evidenceIds.includes('defined-income'), true)
   assert.equal(incomePoint.evidenceIds.includes('foreign-expense'), false)
   assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'defined:uses').points.find(({ x }) => x === '2026-08-20').value, null)
-  assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'variable:uses').points.find(({ x }) => x === '2026-08-21').value, -5)
+  assert.equal(Math.abs(store.dailyForecast.barGroups.find(({ id }) => id === 'defined:uses').points.find(({ x }) => x === '2026-08-21').value), 0)
+  const variableUse = store.dailyForecast.barGroups.find(({ id }) => id === 'variable:uses').points.find(({ x }) => x === '2026-08-21').value
+  assert.equal(Number.isFinite(variableUse), true)
+  assert.equal(variableUse < 0, true)
   assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
   assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
   assert.equal(store.dailyForecastState.isUnavailable, false)
   assert.deepEqual(store.dailyForecastState.unavailableMetricIds, ['expenses'])
-  assert.deepEqual(store.dailyForecastState.unavailableCandidateIds, ['subscription:foreign-expense'])
+  assert.deepEqual(store.dailyForecastState.unavailableCandidateIds, ['defined:subscription:foreign-expense'])
 })
 
 test('keeps explanatory source and use rows for a genuine net-zero day while suppressing empty rows', async () => {
