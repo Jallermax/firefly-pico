@@ -283,6 +283,10 @@ const historyIdentityFor = (entry) => {
   }
 }
 
+const durableIdentityKeys = ['sourceAccountId', 'destinationAccountId', 'categoryId']
+const hasDurableIdentity = (identity) => durableIdentityKeys.every((key) => identity?.[key] !== null && identity?.[key] !== undefined && identity?.[key] !== '')
+const durableIdentityMatches = (expected, actual) => hasDurableIdentity(expected) && durableIdentityKeys.every((key) => String(expected[key]) === String(actual[key] ?? ''))
+
 const authoritativeIdentityMatches = (candidate, entry) => {
   const expected = candidate?.identity ?? {}
   const actual = historyIdentityFor(entry)
@@ -290,10 +294,17 @@ const authoritativeIdentityMatches = (candidate, entry) => {
   for (const key of ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId']) {
     if (expected[key] && String(expected[key]) !== String(actual[key] ?? '')) return false
   }
-  if (expected.payee && normalizeIdentityText(expected.payee) !== actual.payee) return false
+  const durableMatch = durableIdentityMatches(expected, actual)
+  const payeeMatch = Boolean(expected.payee && normalizeIdentityText(expected.payee) === actual.payee)
+  if (expected.payee && !payeeMatch && !durableMatch) return false
   const externalKey = expected.direction === 'income' ? 'sourceAccountId' : expected.direction === 'expense' ? 'destinationAccountId' : null
-  return Boolean((externalKey && expected[externalKey] && String(expected[externalKey]) === String(actual[externalKey])) || (expected.payee && normalizeIdentityText(expected.payee) === actual.payee))
+  return Boolean(durableMatch || payeeMatch || (externalKey && expected[externalKey] && String(expected[externalKey]) === String(actual[externalKey])))
 }
+
+const occurrenceMatchingCandidates = (candidates) =>
+  candidates.map((candidate) =>
+    candidate?.source?.authoritative === true && hasDurableIdentity(candidate.identity) ? { ...candidate, identity: { ...candidate.identity, payee: null }, identityVariants: [] } : candidate,
+  )
 
 const authoritativeAmountRange = ({ candidate, amount }) => {
   if (!Number.isFinite(amount) || amount <= 0) return null
@@ -579,7 +590,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     .map(({ id }) => String(id))
     .sort()
   const currentEntries = entries.filter(({ date }) => date?.startsWith(todayKey.slice(0, 7)) && date <= todayKey)
-  const recurring = matchRecurringOccurrences({ candidates: eligibleCandidates, actualEntries: currentEntries, today: todayKey })
+  const recurring = matchRecurringOccurrences({ candidates: occurrenceMatchingCandidates(eligibleCandidates), actualEntries: currentEntries, today: todayKey })
   const candidateById = new Map(eligibleCandidates.map((candidate) => [candidate.id, candidate]))
   const recurringIds = recurringHistoryIds(eligibleCandidates)
   const evidencedHistoryEntryIds = entries
