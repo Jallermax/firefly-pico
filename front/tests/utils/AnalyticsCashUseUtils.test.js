@@ -772,7 +772,7 @@ test('combination interaction controller pins a point and dismisses it completel
   state = interactionFor(state, { type: 'pointerDown', index: 1, pointCount: 3 })
   assert.deepEqual(state, { ...initial, selectedIndex: 1, isDragging: true, pointerStartedOnPinnedIndex: 1 })
   state = interactionFor(state, { type: 'pointerUp', index: 1, pointCount: 3 })
-  assert.deepEqual(state, initial)
+  assert.deepEqual(state, { ...initial, effect: { type: 'clear' } })
 })
 
 test('combination interaction controller owns pointer, keyboard, outside, and row-selection transitions', () => {
@@ -798,7 +798,30 @@ test('combination interaction controller owns pointer, keyboard, outside, and ro
   state = interactionFor(state, { type: 'rowSelect', item, activation: 'keyboard', pointCount: 3 })
   assert.deepEqual(state.effect, { type: 'selectRow', item, activation: 'keyboard' })
   state = interactionFor(state, { type: 'outside', pointCount: 3 })
-  assert.deepEqual(state, initial)
+  assert.deepEqual(state, { ...initial, effect: { type: 'clear' } })
+})
+
+test('combination interaction controller emits an explicit clear effect for every dismissal path', () => {
+  const selected = {
+    selectedIndex: 1,
+    isPinned: true,
+    isKeyboardSelection: true,
+    isDragging: false,
+    pointerStartedOnPinnedIndex: -1,
+    effect: { type: 'select' },
+  }
+  const cleared = {
+    selectedIndex: -1,
+    isPinned: false,
+    isKeyboardSelection: false,
+    isDragging: false,
+    pointerStartedOnPinnedIndex: -1,
+    effect: { type: 'clear' },
+  }
+
+  assert.deepEqual(interactionFor(selected, { type: 'clear', pointCount: 3 }), cleared)
+  assert.deepEqual(interactionFor(selected, { type: 'outside', pointCount: 3 }), cleared)
+  assert.deepEqual(interactionFor(selected, { type: 'key', key: 'Escape', pointCount: 3 }), cleared)
 })
 
 test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {
