@@ -1,4 +1,5 @@
 import { matchRecurringOccurrences } from './AnalyticsRecurringUtils.js'
+import { ANALYTICS_UNCATEGORIZED_ID } from './AnalyticsUtils.js'
 
 const FLOW_KEYS = ['income', 'refunds', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt', 'savingsChange', 'debtChange', 'netWorthChange', 'availableCashChange']
 const CUMULATIVE_METRICS = new Set(['income', 'refunds', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt'])
@@ -283,17 +284,23 @@ const historyIdentityFor = (entry) => {
   }
 }
 
-const durableIdentityKeys = ['sourceAccountId', 'destinationAccountId', 'categoryId']
-const hasDurableIdentity = (identity) => durableIdentityKeys.every((key) => identity?.[key] !== null && identity?.[key] !== undefined && identity?.[key] !== '')
-const durableIdentityMatches = (expected, actual) => hasDurableIdentity(expected) && durableIdentityKeys.every((key) => String(expected[key]) === String(actual[key] ?? ''))
+const durableAccountIdentityKeys = ['sourceAccountId', 'destinationAccountId']
+const hasCategoryIdentity = (identity) => Boolean(identity && Object.hasOwn(identity, 'categoryId'))
+const normalizedCategoryIdentity = (value) => String(value ?? ANALYTICS_UNCATEGORIZED_ID)
+const hasDurableIdentity = (identity) => hasCategoryIdentity(identity) && durableAccountIdentityKeys.every((key) => identity?.[key] !== null && identity?.[key] !== undefined && identity?.[key] !== '')
+const durableIdentityMatches = (expected, actual) =>
+  hasDurableIdentity(expected) &&
+  durableAccountIdentityKeys.every((key) => String(expected[key]) === String(actual[key] ?? '')) &&
+  normalizedCategoryIdentity(expected.categoryId) === normalizedCategoryIdentity(actual.categoryId)
 
 const authoritativeIdentityMatches = (candidate, entry) => {
   const expected = candidate?.identity ?? {}
   const actual = historyIdentityFor(entry)
   if (expected.direction !== actual.direction) return false
-  for (const key of ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind', 'categoryId']) {
+  for (const key of ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind']) {
     if (expected[key] && String(expected[key]) !== String(actual[key] ?? '')) return false
   }
+  if (hasCategoryIdentity(expected) && normalizedCategoryIdentity(expected.categoryId) !== normalizedCategoryIdentity(actual.categoryId)) return false
   const durableMatch = durableIdentityMatches(expected, actual)
   const payeeMatch = Boolean(expected.payee && normalizeIdentityText(expected.payee) === actual.payee)
   if (expected.payee && !payeeMatch && !durableMatch) return false
@@ -303,7 +310,9 @@ const authoritativeIdentityMatches = (candidate, entry) => {
 
 const occurrenceMatchingCandidates = (candidates) =>
   candidates.map((candidate) =>
-    candidate?.source?.authoritative === true && hasDurableIdentity(candidate.identity) ? { ...candidate, identity: { ...candidate.identity, payee: null }, identityVariants: [] } : candidate,
+    candidate?.source?.authoritative === true && hasDurableIdentity(candidate.identity)
+      ? { ...candidate, identity: { ...candidate.identity, categoryId: normalizedCategoryIdentity(candidate.identity.categoryId), payee: null }, identityVariants: [] }
+      : candidate,
   )
 
 const authoritativeAmountRange = ({ candidate, amount }) => {

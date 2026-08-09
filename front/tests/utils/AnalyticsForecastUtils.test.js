@@ -161,7 +161,7 @@ const buildProductionRentLedger = (transactions) => {
   const landlord = apiAccount({ id: 'landlord', type: 'expense' })
   landlord.attributes.name = 'Landlord account'
   return buildAnalyticsLedger({
-    transactions: transactions.map(({ id, date, amount = 100 }) => ({
+    transactions: transactions.map(({ id, date, amount = 100, categoryId = 'general' }) => ({
       id,
       attributes: {
         transactions: [
@@ -172,7 +172,7 @@ const buildProductionRentLedger = (transactions) => {
             date,
             source_id: checking.id,
             destination_id: landlord.id,
-            category_id: 'general',
+            category_id: categoryId,
             tags: [],
           },
         ],
@@ -448,6 +448,87 @@ test('does not forecast a fulfilled production-ledger occurrence again when defi
       .filter(({ monthKey }) => monthKey !== '2026-08')
       .map(({ id }) => id)
       .sort(),
+  )
+})
+
+test('removes uncategorized production-ledger authoritative history when definition and account labels differ', () => {
+  const productionLedger = buildProductionRentLedger([
+    { id: 'uncategorized-production-rent-june', date: '2026-06-20', categoryId: null },
+    { id: 'uncategorized-production-rent-july', date: '2026-07-20', categoryId: null },
+  ])
+  const baseCandidate = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 100 })
+  const candidate = { ...baseCandidate, identity: { ...baseCandidate.identity, categoryId: null } }
+
+  const result = buildRemainingActivityForecast({
+    ledger: productionLedger,
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(productionLedger.entries[0].categoryId, 'uncategorized')
+  assert.equal(result.remainingFromToday.expenses, 100)
+  assert.equal(result.final.expenses, 100)
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, productionLedger.entries.map(({ id }) => id).sort())
+})
+
+test('does not forecast a fulfilled uncategorized production-ledger occurrence again when labels differ', () => {
+  const productionLedger = buildProductionRentLedger([
+    { id: 'fulfilled-uncategorized-rent-june', date: '2026-06-20', categoryId: null },
+    { id: 'fulfilled-uncategorized-rent-july', date: '2026-07-20', categoryId: null },
+    { id: 'fulfilled-uncategorized-rent-august', date: '2026-08-20', categoryId: null },
+  ])
+  const baseCandidate = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 100 })
+  const candidate = { ...baseCandidate, identity: { ...baseCandidate.identity, categoryId: null } }
+
+  const result = buildRemainingActivityForecast({
+    ledger: productionLedger,
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-20' },
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 6,
+    today: '2026-08-20',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.actualToDate.expenses, 100)
+  assert.equal(result.remainingFromToday.expenses, 0)
+  assert.equal(result.final.expenses, 100)
+  assert.deepEqual(result.dailyProjectedEntries, [])
+  assert.deepEqual(
+    result.audit.recurring.removedHistoryEntryIds,
+    productionLedger.entries
+      .filter(({ monthKey }) => monthKey !== '2026-08')
+      .map(({ id }) => id)
+      .sort(),
+  )
+})
+
+test('keeps categorized production-ledger activity out of an uncategorized authoritative match', () => {
+  const productionLedger = buildProductionRentLedger(
+    ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'].map((month, index) => ({ id: `categorized-nonmatch-${index + 1}`, date: `${month}-20` })),
+  )
+  const baseCandidate = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 100 })
+  const candidate = { ...baseCandidate, identity: { ...baseCandidate.identity, categoryId: null } }
+
+  const result = buildRemainingActivityForecast({
+    ledger: productionLedger,
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.remainingFromToday.expenses, 200)
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, [])
+  assert.deepEqual(
+    [...new Set(result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable').flatMap(({ evidenceIds }) => evidenceIds))].sort(),
+    productionLedger.entries.flatMap(({ id, transactionId }) => [id, transactionId]).sort(),
   )
 })
 
