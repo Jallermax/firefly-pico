@@ -4,7 +4,19 @@ import test from 'node:test'
 import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 
-const account = ({ id, type = 'asset', role = 'defaultAsset', includeNetWorth = true, balance = '0', balanceDate = '2026-04-15T12:00:00-04:00', currencyCode = 'USD', direction = null }) => ({
+const account = ({
+  id,
+  type = 'asset',
+  role = 'defaultAsset',
+  includeNetWorth = true,
+  balance = '0',
+  virtualBalance = '0',
+  currentDebt = null,
+  debtAmount = null,
+  balanceDate = '2026-04-15T12:00:00-04:00',
+  currencyCode = 'USD',
+  direction = null,
+}) => ({
   id,
   attributes: {
     active: true,
@@ -12,6 +24,9 @@ const account = ({ id, type = 'asset', role = 'defaultAsset', includeNetWorth = 
     account_role: role ? { fireflyCode: role } : null,
     include_net_worth: includeNetWorth,
     current_balance: balance,
+    virtual_balance: virtualBalance,
+    current_debt: currentDebt,
+    debt_amount: debtAmount,
     current_balance_date: balanceDate,
     currency_code: currencyCode,
     liability_direction: direction ? { fireflyCode: direction } : null,
@@ -124,6 +139,39 @@ test('rewinds fresh signed account anchors per account without turning credit-ca
     debt.accountBreakdown.some(({ id }) => id === 'credit-card'),
     false,
   )
+})
+
+test('uses Firefly virtual balances for net worth and current debt for liability totals', () => {
+  const cardWithLimit = account({ id: 'card-with-limit', role: 'ccAsset', balance: '290.99', virtualBalance: '500' })
+  const partlyRepaidLoan = account({ id: 'partly-repaid-loan', type: 'liabilities', role: null, balance: '-3000', virtualBalance: '-2000', debtAmount: '1000', direction: 'debit' })
+
+  const netWorth = reconstructBalanceSeries({ ...baseArgs, accounts: [cardWithLimit, partlyRepaidLoan], entries: [], metric: 'netWorth', monthKeys: [] })
+  const debt = reconstructBalanceSeries({ ...baseArgs, accounts: [cardWithLimit, partlyRepaidLoan], entries: [], metric: 'debt', monthKeys: [] })
+
+  assert.equal(netWorth.currentPoint.value, -1209.01)
+  assert.deepEqual(
+    netWorth.accountBreakdown.map(({ id, anchorValue }) => ({ id, anchorValue })),
+    [
+      { id: 'card-with-limit', anchorValue: -209.01 },
+      { id: 'partly-repaid-loan', anchorValue: -1000 },
+    ],
+  )
+  assert.equal(debt.currentPoint.value, 1000)
+  assert.deepEqual(
+    debt.accountBreakdown.map(({ id, anchorValue }) => ({ id, anchorValue })),
+    [{ id: 'partly-repaid-loan', anchorValue: -1000 }],
+  )
+})
+
+test('uses exact primary-currency balance and virtual-balance fields when Firefly provides them', () => {
+  const euroCard = account({ id: 'euro-card', role: 'ccAsset', balance: '90', virtualBalance: '10', currencyCode: 'EUR' })
+  euroCard.attributes.pc_current_balance = '100'
+  euroCard.attributes.pc_virtual_balance = '11'
+
+  const result = reconstructBalanceSeries({ ...baseArgs, accounts: [euroCard], entries: [], metric: 'netWorth', monthKeys: [], rates: { USD: 1, EUR: 0.9 } })
+
+  assert.deepEqual(result.currentPoint, { x: '2026-04-15', value: 89, transactionIds: [] })
+  assert.deepEqual(result.fx, { isEstimated: false, missingCurrencies: [], transactionIds: [] })
 })
 
 test('emits completed gross-expense zeros and exact transaction evidence', () => {

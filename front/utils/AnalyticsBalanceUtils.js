@@ -1,6 +1,6 @@
 import { format } from 'date-fns'
 
-import { convertAnalyticsAmount, getAnalyticsAccountGroups, getAnalyticsAccountKind } from './AnalyticsUtils.js'
+import { convertAnalyticsAmount, getAnalyticsAccountGroups, getAnalyticsAccountKind, getAnalyticsCurrentAmount } from './AnalyticsUtils.js'
 
 const unique = (values) => [...new Set(values.filter(Boolean))].sort()
 const idOf = (value) => (value === null || value === undefined || value === '' ? null : String(value))
@@ -21,6 +21,35 @@ const cleanNumber = (value) => {
   if (!Number.isFinite(value)) return null
   const factor = 10 ** 12
   return Math.round((value + Number.EPSILON) * factor) / factor
+}
+
+const hasAmount = (value) => value !== null && value !== undefined && (typeof value !== 'string' || value.trim() !== '')
+
+const balanceAfterVirtual = (balance, virtualBalance) => {
+  if (!hasAmount(balance)) return null
+  const current = Number(balance)
+  const virtual = hasAmount(virtualBalance) ? Number(virtualBalance) : 0
+  return Number.isFinite(current) && Number.isFinite(virtual) ? cleanNumber(current - virtual) : null
+}
+
+const signedDebtAmount = ({ account, fallbackAmount, primary = false }) => {
+  const attributes = account?.attributes ?? {}
+  const debtAmount = primary ? (attributes.pc_debt_amount ?? attributes.pc_current_debt ?? attributes.native_current_debt) : (attributes.debt_amount ?? attributes.current_debt)
+  const magnitude = getAnalyticsCurrentAmount({ account: { attributes: { current_debt: debtAmount } }, metric: 'debt', fallbackAmount })
+  if (!Number.isFinite(magnitude)) return null
+  if (fallbackAmount < 0) return -magnitude
+  if (fallbackAmount > 0) return magnitude
+  return codeOf(attributes.liability_direction) === 'debit' ? -magnitude : magnitude
+}
+
+const accountAnchorAmounts = (account, metric) => {
+  const attributes = account?.attributes ?? {}
+  const amount = balanceAfterVirtual(attributes.current_balance, attributes.virtual_balance)
+  const primaryAmount = balanceAfterVirtual(attributes.pc_current_balance ?? attributes.native_current_balance, attributes.pc_virtual_balance ?? attributes.native_virtual_balance)
+  return {
+    amount: metric === 'debt' ? signedDebtAmount({ account, fallbackAmount: amount }) : amount,
+    primaryAmount: metric === 'debt' ? signedDebtAmount({ account, fallbackAmount: primaryAmount, primary: true }) : primaryAmount,
+  }
 }
 
 const eligibleAccounts = (accounts, metric) => {
@@ -157,10 +186,11 @@ export function reconstructBalanceSeries({
   const metricEntries = relevantEntries(normalizedEntries, accountIds, metric)
 
   const accountBreakdown = selectedAccounts.map((account) => {
+    const anchorAmounts = accountAnchorAmounts(account, metric)
     const converted = convertAnalyticsAmount({
-      amount: account?.attributes?.current_balance,
+      amount: anchorAmounts.amount,
       currencyCode: codeOf(account?.attributes?.currency_code),
-      primaryAmount: null,
+      primaryAmount: anchorAmounts.primaryAmount,
       primaryCurrencyCode,
       displayCurrencyCode,
       rates,
