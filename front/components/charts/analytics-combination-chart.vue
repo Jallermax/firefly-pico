@@ -14,34 +14,34 @@
       @keydown="onChartKeydown"
     >
       <defs>
-        <pattern id="analytics-combination-forecast" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <pattern :id="paintId('forecast')" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" stroke-width="2" opacity="0.45" />
         </pattern>
-        <pattern id="analytics-combination-refund" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <pattern :id="paintId('refund')" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width="2" opacity="0.58" />
         </pattern>
-        <pattern id="analytics-combination-accessible-savings" width="8" height="8" patternUnits="userSpaceOnUse">
+        <pattern :id="paintId('accessible-savings')" width="8" height="8" patternUnits="userSpaceOnUse">
           <circle cx="2" cy="2" r="1.5" fill="currentColor" opacity="0.55" />
         </pattern>
-        <pattern id="analytics-combination-restricted-savings" width="8" height="8" patternUnits="userSpaceOnUse">
+        <pattern :id="paintId('restricted-savings')" width="8" height="8" patternUnits="userSpaceOnUse">
           <path d="M 0 4 H 8 M 4 0 V 8" stroke="currentColor" stroke-width="1.25" opacity="0.5" />
         </pattern>
-        <pattern id="analytics-combination-debt" width="8" height="8" patternUnits="userSpaceOnUse">
+        <pattern :id="paintId('debt')" width="8" height="8" patternUnits="userSpaceOnUse">
           <path d="M 0 0 L 8 8 M 8 0 L 0 8" stroke="currentColor" stroke-width="1" opacity="0.5" />
         </pattern>
-        <pattern id="analytics-combination-gap-positive" width="8" height="8" patternUnits="userSpaceOnUse">
+        <pattern :id="paintId('gap-positive')" width="8" height="8" patternUnits="userSpaceOnUse">
           <path d="M 0 8 L 8 0" stroke="var(--income2)" stroke-width="2" opacity="0.5" />
         </pattern>
-        <pattern id="analytics-combination-gap-negative" width="8" height="8" patternUnits="userSpaceOnUse">
+        <pattern :id="paintId('gap-negative')" width="8" height="8" patternUnits="userSpaceOnUse">
           <path d="M 0 0 L 8 8" stroke="var(--expense2)" stroke-width="2" opacity="0.55" />
         </pattern>
-        <pattern id="analytics-combination-defined" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <pattern :id="paintId('defined')" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width="2" opacity="0.7" />
         </pattern>
-        <pattern id="analytics-combination-inferred" width="7" height="7" patternUnits="userSpaceOnUse">
+        <pattern :id="paintId('inferred')" width="7" height="7" patternUnits="userSpaceOnUse">
           <circle cx="2" cy="2" r="1.4" fill="currentColor" opacity="0.7" />
         </pattern>
-        <pattern id="analytics-combination-variable" width="8" height="8" patternUnits="userSpaceOnUse">
+        <pattern :id="paintId('variable')" width="8" height="8" patternUnits="userSpaceOnUse">
           <path d="M 0 4 H 8" stroke="currentColor" stroke-width="1.5" opacity="0.65" />
         </pattern>
       </defs>
@@ -92,13 +92,13 @@
         />
         <template v-for="layer in renderedUseLayers" :key="layer.id">
           <path v-for="(path, index) in layer.paths" :key="`${layer.id}:${index}`" :d="path.d" :fill="areaFill(layer, path)" :style="{ color: layer.color }" opacity="0.72" />
-          <path v-for="(path, index) in layer.refundPaths" :key="`${layer.id}:refund:${index}`" :d="path.d" fill="url(#analytics-combination-refund)" :style="{ color: layer.color }" opacity="0.9" />
+          <path v-for="(path, index) in layer.refundPaths" :key="`${layer.id}:refund:${index}`" :d="path.d" :fill="paintUrl('refund')" :style="{ color: layer.color }" opacity="0.9" />
         </template>
         <template v-for="band in renderedSourceBands" :key="band.id">
           <path v-for="(path, index) in band.paths" :key="`${band.id}:${index}`" :d="path.d" :fill="areaFill(band, path)" :style="{ color: band.color }" opacity="0.55" />
         </template>
-        <path v-for="(path, index) in renderedPositiveGap" :key="`positive-gap:${index}`" :d="path.d" fill="url(#analytics-combination-gap-positive)" />
-        <path v-for="(path, index) in renderedNegativeGap" :key="`negative-gap:${index}`" :d="path.d" fill="url(#analytics-combination-gap-negative)" />
+        <path v-for="(path, index) in renderedPositiveGap" :key="`positive-gap:${index}`" :d="path.d" :fill="paintUrl('gap-positive')" />
+        <path v-for="(path, index) in renderedNegativeGap" :key="`negative-gap:${index}`" :d="path.d" :fill="paintUrl('gap-negative')" />
         <path
           v-for="(path, index) in ordinaryIncomePaths"
           :key="`income:${index}`"
@@ -183,11 +183,15 @@
 
 <script setup>
 import { onClickOutside, useElementSize } from '@vueuse/core'
+import { useId } from 'vue'
 import { useAppStore } from '~/stores/appStore.js'
 import { buildCombinationAreaGeometry, reduceCombinationChartInteraction } from '~/utils/AnalyticsCashUseUtils.js'
 import { buildLineChartLayout, buildLineChartSelectionPayload, nearestChartPointIndex } from '~/utils/ChartUtils.js'
 
 const GRID_LINE_COUNT = 5
+const paintServerPrefix = `analytics-combination-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+const paintId = (name) => `${paintServerPrefix}-${name}`
+const paintUrl = (name) => `url(#${paintId(name)})`
 
 const props = defineProps({
   series: { type: Object, required: true },
@@ -289,9 +293,9 @@ const barSourceKinds = computed(() => [...new Set((props.series.barGroups ?? [])
 const barSpacing = computed(() => (pointCount.value > 1 ? innerWidth.value / (pointCount.value - 1) : innerWidth.value))
 const barWidth = computed(() => Math.max(2, Math.min(10, (barSpacing.value * 0.78) / Math.max(1, barSourceKinds.value.length))))
 const barFill = (group) => {
-  if (group.sourceKind === 'defined') return 'url(#analytics-combination-defined)'
-  if (group.sourceKind === 'inferred') return 'url(#analytics-combination-inferred)'
-  if (group.sourceKind === 'variable') return 'url(#analytics-combination-variable)'
+  if (group.sourceKind === 'defined') return paintUrl('defined')
+  if (group.sourceKind === 'inferred') return paintUrl('inferred')
+  if (group.sourceKind === 'variable') return paintUrl('variable')
   return group.color
 }
 const renderedBars = computed(() =>
@@ -318,11 +322,11 @@ const renderedBars = computed(() =>
   }),
 )
 const areaFill = (item, path) => {
-  if (path.forecast) return 'url(#analytics-combination-forecast)'
-  if (item.pattern === 'refund') return 'url(#analytics-combination-refund)'
-  if (item.pattern === 'accessible-savings') return 'url(#analytics-combination-accessible-savings)'
-  if (item.pattern === 'restricted-savings') return 'url(#analytics-combination-restricted-savings)'
-  if (item.pattern === 'debt') return 'url(#analytics-combination-debt)'
+  if (path.forecast) return paintUrl('forecast')
+  if (item.pattern === 'refund') return paintUrl('refund')
+  if (item.pattern === 'accessible-savings') return paintUrl('accessible-savings')
+  if (item.pattern === 'restricted-savings') return paintUrl('restricted-savings')
+  if (item.pattern === 'debt') return paintUrl('debt')
   return item.color
 }
 const selectedXValue = computed(() => xValues.value[selectedIndex.value])

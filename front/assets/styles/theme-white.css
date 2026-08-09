@@ -2453,7 +2453,7 @@ body {
 }
 
 .analytics-metric-facet-button {
-    min-height: 32px;
+    min-height: 44px;
     padding: 0 12px;
     border: 0;
     border-radius: 25px;
@@ -2617,7 +2617,7 @@ body {
 }
 
 .analytics-calculation-details summary {
-    min-height: 36px;
+    min-height: 44px;
     padding: 9px 10px;
     color: var(--van-text-color);
     cursor: pointer;
@@ -2644,7 +2644,7 @@ body {
 }
 
 .analytics-category-facet-button {
-    min-height: 32px;
+    min-height: 44px;
     padding: 0 12px;
     border: 0;
     border-radius: 25px;

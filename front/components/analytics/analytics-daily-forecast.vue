@@ -10,7 +10,7 @@
     </div>
 
     <div class="analytics-category-periods">
-      <app-tabs v-model="analyticsStore.dailyForecastMonths" :items="periodItems" />
+      <app-tabs v-model="analyticsStore.dailyForecastMonths" :items="periodItems" :aria-label="$t('analytics.daily_forecast.history_window_label')" />
     </div>
 
     <div v-if="dailyState.status === 'loading' && !hasRetainedData" class="analytics-card-state">

@@ -858,3 +858,84 @@ test('combination chart and card wire accessible interaction targets and exact e
     forecastOnly: true,
   })
 })
+
+test('cash use consumes the page-level Savings view without rendering a duplicate control', () => {
+  const page = readFileSync(new URL('../../pages/analytics.vue', import.meta.url), 'utf8')
+  const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+
+  assert.equal(page.match(/<analytics-savings-view-control\b/g)?.length ?? 0, 1)
+  assert.doesNotMatch(card, /v-model="analyticsStore\.savingsView"/)
+  assert.doesNotMatch(card, /const savingsItems = computed/)
+})
+
+test('analytics interaction inventory keeps every compact control at least 44px tall', () => {
+  const css = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selectors, declarations]) => ({
+    selectors: selectors
+      .split(',')
+      .map((selector) => selector.trim())
+      .filter(Boolean),
+    declarations,
+  }))
+  const targetHeight = (selector) => {
+    const rule = rules.find((item) => item.selectors.includes(selector))
+    const minHeight = rule?.declarations.match(/min-height:\s*(\d+)px/)?.[1]
+    const height = rule?.declarations.match(/(?:^|\s)height:\s*(\d+)px/)?.[1]
+    return Math.max(Number(minHeight ?? 0), Number(height ?? 0)) || null
+  }
+  const interactiveSelectors = [
+    '.analytics-card .van-button',
+    '.analytics-page .analytics-card .app-tabs-item',
+    '.analytics-page .app-tabs.analytics-page-switch .app-tabs-item',
+    '.analytics-page .analytics-savings-view-control .app-tabs-item',
+    '.analytics-metric-facet-button',
+    '.analytics-metric-facet-row',
+    '.analytics-category-facet-button',
+    '.analytics-category-facet-row',
+    '.analytics-calculation-details summary',
+    '.analytics-flow-month-button',
+    '.analytics-flow-audit summary',
+    '.analytics-flow-exact-values summary',
+    '.analytics-flow-reallocation-row',
+  ]
+
+  assert.deepEqual(Object.fromEntries(interactiveSelectors.map((selector) => [selector, targetHeight(selector)])), Object.fromEntries(interactiveSelectors.map((selector) => [selector, 44])))
+})
+
+test('new analytics tablists expose distinct localized accessible names', () => {
+  const cashUse = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+  const daily = readFileSync(new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url), 'utf8')
+  const pageSwitch = readFileSync(new URL('../../components/analytics/analytics-page-switch.vue', import.meta.url), 'utf8')
+  const savings = readFileSync(new URL('../../components/analytics/analytics-savings-view-control.vue', import.meta.url), 'utf8')
+
+  assert.match(cashUse, /v-model="analyticsStore\.cashUseMode"[^>]+aria-label="\$t\('analytics\.cash_use\.mode_label'\)"/)
+  assert.match(cashUse, /v-model="analyticsStore\.balancePeriod"[^>]+aria-label="\$t\('analytics\.cash_use\.history_window_label'\)"/)
+  assert.match(cashUse, /v-model="analyticsStore\.cashUseDetail"[^>]+aria-label="\$t\('analytics\.cash_use\.detail_label'\)"/)
+  assert.match(daily, /v-model="analyticsStore\.dailyForecastMonths"[^>]+aria-label="\$t\('analytics\.daily_forecast\.history_window_label'\)"/)
+  assert.match(pageSwitch, /aria-label="\$t\('analytics\.title'\)"/)
+  assert.match(savings, /aria-labelledby="analytics-savings-view-label"/)
+
+  const localeKeys = [
+    ['cash_use', 'mode_label'],
+    ['cash_use', 'history_window_label'],
+    ['cash_use', 'detail_label'],
+    ['daily_forecast', 'history_window_label'],
+  ]
+  for (const locale of ['de-DE', 'en', 'es-MX', 'fr', 'it', 'ko', 'pl', 'pt-BR', 'ro', 'ru-RU', 'zh-CN']) {
+    const analytics = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics
+    for (const [group, key] of localeKeys) assert.equal(typeof analytics[group][key], 'string', `${locale}: analytics.${group}.${key}`)
+  }
+})
+
+test('combination chart scopes every SVG paint server to its component instance', () => {
+  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const definitions = [...chart.matchAll(/<pattern\s+:id="paintId\('([^']+)'\)"/g)].map(([, name]) => name)
+  const references = [...chart.matchAll(/paintUrl\('([^']+)'\)/g)].map(([, name]) => name)
+
+  assert.match(chart, /import \{ useId \} from 'vue'/)
+  assert.match(chart, /const paintServerPrefix = `analytics-combination-\$\{/)
+  assert.doesNotMatch(chart, /id="analytics-combination-/)
+  assert.doesNotMatch(chart, /url\(#analytics-combination-/)
+  assert.deepEqual([...new Set(references)].sort(), [...new Set(definitions)].sort())
+  assert.equal(new Set(definitions).size, 10)
+})

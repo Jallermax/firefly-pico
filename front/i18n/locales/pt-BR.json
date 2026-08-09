@@ -32,6 +32,9 @@
       "exact_values": "Valores exatos"
     },
     "cash_use": {
+      "mode_label": "Cash-use mode",
+      "history_window_label": "Cash-use history window",
+      "detail_label": "Cash-use category detail",
       "title": "Cash use",
       "subtitle": "How income and existing funds covered spending, savings, and debt",
       "chart_label": "Monthly sources, uses, and excess or shortfall",
@@ -65,6 +68,7 @@
       "existing_available_funds_required": "Shortfall covered by existing Available"
     },
     "daily_forecast": {
+      "history_window_label": "Daily forecast history window",
       "title": "Daily forecast",
       "chart_label": "Actual and expected daily inflow, outflow, and cumulative Available change",
       "available_change": "Available change",

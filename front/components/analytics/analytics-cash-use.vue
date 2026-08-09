@@ -11,10 +11,9 @@
     </div>
 
     <div class="analytics-category-periods">
-      <app-tabs v-model="analyticsStore.cashUseMode" :items="modeItems" />
-      <app-tabs v-model="analyticsStore.balancePeriod" :items="periodItems" />
-      <app-tabs v-model="analyticsStore.cashUseDetail" :items="detailItems" />
-      <app-tabs v-if="analyticsStore.cashUseMode === 'full'" v-model="analyticsStore.savingsView" :items="savingsItems" />
+      <app-tabs v-model="analyticsStore.cashUseMode" :items="modeItems" :aria-label="$t('analytics.cash_use.mode_label')" />
+      <app-tabs v-model="analyticsStore.balancePeriod" :items="periodItems" :aria-label="$t('analytics.cash_use.history_window_label')" />
+      <app-tabs v-model="analyticsStore.cashUseDetail" :items="detailItems" :aria-label="$t('analytics.cash_use.detail_label')" />
     </div>
 
     <div v-if="cashUseState.status === 'loading' && !hasRetainedData" class="analytics-card-state">
@@ -92,10 +91,6 @@ const detailItems = computed(() => [
   { label: t('analytics.flow.top_5'), value: 5 },
   { label: t('analytics.flow.top_10'), value: 10 },
   { label: t('analytics.flow.all'), value: 'all' },
-])
-const savingsItems = computed(() => [
-  { label: t('analytics.savings_view.combined'), value: 'combined' },
-  { label: t('analytics.savings_view.split'), value: 'split' },
 ])
 const categoryLabel = (id) => (id === ANALYTICS_UNCATEGORIZED_ID ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[id]) || id)
 const formatCurrency = (value) => (Number.isFinite(value) ? `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
