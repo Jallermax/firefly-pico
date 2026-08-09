@@ -457,8 +457,8 @@ export function createAnalyticsStore(id, useDependencies) {
     const selectedFlowMonth = ref(startOfMonth(getNow()))
 
     const balanceState = reactive({ status: 'idle', error: null, isStale: false })
-    const categoryState = reactive({ status: 'idle', error: null, isStale: false })
-    const flowState = reactive({ status: 'idle', error: null, isStale: false })
+    const categoryState = reactive({ status: 'idle', error: null, isStale: false, sourceErrors: [] })
+    const flowState = reactive({ status: 'idle', error: null, isStale: false, sourceErrors: [] })
     const ancillaryState = reactive({
       transactionLinks: { status: 'idle', error: null },
       transactionLinkTypes: { status: 'idle', error: null },
@@ -932,6 +932,9 @@ export function createAnalyticsStore(id, useDependencies) {
     const dailyForecastSourceErrors = computed(() =>
       ['recurringTransactions', 'subscriptions'].filter((source) => ancillaryState[source].status === 'error').map((source) => ({ source, message: ancillaryState[source].error?.message ?? '' })),
     )
+    const refundCoverageSourceErrors = computed(() =>
+      ['transactionLinks', 'transactionLinkTypes'].filter((source) => ancillaryState[source].status === 'error').map((source) => ({ source, message: ancillaryState[source].error?.message ?? '' })),
+    )
     const dailyForecastState = computed(() => {
       const sourceErrors = dailyForecastSourceErrors.value
       const forecastStatus = sourceErrors.length > 0 && dailyForecast.value.status !== 'unavailable' ? 'partial' : dailyForecast.value.status
@@ -987,8 +990,8 @@ export function createAnalyticsStore(id, useDependencies) {
       const ownsCurrentSnapshot = () => activeSnapshotGeneration === generation
       Object.values(ancillaryState).forEach((state) => Object.assign(state, { status: 'loading', error: null }))
       Object.assign(balanceState, { status: 'loading', error: null, isStale: false })
-      Object.assign(categoryState, { status: 'loading', error: null, isStale: false })
-      Object.assign(flowState, { status: 'loading', error: null, isStale: false })
+      Object.assign(categoryState, { status: 'loading', error: null, isStale: false, sourceErrors: [] })
+      Object.assign(flowState, { status: 'loading', error: null, isStale: false, sourceErrors: [] })
 
       const request = (async () => {
         const [accountResult, transactionLinkResult, transactionLinkTypeResult, subscriptionResult, recurringTransactionResult, rateResult, transactionResult] = await Promise.all([
@@ -1019,11 +1022,12 @@ export function createAnalyticsStore(id, useDependencies) {
           }
         })
 
+        const previousSnapshot = rawSnapshot.value
         rawSnapshot.value = {
           accounts: accountResult?.ok ? accountResult.data : [],
           transactions: transactionResult.ok ? transactionResult.data : [],
-          transactionLinks: transactionLinkResult?.ok ? transactionLinkResult.data : [],
-          transactionLinkTypes: transactionLinkTypeResult?.ok ? transactionLinkTypeResult.data : [],
+          transactionLinks: transactionLinkResult?.ok ? transactionLinkResult.data : previousSnapshot.transactionLinks,
+          transactionLinkTypes: transactionLinkTypeResult?.ok ? transactionLinkTypeResult.data : previousSnapshot.transactionLinkTypes,
           subscriptions: subscriptionResult?.ok ? subscriptionResult.data : [],
           recurringTransactions: recurringTransactionResult?.ok ? recurringTransactionResult.data : [],
           rates: rateResult,
@@ -1032,13 +1036,15 @@ export function createAnalyticsStore(id, useDependencies) {
         }
 
         const transactionStatus = transactionResult.data.length > 0 ? 'ready' : 'empty'
+        const refundSourceErrors = refundCoverageSourceErrors.value
         if (transactionResult.ok) {
-          Object.assign(categoryState, { status: transactionStatus, error: null, isStale: false })
-          Object.assign(flowState, { status: transactionStatus, error: null, isStale: false })
+          const status = refundSourceErrors.length ? 'partial' : transactionStatus
+          Object.assign(categoryState, { status, error: null, isStale: refundSourceErrors.length > 0, sourceErrors: refundSourceErrors })
+          Object.assign(flowState, { status, error: null, isStale: refundSourceErrors.length > 0, sourceErrors: refundSourceErrors })
         } else {
           const error = new Error('Analytics transaction request failed')
-          Object.assign(categoryState, { status: 'error', error, isStale: false })
-          Object.assign(flowState, { status: 'error', error, isStale: false })
+          Object.assign(categoryState, { status: 'error', error, isStale: false, sourceErrors: refundSourceErrors })
+          Object.assign(flowState, { status: 'error', error, isStale: false, sourceErrors: refundSourceErrors })
         }
 
         if (!accountResult?.ok) Object.assign(balanceState, { status: 'error', error: new Error('Analytics account request failed'), isStale: false })

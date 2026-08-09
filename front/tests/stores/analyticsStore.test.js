@@ -1287,8 +1287,44 @@ test('retains failure metadata for each ancillary snapshot input', async () => {
     assert.equal(store.ancillaryState[input].status, 'error', input)
     assert.match(store.ancillaryState[input].error.message, /Analytics .* request failed/)
   }
-  assert.equal(store.categoryState.status, 'ready')
+  assert.equal(store.categoryState.status, 'partial')
+  assert.deepEqual(
+    store.categoryState.sourceErrors.map(({ source }) => source),
+    ['transactionLinks', 'transactionLinkTypes'],
+  )
 })
+
+for (const [source, configureFailure] of [
+  ['transactionLinks', () => (transactionLinkResult = async () => ({ ok: false, data: [] }))],
+  ['transactionLinkTypes', () => (transactionLinkTypeResult = async () => ({ ok: false, data: [] }))],
+]) {
+  test(`keeps refund-sensitive analytics partial when ${source} cannot be loaded`, async () => {
+    transactionResult = [currentExpenseTransaction(25)]
+    configureFailure()
+    const store = (analyticsStore = useAnalyticsStore())
+
+    await store.init()
+
+    for (const state of [store.categoryState, store.flowState, store.cashUseState]) {
+      assert.equal(state.status, 'partial')
+      assert.deepEqual(
+        state.sourceErrors.map(({ source: name }) => name),
+        [source],
+      )
+    }
+    assert.equal(store.balanceState.status, 'ready')
+    assert.equal(store.dailyForecastState.sourceErrors.length, 0)
+
+    if (source === 'transactionLinks') transactionLinkResult = async () => ({ ok: true, data: [] })
+    else transactionLinkTypeResult = async () => ({ ok: true, data: [] })
+    await store.retryCategory()
+
+    for (const state of [store.categoryState, store.flowState, store.cashUseState]) {
+      assert.equal(state.status, 'ready')
+      assert.deepEqual(state.sourceErrors, [])
+    }
+  })
+}
 
 test('keeps a completed snapshot on its captured exchange rates', async () => {
   const euroAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, currency_code: 'EUR', current_balance: '100' } }

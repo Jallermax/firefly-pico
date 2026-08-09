@@ -32,6 +32,10 @@
       <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
     </div>
     <template v-else>
+      <div v-if="analyticsStore.flowState.sourceErrors.length" class="analytics-warning" role="status">
+        <span>{{ $t('analytics.flow.error') }}</span>
+        <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
+      </div>
       <div v-if="analyticsStore.flowState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
         <span>{{ $t('analytics.flow.error') }}</span>
         <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
