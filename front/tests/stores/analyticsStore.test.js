@@ -210,14 +210,14 @@ const analyticsAccount = (id, type, role = null, includeNetWorth = false) => ({
     current_balance: type === 'asset' ? '0' : null,
   },
 })
-const dailyTransaction = ({ id, date, amount, source, destination, categoryId = null, tags = [] }) => ({
+const dailyTransaction = ({ id, date, amount, source, destination, categoryId = null, tags = [], currencyCode = 'USD' }) => ({
   id,
   attributes: {
     transactions: [
       {
         transaction_journal_id: `${id}-journal`,
         amount: String(amount),
-        currency_code: 'USD',
+        currency_code: currencyCode,
         date,
         category_id: categoryId,
         source_id: source.id,
@@ -1933,12 +1933,23 @@ test('applies per-metric unavailability to future daily components without blank
 
   assert.equal(store.dailyForecast.statusByMetric.expenses, 'unavailable')
   assert.equal(store.dailyForecast.statusByMetric.income, 'ready')
+  const beforeUnavailableDay = store.dailyForecast.days.find(({ date }) => date === '2026-08-19')
   const projectedDay = store.dailyForecast.days.find(({ date }) => date === '2026-08-20')
+  const afterUnavailableDay = store.dailyForecast.days.find(({ date }) => date === '2026-08-21')
+  assert.equal(Number.isFinite(beforeUnavailableDay.projected.components.expenses), true)
+  assert.equal(Number.isFinite(beforeUnavailableDay.projected.uses), true)
+  assert.equal(Number.isFinite(beforeUnavailableDay.availableCashChange), true)
+  assert.equal(Number.isFinite(beforeUnavailableDay.cumulativeAvailableCashChange), true)
   assert.equal(projectedDay.projected.components.expenses, null)
   assert.equal(projectedDay.projected.components.income, 100)
   assert.equal(projectedDay.projected.sources, 100)
   assert.equal(projectedDay.projected.uses, null)
   assert.equal(projectedDay.availableCashChange, null)
+  assert.equal(projectedDay.cumulativeAvailableCashChange, null)
+  assert.equal(Number.isFinite(afterUnavailableDay.projected.components.expenses), true)
+  assert.equal(Number.isFinite(afterUnavailableDay.projected.uses), true)
+  assert.equal(Number.isFinite(afterUnavailableDay.availableCashChange), true)
+  assert.equal(afterUnavailableDay.cumulativeAvailableCashChange, null)
   const incomePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'defined:sources').points.find(({ x }) => x === '2026-08-20')
   assert.equal(incomePoint.value, 100)
   assert.deepEqual(incomePoint.transactionIds, [])
@@ -1954,6 +1965,32 @@ test('applies per-metric unavailability to future daily components without blank
   assert.equal(store.dailyForecastState.isUnavailable, false)
   assert.deepEqual(store.dailyForecastState.unavailableMetricIds, ['expenses'])
   assert.deepEqual(store.dailyForecastState.unavailableCandidateIds, ['defined:subscription:foreign-expense'])
+})
+
+test('keeps selected-history missing-FX Firefly transaction IDs separate from entry and projected evidence IDs', async () => {
+  now = new Date(2026, 7, 10, 12)
+  currencyStore.exchangeRates = { rates: { USD: 1 } }
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const revenue = analyticsAccount('revenue', 'revenue')
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, revenue, expense]
+  transactionResult = [
+    dailyTransaction({ id: 'history-missing-fx', date: '2026-07-15', amount: 30, source: checking, destination: expense, currencyCode: 'EUR' }),
+    dailyTransaction({ id: 'usable-current-income', date: '2026-08-05', amount: 100, source: revenue, destination: checking }),
+  ]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.dailyForecast.audit.unavailableEntryIds, ['history-missing-fx:history-missing-fx-journal:0'])
+  assert.deepEqual(store.dailyForecast.audit.unavailableTransactionIds, ['history-missing-fx'])
+  assert.deepEqual(store.dailyForecastState.unavailableTransactionIds, ['history-missing-fx'])
+  assert.deepEqual(store.dailyForecast.audit.unavailableCandidateIds, [])
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+  assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
+  const incomePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'actual:sources').points.find(({ x }) => x === '2026-08-05')
+  assert.deepEqual(incomePoint.transactionIds, ['usable-current-income'])
+  assert.equal(incomePoint.evidenceIds.includes('history-missing-fx'), false)
 })
 
 test('keeps explanatory source and use rows for a genuine net-zero day while suppressing empty rows', async () => {
