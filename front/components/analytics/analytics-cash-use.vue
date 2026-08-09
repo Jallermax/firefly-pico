@@ -16,6 +16,10 @@
       <app-tabs v-model="analyticsStore.cashUseDetail" :items="detailItems" :aria-label="$t('analytics.cash_use.detail_label')" />
     </div>
 
+    <div v-if="cashUseState.sourceErrors.length" class="analytics-warning" role="status">
+      <span>{{ $t('analytics.cash_use.error') }}</span>
+      <van-button size="small" @click="analyticsStore.retryCashUse">{{ $t('analytics.common.retry') }}</van-button>
+    </div>
     <div v-if="cashUseState.status === 'loading' && !hasRetainedData" class="analytics-card-state">
       <van-loading size="20" />
       <span>{{ $t('analytics.common.loading') }}</span>
@@ -32,18 +36,10 @@
       }}</template>
     </div>
     <template v-else-if="!hasActivity">
-      <div v-if="cashUseState.sourceErrors.length" class="analytics-warning" role="status">
-        <span>{{ $t('analytics.cash_use.error') }}</span>
-        <van-button size="small" @click="analyticsStore.retryCashUse">{{ $t('analytics.common.retry') }}</van-button>
-      </div>
       <div class="analytics-card-state">{{ $t('analytics.cash_use.empty') }}</div>
       <div class="analytics-assumption-note">{{ $t('analytics.cash_use.definition') }}</div>
     </template>
     <template v-else>
-      <div v-if="cashUseState.sourceErrors.length" class="analytics-warning" role="status">
-        <span>{{ $t('analytics.cash_use.error') }}</span>
-        <van-button size="small" @click="analyticsStore.retryCashUse">{{ $t('analytics.common.retry') }}</van-button>
-      </div>
       <div v-if="cashUseState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
         <span>{{ $t('analytics.cash_use.error') }}</span>
         <van-button size="small" @click="analyticsStore.retryCashUse">{{ $t('analytics.common.retry') }}</van-button>

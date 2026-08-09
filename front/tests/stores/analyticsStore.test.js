@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import test, { afterEach, beforeEach } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
-import { nextTick, reactive, ref } from 'vue'
+import { createSSRApp, h, nextTick, reactive, ref } from 'vue'
+import { renderToString } from '@vue/server-renderer'
+import { parse as parseSfc } from '@vue/compiler-sfc'
 import { format, subMonths } from 'date-fns'
 import { createAnalyticsStore } from '../../stores/analyticsStoreFactory.js'
 import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
@@ -242,6 +244,33 @@ const waitFor = async (predicate) => {
     await new Promise((resolve) => setImmediate(resolve))
   }
   assert.fail('condition was not reached')
+}
+const renderAnalyticsCard = async (path, context) => {
+  const source = readFileSync(new URL(path, import.meta.url), 'utf8')
+  const template = parseSfc(source).descriptor.template?.content
+  const app = createSSRApp({ template, setup: () => context })
+  const slotStub = {
+    setup:
+      (_, { slots }) =>
+      () =>
+        h('div', slots.default?.()),
+  }
+  for (const name of [
+    'van-cell-group',
+    'van-loading',
+    'van-button',
+    'app-tabs',
+    'app-icon',
+    'app-popup',
+    'analytics-category-facet',
+    'multi-series-line-chart',
+    'analytics-combination-chart',
+    'layered-money-flow-chart',
+  ])
+    app.component(name, slotStub)
+  app.config.warnHandler = () => {}
+  app.config.globalProperties.$t = (key) => key
+  return renderToString(app)
 }
 
 beforeEach(() => {
@@ -1325,6 +1354,83 @@ for (const [source, configureFailure] of [
     }
   })
 }
+
+test('category keeps refund-source retry visible with blocking amount evidence', async () => {
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-category-spending.vue', {
+    analyticsStore: {
+      categoryState: { status: 'partial', error: null, isStale: true, sourceErrors: [{ source: 'transactionLinks' }] },
+      selectedCategoryIds: [],
+      categoryAverageMonths: 3,
+      retryCategory: () => {},
+    },
+    facetItems: [],
+    periodItems: [],
+    hasRetainedData: true,
+    readyPresentation: { isBlocked: true, unavailableTransactionIds: ['unavailable'] },
+    chartSeries: [],
+  })
+
+  assert.match(html, /analytics\.common\.unavailable_amounts/)
+  assert.match(html, /analytics\.category\.error/)
+  assert.match(html, /analytics\.common\.retry/)
+})
+
+test('cash use keeps refund-source retry visible with blocking audit evidence', async () => {
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-cash-use.vue', {
+    analyticsStore: { selectedCategoryIds: [], balancePeriod: 3, cashUseMode: 'spending', cashUseDetail: 5, retryCashUse: () => {} },
+    facetItems: [],
+    modeItems: [],
+    periodItems: [],
+    detailItems: [],
+    cashUseState: {
+      status: 'partial',
+      error: null,
+      isStale: true,
+      isUnavailable: true,
+      sourceErrors: [{ source: 'transactionLinkTypes' }],
+      unavailableTransactionIds: ['unavailable'],
+      auditStatus: 'unavailable',
+    },
+    hasRetainedData: true,
+    projectedUnavailableIds: [],
+  })
+
+  assert.match(html, /analytics\.common\.unavailable_amounts/)
+  assert.match(html, /analytics\.cash_use\.error/)
+  assert.match(html, /analytics\.common\.retry/)
+})
+
+test('money flow keeps refund-source retry visible with blocking audit evidence', async () => {
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', {
+    analyticsStore: { graphDetail: 5, flowState: { status: 'partial', error: null, isStale: true, sourceErrors: [{ source: 'transactionLinks' }] }, retryFlow: () => {} },
+    detailItems: [],
+    canPrevious: false,
+    canNext: false,
+    selectedMonthLabel: 'August 2026',
+    moveMonth: () => {},
+    isBlockingLoading: false,
+    isBlockingError: false,
+    presentation: { showAudit: true, reason: 'unbalanced', showEmpty: false, showGraph: false },
+    stateLabel: 'Audit blocked',
+    stateDescription: 'Audit evidence unavailable',
+    hasUnclassified: false,
+    flow: { unclassified: { value: 0, transactionIds: [] }, isBalanced: false },
+    formatCurrency: String,
+    chartGraph: {},
+    chartMode: 'full',
+    fullLinks: [],
+    TablerIconConstants: { leftArrow: 'left', rightArrow: 'right' },
+    openDetails: () => {},
+    auditSections: [],
+    liabilityReallocations: [],
+    detailsVisible: false,
+    selectedItem: null,
+  })
+
+  assert.match(html, /analytics\.flow\.error/)
+  assert.match(html, /analytics\.common\.retry/)
+  assert.match(html, /Audit blocked/)
+})
 
 test('keeps a completed snapshot on its captured exchange rates', async () => {
   const euroAccount = { ...activeAsset(), attributes: { ...activeAsset().attributes, currency_code: 'EUR', current_balance: '100' } }

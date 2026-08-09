@@ -13,6 +13,10 @@
       <app-tabs v-model="analyticsStore.categoryAverageMonths" :items="periodItems" />
     </div>
 
+    <div v-if="analyticsStore.categoryState.sourceErrors.length" class="analytics-warning" role="status">
+      <span>{{ $t('analytics.category.error') }}</span>
+      <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
+    </div>
     <div v-if="analyticsStore.categoryState.status === 'loading' && !hasRetainedData" class="analytics-card-state">
       <van-loading size="20" />
       <span>{{ $t('analytics.common.loading') }}</span>
@@ -25,19 +29,11 @@
       {{ $t('analytics.common.unavailable_amounts', { ids: readyPresentation.unavailableTransactionIds.join(', ') }) }}
     </div>
     <template v-else-if="analyticsStore.categoryState.status === 'empty' || chartSeries.length === 0">
-      <div v-if="analyticsStore.categoryState.sourceErrors.length" class="analytics-warning" role="status">
-        <span>{{ $t('analytics.category.error') }}</span>
-        <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
-      </div>
       <div class="analytics-card-state">{{ $t('analytics.category.empty') }}</div>
       <div class="analytics-assumption-note">{{ $t('analytics.category.definition') }}</div>
       <div class="analytics-assumption-note">{{ $t('analytics.category.current_month_separate') }}</div>
     </template>
     <template v-else>
-      <div v-if="analyticsStore.categoryState.sourceErrors.length" class="analytics-warning" role="status">
-        <span>{{ $t('analytics.category.error') }}</span>
-        <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
-      </div>
       <div v-if="analyticsStore.categoryState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
         <span>{{ $t('analytics.category.error') }}</span>
         <van-button size="small" @click="analyticsStore.retryCategory">{{ $t('analytics.common.retry') }}</van-button>
