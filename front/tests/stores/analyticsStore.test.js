@@ -1759,6 +1759,8 @@ test('isolates unavailable daily evidence and never turns the affected flow into
   assert.equal(day?.availableCashChange, null)
   assert.equal(day?.cumulativeAvailableCashChange, null)
   assert.equal(store.dailyForecastState?.isUnavailable, true)
+  assert.equal(store.dailyForecastState?.isBlockingUnavailable, true)
+  assert.equal(store.dailyForecastState?.isPartiallyUnavailable, false)
   assert.deepEqual(store.dailyForecastState?.unavailableTransactionIds, ['unavailable-expense'])
   assert.equal(store.dailyForecast?.reconciliation.status, 'unavailable')
   assert.equal(store.categoryState.status, 'ready')
@@ -1780,9 +1782,35 @@ test('blocks only the daily card for nonzero unclassified ledger activity with e
   assert.deepEqual(store.dailyForecast.audit.unclassifiedTransactionIds, ['unclassified-daily'])
   assert.equal(store.dailyForecast.reconciliation.status, 'unavailable')
   assert.equal(store.dailyForecastState.isUnavailable, true)
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, true)
+  assert.equal(store.dailyForecastState.isPartiallyUnavailable, false)
   assert.deepEqual(store.dailyForecastState.unclassifiedTransactionIds, ['unclassified-daily'])
   assert.equal(store.categoryState.status, 'ready')
   assert.equal(store.flowState.status, 'ready')
+})
+
+test('scopes unclassified daily blocking to the selected completed months plus current month', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const unknown = analyticsAccount('unknown-source', 'mystery')
+  accountStore.accountList = [checking, unknown]
+  transactionResult = [dailyTransaction({ id: 'older-unclassified', date: '2025-11-05', amount: 25, source: unknown, destination: checking })]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.dailyForecastMonths, 6)
+  assert.equal(store.ledger.audit.unclassifiedValue, 25)
+  assert.equal(store.dailyForecast.audit.unclassifiedValue, 0)
+  assert.deepEqual(store.dailyForecast.audit.unclassifiedTransactionIds, [])
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+
+  store.dailyForecastMonths = 12
+  await nextTick()
+
+  assert.equal(store.dailyForecast.audit.unclassifiedValue, 25)
+  assert.deepEqual(store.dailyForecast.audit.unclassifiedTransactionIds, ['older-unclassified'])
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, true)
 })
 
 test('reports recurring and subscription source failures card-locally and clears them on retry', async () => {
@@ -1802,6 +1830,8 @@ test('reports recurring and subscription source failures card-locally and clears
   assert.equal(store.dailyForecastState.forecastStatus, 'partial')
   assert.equal(store.dailyForecastState.isPartial, true)
   assert.equal(store.dailyForecastState.isUnavailable, false)
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+  assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
   assert.deepEqual(store.dailyForecastState.sourceErrors, [
     { source: 'recurringTransactions', message: 'Analytics recurring transaction request failed' },
     { source: 'subscriptions', message: 'Analytics subscription request failed' },
@@ -1871,6 +1901,7 @@ test('applies per-metric unavailability to future daily components without blank
   const revenue = analyticsAccount('revenue', 'revenue')
   const expense = analyticsAccount('expense', 'expense')
   accountStore.accountList = [checking, revenue, expense]
+  transactionResult = [dailyTransaction({ id: 'known-variable-expense', date: '2026-07-21', amount: 30, source: checking, destination: expense, categoryId: 'variable' })]
   subscriptionResult = async () => ({
     ok: true,
     data: [
@@ -1908,8 +1939,18 @@ test('applies per-metric unavailability to future daily components without blank
   assert.equal(projectedDay.projected.sources, 100)
   assert.equal(projectedDay.projected.uses, null)
   assert.equal(projectedDay.availableCashChange, null)
-  assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'defined:sources').points.find(({ x }) => x === '2026-08-20').value, 100)
+  const incomePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'defined:sources').points.find(({ x }) => x === '2026-08-20')
+  assert.equal(incomePoint.value, 100)
+  assert.deepEqual(incomePoint.transactionIds, [])
+  assert.equal(incomePoint.evidenceIds.includes('defined-income'), true)
+  assert.equal(incomePoint.evidenceIds.includes('foreign-expense'), false)
   assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'defined:uses').points.find(({ x }) => x === '2026-08-20').value, null)
+  assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'variable:uses').points.find(({ x }) => x === '2026-08-21').value, -5)
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+  assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
+  assert.equal(store.dailyForecastState.isUnavailable, false)
+  assert.deepEqual(store.dailyForecastState.unavailableMetricIds, ['expenses'])
+  assert.deepEqual(store.dailyForecastState.unavailableCandidateIds, ['subscription:foreign-expense'])
 })
 
 test('keeps explanatory source and use rows for a genuine net-zero day while suppressing empty rows', async () => {
@@ -1970,6 +2011,9 @@ test('keeps the daily card and combination-chart selection contract exact withou
   assert.match(dailySource, /kind:\s*point\?\.kind/)
   assert.match(dailySource, /daily\.value\.barGroups\.some/)
   assert.match(dailySource, /selectedPayload\.value = payload/)
+  assert.match(dailySource, /v-else-if="dailyState\.isBlockingUnavailable"/)
+  assert.match(dailySource, /v-if="dailyState\.isPartiallyUnavailable"/)
+  assert.match(dailySource, /v-if="dailyState\.sourceErrors\.length"[\s\S]*?<van-button[^>]+@click="analyticsStore\.retryDailyForecast"/)
   assert.match(chartSource, /series\.barGroups/)
   assert.match(chartSource, /point\?\.showInTooltip !== false/)
   assert.match(chartSource, /reduceCombinationChartInteraction/)
