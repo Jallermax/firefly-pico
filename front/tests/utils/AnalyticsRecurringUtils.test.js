@@ -66,8 +66,8 @@ test('normalizes usable recurring transactions and subscriptions as authoritativ
   assert.deepEqual(
     result.map(({ source, expectedDates }) => ({ source, expectedDates })),
     [
-      { source: { type: 'recurringTransaction', id: 'recurring-rent', authoritative: true }, expectedDates: ['2026-08-03', '2026-09-01'] },
-      { source: { type: 'subscription', id: 'subscription-internet', authoritative: true }, expectedDates: ['2026-08-15', '2026-09-15'] },
+      { source: { type: 'recurringTransaction', id: 'recurring-rent', label: 'Rent', authoritative: true }, expectedDates: ['2026-08-03', '2026-09-01'] },
+      { source: { type: 'subscription', id: 'subscription-internet', label: 'Internet', authoritative: true }, expectedDates: ['2026-08-15', '2026-09-15'] },
     ],
   )
   assert.deepEqual(result[0].identity, {
@@ -143,6 +143,7 @@ test('infers monthly rent despite local weekend shifts and retains exact evidenc
   assert.deepEqual(candidate.cadence.days, [1])
   assert.equal(candidate.confidence.factors.dateMadDays, 0)
   assert.equal(candidate.confidence.factors.coverage, 1)
+  assert.equal(candidate.source.label, 'Monthly Rent')
   assert.deepEqual(
     candidate.evidence.transactionIds,
     entries.map(({ transactionId }) => transactionId),
@@ -312,7 +313,7 @@ test('merges an overlapping inferred candidate into the authoritative recurring 
   const result = mergeRecurringCandidates({ defined, inferred })
 
   assert.equal(result.length, 1)
-  assert.deepEqual(result[0].source, { type: 'recurringTransaction', id: 'recurring-rent', authoritative: true })
+  assert.deepEqual(result[0].source, { type: 'recurringTransaction', id: 'recurring-rent', label: 'Rent', authoritative: true })
   assert.deepEqual(
     result[0].evidence.transactionIds,
     entries.map(({ transactionId }) => transactionId),

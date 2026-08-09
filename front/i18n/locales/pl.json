@@ -159,7 +159,7 @@
       "current_month_separate": "Bieżący miesiąc jest wyświetlany oddzielnie od średnich z zakończonych miesięcy.",
       "average_remainder": "Średnie pozostałe wydatki",
       "paced_forecast": "Prognoza według bieżącego tempa",
-      "final_forecast_rule": "Prognoza na koniec miesiąca jest maksimum z wartości rzeczywistej, średniej i prognozy tempa.",
+      "final_forecast_rule": "Prognoza na koniec miesiąca łączy dotychczasowe wydatki z oczekiwaną aktywnością cykliczną i historyczną pozostałością; nigdy nie jest niższa od rzeczywistych wydatków.",
       "remaining_from_today": "Pozostało od dzisiaj",
       "used_month_count": "Użyte zakończone miesiące"
     },

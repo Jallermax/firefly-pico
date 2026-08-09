@@ -159,7 +159,7 @@
       "current_month_separate": "本月数据与已结束月份的平均值分开显示。",
       "average_remainder": "平均剩余支出",
       "paced_forecast": "按当前进度预测",
-      "final_forecast_rule": "月末预测取实际值、平均值和进度预测中的最大值。",
+      "final_forecast_rule": "月末预测将当前支出、预计的周期性活动和历史剩余活动合并计算，且不会低于实际支出。",
       "remaining_from_today": "从今天起的剩余金额",
       "used_month_count": "使用的已结束月份数"
     },

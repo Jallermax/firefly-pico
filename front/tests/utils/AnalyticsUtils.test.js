@@ -818,6 +818,7 @@ test('builds balance today separately while change and expense charts contain co
       forecastTotal: 140,
       forecastChange: 10,
       forecastAvailable: true,
+      forecastIsPartial: true,
     },
   ]
   const expenses = {
@@ -836,6 +837,7 @@ test('builds balance today separately while change and expense charts contain co
       { x: '2026-08:forecast', value: 140, kind: 'forecast' },
     ],
   )
+  assert.equal(balancePoints.at(-1).partial, true)
   const changeSeries = AnalyticsUtils.buildFinancialTrendChartSeries({ view: 'changes', metrics, selectedIds: ['netWorth', 'expenses'], accountSeries, expenses, currentMonthKey: '2026-08' })
   assert.deepEqual(
     changeSeries.map((series) => [series.id, series.points.map(({ x, kind }) => [x, kind])]),
@@ -886,6 +888,17 @@ test('distinguishes insufficient forecast history from a genuinely missing forec
   )
   assert.equal(AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: true, value: null, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }), '—')
   assert.equal(AnalyticsUtils.formatFinancialTrendForecastValue({ forecastAvailable: true, value: 25, formatValue, insufficientHistoryLabel: 'Localized two-month minimum' }), '25 USD')
+  assert.equal(
+    AnalyticsUtils.formatFinancialTrendForecastValue({
+      forecastAvailable: true,
+      status: 'unavailable',
+      value: 25,
+      formatValue,
+      insufficientHistoryLabel: 'Localized two-month minimum',
+      partialLabel: 'Partial',
+    }),
+    '25 USD · Partial',
+  )
 })
 
 test('summarizes total expense from every category without a legacy forecast', () => {

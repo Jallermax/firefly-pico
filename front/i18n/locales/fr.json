@@ -159,7 +159,7 @@
       "current_month_separate": "Le mois en cours est affiché séparément des moyennes des mois terminés.",
       "average_remainder": "Dépenses restantes moyennes",
       "paced_forecast": "Prévision au rythme actuel",
-      "final_forecast_rule": "La prévision de fin de mois est le maximum du réel, de la moyenne et du rythme actuel.",
+      "final_forecast_rule": "La prévision de fin de mois combine les dépenses à ce jour, l’activité récurrente attendue et le reliquat historique ; elle n’est jamais inférieure aux dépenses réelles.",
       "remaining_from_today": "Reste à partir d’aujourd’hui",
       "used_month_count": "Mois terminés utilisés"
     },

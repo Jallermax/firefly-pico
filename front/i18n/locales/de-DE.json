@@ -159,7 +159,7 @@
       "current_month_separate": "Der aktuelle Monat wird getrennt von den Durchschnittswerten abgeschlossener Monate angezeigt.",
       "average_remainder": "Durchschnittliche verbleibende Ausgaben",
       "paced_forecast": "Hochgerechnete Prognose",
-      "final_forecast_rule": "Die Monatsendprognose ist das Maximum aus Istwert, Durchschnitt und Hochrechnung.",
+      "final_forecast_rule": "Die Monatsendprognose kombiniert die bisherigen Ausgaben mit erwarteten wiederkehrenden Aktivitäten und dem historischen Rest; sie liegt nie unter den tatsächlichen Ausgaben.",
       "remaining_from_today": "Ab heute verbleibend",
       "used_month_count": "Verwendete abgeschlossene Monate"
     },

@@ -150,6 +150,42 @@ test('category forecast details use Task 8 values and only show ready progress',
   )
 })
 
+test('category forecast details aggregate projected activity by readable source without losing audit identity', () => {
+  const presentation = CategoryPresentation.buildCategoryForecastDetailsPresentation({
+    point: {
+      actualToDate: 2321,
+      final: 3121,
+      remainingFromToday: 800,
+      progress: 2321 / 3121,
+      progressState: 'ready',
+      projectedSources: [
+        { sourceKind: 'defined', sourceLabel: 'Rent adjustment', sourceId: 'subscription-42', candidateId: 'defined:subscription:subscription-42', flowAmounts: { expenses: 500 } },
+        { sourceKind: 'defined', sourceLabel: 'Rent adjustment', sourceId: 'subscription-42', candidateId: 'defined:subscription:subscription-42', flowAmounts: { expenses: 300 } },
+        { sourceKind: 'variable', sourceId: 'projected:variable:1', flowAmounts: { expenses: 0 } },
+      ],
+    },
+    labels: {
+      currentActual: 'Current actual',
+      finalForecast: 'Final forecast',
+      remainingFromToday: 'Remaining',
+      progress: 'Progress',
+      sourceKinds: { defined: 'Recurring', variable: 'Variable' },
+    },
+    formatValue: (value) => `${value} USD`,
+    formatSignedValue: (value) => `${value > 0 ? '+' : ''}${value} USD`,
+  })
+
+  assert.deepEqual(presentation.at(-1), {
+    id: 'source:defined:defined:subscription:subscription-42',
+    label: 'Recurring — Rent adjustment',
+    value: '+800 USD',
+    sourceKind: 'defined',
+    sourceLabel: 'Rent adjustment',
+    sourceId: 'subscription-42',
+    candidateId: 'defined:subscription:subscription-42',
+  })
+})
+
 test('category detail retains non-ready Task 8 progress state without legacy averages or pacing', () => {
   const presentation = CategoryPresentation.buildCategoryForecastDetailsPresentation({
     point: { actualToDate: -10, final: -8, remainingFromToday: 2, progress: null, progressState: 'opposite', status: 'partial' },
@@ -198,6 +234,13 @@ test('category card renders unavailable amounts as a blocking warning before emp
   assert.ok(template.indexOf('v-else-if="readyPresentation.isBlocked"') < template.indexOf("analyticsStore.categoryState.status === 'empty'"))
   assert.match(template, /analytics\.common\.unavailable_amounts/)
   assert.match(template, /readyPresentation\.unavailableTransactionIds\.join\(', '\)/)
+})
+
+test('category forecast explanation describes recurring and historical remaining activity instead of retired pacing', () => {
+  const message = JSON.parse(readFileSync(new URL('../../i18n/locales/en.json', import.meta.url), 'utf8')).analytics.category.final_forecast_rule
+  assert.match(message, /recurring activity/i)
+  assert.match(message, /historical remainder/i)
+  assert.doesNotMatch(message, /paced|maximum of actual/i)
 })
 
 test('money-flow presentation order is amount descending, stable by ID, with Other last', () => {

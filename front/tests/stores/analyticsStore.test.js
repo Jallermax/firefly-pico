@@ -2222,6 +2222,7 @@ test('applies per-metric unavailability to future daily components without blank
   await store.init()
 
   assert.equal(store.dailyForecast.statusByMetric.expenses, 'unavailable')
+  assert.equal(store.financialTrend.forecast.final.expenses, null)
   assert.equal(store.dailyForecast.statusByMetric.income, 'ready')
   const beforeUnavailableDay = store.dailyForecast.days.find(({ date }) => date === '2026-08-19')
   const projectedDay = store.dailyForecast.days.find(({ date }) => date === '2026-08-20')
@@ -2279,10 +2280,86 @@ test('labels a defensible chart with account-dependent unresolved forecast input
   assert.equal(store.dailyForecast.status, 'partial')
   assert.equal(store.dailyForecast.statusByMetric.income, 'ready')
   assert.equal(store.dailyForecast.statusByMetric.refunds, 'ready')
-  assert.equal(store.dailyForecast.statusByMetric.expenses, 'unavailable')
+  assert.equal(store.dailyForecast.statusByMetric.expenses, 'ready')
+  assert.equal(store.financialTrend.forecast.final.expenses, 60)
+  const netWorth = store.financialTrend.series.find(({ id }) => id === 'netWorth')
+  assert.equal(netWorth.status, 'unavailable')
+  assert.equal(netWorth.forecastIsPartial, true)
+  assert.equal(netWorth.forecastAvailable, true)
+  assert.equal(netWorth.forecastChange, 100)
+  assert.equal(netWorth.forecastTotal, 0)
+  for (const id of ['savings', 'debt']) {
+    const series = store.financialTrend.series.find((item) => item.id === id)
+    assert.equal(series.status, 'unavailable')
+    assert.equal(series.forecastIsPartial, true)
+    assert.equal(series.forecastAvailable, true)
+    assert.equal(series.forecastChange, 0)
+  }
   assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
   assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
   assert.equal(store.dailyForecastState.forecastStatus, 'partial')
+})
+
+test('keeps completed Cash use visible when only account-dependent forecast metrics are unavailable', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, expense]
+  transactionResult = ['2026-02-05', '2026-03-05', '2026-04-05', '2026-05-05', '2026-06-05', '2026-07-05'].map((date, index) =>
+    dailyTransaction({ id: `historical-grocery-${index}`, date, amount: 30, source: checking, destination: expense, categoryId: 'food' }),
+  )
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'unknown-route-subscription',
+        attributes: { active: true, name: 'Unmatched scheduled expense', repeat_freq: 'monthly', amount_avg: '60', currency_code: 'USD', next_expected_match: '2026-08-20' },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+  store.cashUseMode = 'full'
+
+  await store.init()
+
+  assert.equal(store.financialTrend.forecast.statusByMetric.expenses, 'ready')
+  assert.equal(store.financialTrend.forecast.final.expenses, 90)
+  assert.equal(store.cashUseState.isUnavailable, false)
+  assert.equal(store.cashUseState.isPartiallyUnavailable, true)
+  assert.equal(
+    store.cashUseSeries.useLayers.some(({ points }) => points.some(({ x, value }) => x === '2026-07' && Number.isFinite(value) && value > 0)),
+    true,
+  )
+})
+
+test('renders projected Cash use uncertainty beside retained chart content', async () => {
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-cash-use.vue', {
+    analyticsStore: { selectedCategoryIds: [], balancePeriod: 6, cashUseMode: 'full', cashUseDetail: 5, retryCashUse: () => {} },
+    facetItems: [],
+    modeItems: [],
+    periodItems: [],
+    detailItems: [],
+    cashUseState: {
+      status: 'ready',
+      error: null,
+      isStale: false,
+      isUnavailable: false,
+      isPartiallyUnavailable: true,
+      sourceErrors: [],
+      unavailableTransactionIds: [],
+      auditStatus: 'unavailable',
+    },
+    hasRetainedData: false,
+    hasActivity: true,
+    projectedUnavailableSummary: { count: 2, previewIds: ['defined:subscription:unknown-route'], omittedCount: 0 },
+    chartSeries: { useLayers: [], ordinaryIncome: { points: [] }, sourceBands: [], totalUses: { points: [] }, totalSources: { points: [] }, gap: { points: [] } },
+    formatCurrency: String,
+    onSelectPoint: () => {},
+  })
+
+  assert.match(html, /analytics\.common\.unavailable_evidence_count/)
+  assert.match(html, /defined:subscription:unknown-route/)
+  assert.match(html, /analytics\.common\.how_calculated/)
 })
 
 test('keeps selected-history missing-FX Firefly transaction IDs separate from entry and projected evidence IDs', async () => {
@@ -2369,6 +2446,16 @@ test('keeps the daily card and combination-chart selection contract exact withou
   assert.match(dailySource, /kind:\s*point\?\.kind/)
   assert.match(dailySource, /daily\.value\.barGroups\.some/)
   assert.match(dailySource, /selectedPayload\.value = payload/)
+  assert.match(dailySource, /selectedPayload\.value = \{ xLabel: point\.xLabel \?\? point\.x, values: \[\{ point \}\] \}/)
+  assert.match(dailySource, /summarizeProjectedSources/)
+  assert.match(dailySource, /evidenceOmittedCount/)
+  assert.match(dailySource, /id: 'sources',[^\n]+analytics\.cash_use\.total_sources[^\n]+var\(--income2\)/)
+  assert.match(dailySource, /id: 'uses',[^\n]+analytics\.cash_use\.total_uses[^\n]+var\(--expense2\)/)
+  assert.match(dailySource, /id: 'available',[^\n]+analytics\.daily_forecast\.available_change[^\n]+var\(--transfer2\)/)
+  assert.match(dailySource, /id: 'actual',[^\n]+sourceLabel\('actual'\)[^\n]+var\(--van-text-color-2\)/)
+  assert.match(dailySource, /id: 'defined',[^\n]+sourceLabel\('defined'\)[^\n]+var\(--van-text-color-2\)/)
+  assert.match(dailySource, /id: 'inferred',[^\n]+sourceLabel\('inferred'\)[^\n]+var\(--van-text-color-2\)/)
+  assert.match(dailySource, /id: 'variable',[^\n]+sourceLabel\('variable'\)[^\n]+var\(--van-text-color-2\)/)
   assert.match(dailySource, /v-else-if="dailyState\.isBlockingUnavailable"/)
   assert.match(dailySource, /v-if="dailyState\.isPartiallyUnavailable"/)
   assert.match(dailySource, /v-if="dailyState\.sourceErrors\.length"[\s\S]*?<van-button[^>]+@click="analyticsStore\.retryDailyForecast"/)

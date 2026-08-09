@@ -998,15 +998,20 @@ export function buildFinancialTrendChartSeries({ view, metrics, selectedIds, acc
         points: [
           ...actualPoints,
           ...(isBalances && partial ? [{ ...partial, ...forecastMetadata }] : fallback.map((point) => ({ ...point, ...forecastMetadata }))),
-          ...(series.forecastAvailable && Number.isFinite(forecastValue) ? [{ x: currentMonthKey + ':forecast', value: forecastValue, kind: 'forecast', ...forecastMetadata }] : []),
+          ...(series.forecastAvailable && Number.isFinite(forecastValue)
+            ? [{ x: currentMonthKey + ':forecast', value: forecastValue, kind: 'forecast', partial: series.forecastIsPartial === true, ...forecastMetadata }]
+            : []),
         ],
       },
     ]
   })
 }
 
-export function formatFinancialTrendForecastValue({ forecastAvailable, status, value, formatValue, insufficientHistoryLabel, unavailableLabel = insufficientHistoryLabel }) {
-  if (forecastAvailable) return formatValue(value)
+export function formatFinancialTrendForecastValue({ forecastAvailable, status, value, formatValue, insufficientHistoryLabel, unavailableLabel = insufficientHistoryLabel, partialLabel = null }) {
+  if (forecastAvailable) {
+    const formatted = formatValue(value)
+    return partialLabel && ['partial', 'unavailable'].includes(status) && formatted !== '—' ? `${formatted} · ${partialLabel}` : formatted
+  }
   return status === 'insufficientHistory' ? insufficientHistoryLabel : unavailableLabel
 }
 

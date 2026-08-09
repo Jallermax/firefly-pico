@@ -260,7 +260,7 @@ test('selection route projection distinguishes pointer/keyboard actual forecasts
   })
 })
 
-test('balance and category card projections route actual forecast IDs for pointer and keyboard activation only', () => {
+test('balance forecasts route actual IDs while category forecasts open details before optional actual drill-down', () => {
   assert.equal(typeof ChartUtils.projectBalanceTrendSelection, 'function')
   assert.equal(typeof ChartUtils.projectCategorySpendingSelection, 'function')
   const toUrl = (ids) => 'id=' + ids.join('|')
@@ -275,15 +275,23 @@ test('balance and category card projections route actual forecast IDs for pointe
     {
       activation: 'keyboard',
       transactionIds: ['actual'],
-      route: RouteConstants.ROUTE_TRANSACTION_LIST + '?id=actual',
-      forecastOnly: false,
+      route: null,
+      actualRoute: RouteConstants.ROUTE_TRANSACTION_LIST + '?id=actual',
+      forecastOnly: true,
     },
   )
   assert.deepEqual(ChartUtils.projectCategorySpendingSelection({ activation: 'keyboard', point: { kind: 'forecast', transactionIds: [] }, route: RouteConstants.ROUTE_TRANSACTION_LIST, toUrl }), {
     activation: 'keyboard',
     transactionIds: [],
     route: null,
+    actualRoute: null,
     forecastOnly: true,
+  })
+  assert.deepEqual(ChartUtils.projectCategorySpendingSelection({ activation: 'pointer', point: { kind: 'actual', transactionIds: ['posted'] }, route: RouteConstants.ROUTE_TRANSACTION_LIST, toUrl }), {
+    activation: 'pointer',
+    transactionIds: ['posted'],
+    route: RouteConstants.ROUTE_TRANSACTION_LIST + '?id=posted',
+    forecastOnly: false,
   })
 })
 
@@ -293,6 +301,9 @@ test('balance and category consumers wire the real route constant and transactio
     assert.match(component, /route:\s*RouteConstants\.ROUTE_TRANSACTION_LIST/)
     assert.match(component, /toUrl:\s*TransactionFilterUtils\.filters\.id\.toUrl/)
   }
+  const category = readFileSync(new URL('../../components/analytics/analytics-category-spending.vue', import.meta.url), 'utf8')
+  assert.match(category, /selection\.actualRoute/)
+  assert.match(category, /analytics\.flow\.view_transactions/)
 })
 
 test('financial trend omits unavailable expenses while retaining selected account metrics', () => {
@@ -320,6 +331,7 @@ test('tooltip and live-region qualifiers share partial forecast and estimated la
 
   assert.deepEqual(ChartUtils.lineChartPointQualifierKeys(partial), ['partial', 'estimated_current_rates'])
   assert.deepEqual(ChartUtils.lineChartPointQualifierKeys(forecast), ['forecast', 'estimated_current_rates'])
+  assert.deepEqual(ChartUtils.lineChartPointQualifierKeys({ ...forecast, partial: true }), ['forecast', 'partial', 'estimated_current_rates'])
   assert.equal(
     ChartUtils.buildLineChartLiveDescription({
       xLabel: 'Aug 2026',

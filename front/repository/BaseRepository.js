@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { get } from 'lodash-es'
 
+const MERGED_PAGE_CONCURRENCY = 6
+
 export default class BaseRepository {
   constructor(endpoint) {
     this.endpoint = endpoint
@@ -37,11 +39,8 @@ export default class BaseRepository {
     list = [...list, ...responseList]
 
     let totalPages = get(firstPageResponseBody, 'meta.pagination.total_pages')
-    for (let page = 2; page <= totalPages; page++) {
-      const pageResponse = await getMethod({ filters, page, pageSize })
-      let responseList = get(pageResponse, 'data', [])
-      list = [...list, ...responseList]
-    }
+    const remainingPages = await this.getRemainingPages({ filters, getMethod, pageSize, totalPages })
+    for (const pageResponse of remainingPages) list.push(...get(pageResponse, 'data', []))
     return list
   }
 
@@ -53,8 +52,8 @@ export default class BaseRepository {
 
     list.push(...firstPage.data)
     const totalPages = Number(firstPage?.meta?.pagination?.total_pages ?? 1)
-    for (let page = 2; page <= totalPages; page++) {
-      const response = await getMethod({ filters, page, pageSize })
+    const remainingPages = await this.getRemainingPages({ filters, getMethod, pageSize, totalPages })
+    for (const response of remainingPages) {
       if (!Array.isArray(response?.data)) return { ok: false, data: [] }
       list.push(...response.data)
     }
@@ -80,6 +79,20 @@ export default class BaseRepository {
   }
 
   // ---------------------------- PRIVATE --------------------------
+
+  async getRemainingPages({ filters, getMethod, pageSize, totalPages }) {
+    const pages = Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) => index + 2)
+    const responses = new Array(pages.length)
+    let nextIndex = 0
+    const worker = async () => {
+      while (nextIndex < pages.length) {
+        const index = nextIndex++
+        responses[index] = await getMethod({ filters, page: pages[index], pageSize })
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(MERGED_PAGE_CONCURRENCY, pages.length) }, worker))
+    return responses
+  }
 
   getUrlForRequest({ filters = [], page = 1, pageSize = 10, url = null } = {}) {
     let requestURL = url ?? this.getUrl()

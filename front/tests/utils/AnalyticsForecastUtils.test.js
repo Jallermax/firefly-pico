@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildRemainingActivityForecast as buildForecastCore, projectMetricForecast as projectMetricForecastCore } from '../../utils/AnalyticsForecastUtils.js'
+import { buildRemainingActivityForecast as buildForecastCore, projectMetricForecast as projectMetricForecastCore, summarizeProjectedSources } from '../../utils/AnalyticsForecastUtils.js'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 import { buildDefinedOccurrences, detectRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
 
@@ -100,7 +100,7 @@ const definedCandidate = ({ id, sourceAccountId, destinationAccountId, direction
   direction,
   cadence: { type: 'monthly', days: [Number(date.slice(-2))] },
   expectedAmount: { value: amount, min: amount, max: amount },
-  source: { type: 'recurringTransaction', id, authoritative: true },
+  source: { type: 'recurringTransaction', id, label: `Readable ${id}`, authoritative: true },
   evidence: { entryIds: [], transactionIds: [], dates: [] },
   confidence: { score: 1, factors: { authoritative: true }, reasons: ['Authoritative Firefly schedule'] },
   matching: { dateWindowDays: 4, amountTolerance: 0.25, amountEnvelope: { min: amount, max: amount } },
@@ -117,6 +117,49 @@ const reorderSemanticValue = (value) => {
       .map(([key, item]) => [key, reorderSemanticValue(item)]),
   )
 }
+
+test('summarizes projected evidence by readable source and caps noisy variable audit IDs', () => {
+  const summary = summarizeProjectedSources(
+    [
+      { id: 'rent-1', sourceKind: 'defined', sourceLabel: 'Rent', sourceId: 'rent', candidateId: 'defined:rent', amount: 500, evidenceIds: ['rent-a'] },
+      { id: 'rent-2', sourceKind: 'defined', sourceLabel: 'Rent', sourceId: 'rent', candidateId: 'defined:rent', amount: 300, evidenceIds: ['rent-b'] },
+      { id: 'variable-1', sourceKind: 'variable', sourceId: 'variable-1', amount: 10, evidenceIds: ['a', 'b', 'c'] },
+      { id: 'variable-2', sourceKind: 'variable', sourceId: 'variable-2', amount: 20, evidenceIds: ['d', 'e', 'f'] },
+    ],
+    4,
+  )
+
+  assert.deepEqual(summary, [
+    {
+      id: 'defined:defined:rent',
+      sourceKind: 'defined',
+      sourceLabel: 'Rent',
+      sourceId: 'rent',
+      candidateId: 'defined:rent',
+      amount: 800,
+      overdue: false,
+      reasons: [],
+      confidence: null,
+      conversion: null,
+      evidenceIds: ['rent-a', 'rent-b'],
+      evidenceOmittedCount: 0,
+    },
+    {
+      id: 'variable:variable',
+      sourceKind: 'variable',
+      sourceLabel: null,
+      sourceId: null,
+      candidateId: null,
+      amount: 30,
+      overdue: false,
+      reasons: [],
+      confidence: null,
+      conversion: null,
+      evidenceIds: ['a', 'b', 'c', 'd'],
+      evidenceOmittedCount: 2,
+    },
+  ])
+})
 
 const expensesForMonths = (months, value, day = 20, options = {}) =>
   months.map((month, index) => entry({ id: `${options.idPrefix ?? 'expense'}-${index + 1}`, date: `${month}-${String(day).padStart(2, '0')}`, value, ...options }))
@@ -279,6 +322,7 @@ test('projects an unpaid inferred rent after its usual weekend-shifted date', ()
   assert.equal(result.final.expenses, 2321)
   assert.ok(rent.date > '2026-08-03')
   assert.equal(rent.sourceKind, 'inferred')
+  assert.equal(rent.sourceLabel, candidates[0].source.label)
   assert.equal(rent.overdue, true)
 })
 
@@ -1140,9 +1184,9 @@ test('keeps authoritative candidates with missing amount or account classificati
   assert.equal(classificationResult.final.refunds, 0)
   assert.equal(classificationResult.final.savingsDeposits, 0)
   assert.equal(classificationResult.final.debtRepayments, 0)
-  assert.equal(classificationResult.final.expenses, null)
+  assert.equal(classificationResult.final.expenses, 100)
   assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].reasons, ['missingAccountContext'])
-  assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].affectedMetricIds, ['expenses', 'netWorthChange', 'availableCashChange'])
+  assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].affectedMetricIds, [])
   assert.deepEqual(classificationResult.audit.recurring.unresolvedCandidates[0].missingAccountIds, ['unknown-account'])
 })
 
@@ -1169,20 +1213,153 @@ test('rejects authoritative embedded kinds when endpoint IDs are absent', () => 
   assert.equal(result.final.refunds, 0)
   assert.equal(result.final.savingsDeposits, 0)
   assert.equal(result.final.debtRepayments, 0)
-  assert.equal(result.final.expenses, null)
-  assert.deepEqual(result.dailyProjectedEntries, [])
+  assert.equal(result.final.expenses, 100)
+  assert.equal(result.knownRemainingFromToday.expenses, 100)
+  assert.equal(result.knownRemainingFromToday.netWorthChange, 0)
+  assert.equal(result.knownFinal.expenses, 100)
+  assert.equal(result.knownFinal.netWorthChange, 0)
+  assert.equal(result.dailyProjectedEntries.length, 1)
+  assert.equal(result.dailyProjectedEntries[0].flowAmounts.expenses, 100)
   assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].reasons, ['missingAccountContext'])
-  assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].affectedMetricIds, [
-    'expenses',
-    'savingsWithdrawals',
-    'newDebt',
-    'savingsChange',
-    'debtChange',
-    'netWorthChange',
-    'availableCashChange',
-  ])
+  assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].affectedMetricIds, ['savingsWithdrawals', 'newDebt', 'savingsChange', 'debtChange', 'netWorthChange', 'availableCashChange'])
   assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].missingAccountIds, [])
   assert.deepEqual(result.audit.recurring.unresolvedCandidates[0].missingAccountEndpoints, ['source', 'destination'])
+})
+
+test('uses consistent matched history to classify an authoritative expense with an omitted source endpoint', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const candidate = definedCandidate({ id: 'rent-without-source', sourceAccountId: '', destinationAccountId: 'landlord', amount: 100 })
+  candidate.identity.payee = 'rent'
+  const history = expensesForMonths(months, 100, 20, { idPrefix: 'rent', destinationId: 'landlord', description: 'Rent' })
+
+  const result = buildForecastCore({
+    ledger: ledger(history),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.statusByMetric.expenses, 'ready')
+  assert.equal(result.final.expenses, 100)
+  assert.equal(result.final.netWorthChange, -100)
+  assert.equal(result.final.availableCashChange, -100)
+  assert.deepEqual(result.audit.unavailable.candidateIds, [])
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, history.map(({ id }) => id).sort())
+  assert.equal(result.dailyProjectedEntries.length, 1)
+  assert.equal(result.dailyProjectedEntries[0].sourceAccountId, 'checking')
+  assert.equal(result.dailyProjectedEntries[0].destinationAccountId, 'landlord')
+})
+
+test('classifies an endpoint-free subscription only from one unique repeated amount and cadence match', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const candidate = definedCandidate({ id: 'subscription-without-route', sourceAccountId: '', destinationAccountId: '', date: '2026-08-20', amount: 100 })
+  candidate.source.type = 'subscription'
+  candidate.identity.categoryId = null
+  candidate.identity.payee = 'Scheduled housing'
+  const history = expensesForMonths(months, 100, 20, { idPrefix: 'housing-payment', destinationId: 'landlord', categoryId: 'housing', description: 'Housing payment' })
+
+  const result = buildForecastCore({
+    ledger: ledger(history),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.final.expenses, 100)
+  assert.equal(result.final.netWorthChange, -100)
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, history.map(({ id }) => id).sort())
+  assert.equal(result.dailyProjectedEntries.length, 1)
+  assert.equal(result.dailyProjectedEntries[0].sourceAccountId, 'checking')
+  assert.equal(result.dailyProjectedEntries[0].destinationAccountId, 'landlord')
+  assert.equal(result.dailyProjectedEntries[0].categoryId, 'housing')
+})
+
+test('does not guess an endpoint-free subscription route when repeated matches are ambiguous', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const candidate = definedCandidate({ id: 'ambiguous-subscription', sourceAccountId: '', destinationAccountId: '', date: '2026-08-20', amount: 100 })
+  candidate.source.type = 'subscription'
+  candidate.identity.categoryId = null
+  candidate.identity.payee = 'Ambiguous schedule'
+  const history = months.flatMap((month, index) => [
+    entry({ id: `ambiguous-a-${index}`, date: `${month}-20`, value: 100, destinationId: 'landlord', categoryId: 'housing', description: 'Housing payment' }),
+    entry({ id: `ambiguous-b-${index}`, date: `${month}-20`, value: 100, destinationId: 'merchant', categoryId: 'general', description: 'Other payment' }),
+  ])
+
+  const result = buildForecastCore({
+    ledger: ledger(history),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, [])
+  assert.equal(result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'defined').length, 1)
+  assert.equal(result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable').length > 0, true)
+  assert.equal(result.statusByMetric.netWorthChange, 'unavailable')
+})
+
+test('uses the unique repeated subscription route to suppress a fulfilled current occurrence', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const candidate = definedCandidate({ id: 'fulfilled-subscription-without-route', sourceAccountId: '', destinationAccountId: '', date: '2026-08-20', amount: 100 })
+  candidate.source.type = 'subscription'
+  candidate.identity.categoryId = null
+  candidate.identity.payee = 'Scheduled housing'
+  const history = expensesForMonths(months, 100, 20, { idPrefix: 'fulfilled-housing-payment', destinationId: 'landlord', categoryId: 'housing', description: 'Housing payment' })
+  const current = entry({ id: 'fulfilled-housing-current', date: '2026-08-20', value: 100, destinationId: 'landlord', categoryId: 'housing', description: 'Housing payment' })
+
+  const result = buildForecastCore({
+    ledger: ledger([...history, current], { endDate: '2026-08-20' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-20' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-20',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.actualToDate.expenses, 100)
+  assert.equal(result.remainingFromToday.expenses, 0)
+  assert.equal(result.final.expenses, 100)
+  assert.deepEqual(result.dailyProjectedEntries, [])
+  assert.deepEqual(result.audit.recurring.fulfilledExpectedIds, [`expected:${candidate.id}:2026-08-20`])
+})
+
+test('keeps a known authoritative expense forecast when its account route cannot be classified', () => {
+  const candidate = definedCandidate({ id: 'known-expense-unknown-route', sourceAccountId: '', destinationAccountId: '', amount: 100 })
+
+  const result = buildForecastCore({
+    ledger: ledger([]),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    fetchCoverage: { startMonth: '2026-02', endDate: '2026-08-10' },
+    currencyDecimalPlaces: 2,
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.status, 'partial')
+  assert.equal(result.statusByMetric.expenses, 'ready')
+  assert.equal(result.remainingFromToday.expenses, 100)
+  assert.equal(result.final.expenses, 100)
+  assert.equal(result.dailyProjectedEntries.length, 1)
+  assert.equal(result.dailyProjectedEntries[0].flowAmounts.expenses, 100)
+  assert.equal(result.dailyProjectedEntries[0].flowAmounts.availableCashChange, null)
+  assert.equal(result.audit.recurring.unresolvedCandidates[0].reasons.includes('missingAccountContext'), true)
+  assert.equal(result.audit.recurring.unresolvedCandidates[0].affectedMetricIds.includes('expenses'), false)
 })
 
 test('returns partial for defined-only activity and insufficient history when no defensible source exists', () => {

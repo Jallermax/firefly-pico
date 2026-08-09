@@ -80,10 +80,11 @@ const directionOf = (entry) => {
 
 const accountId = (entry, side) => idOf(entry?.[`${side}Account`]?.id ?? entry?.[`${side}AccountId`] ?? entry?.[`${side}_id`])
 
-const payeeOf = (entry, direction = directionOf(entry)) => {
+const displayPayeeOf = (entry, direction = directionOf(entry)) => {
   const external = direction === 'income' ? entry?.sourceAccount : direction === 'expense' ? entry?.destinationAccount : null
-  return normalizeText(entry?.payee ?? entry?.description ?? external?.attributes?.name ?? external?.name ?? external?.id)
+  return String(entry?.payee ?? entry?.description ?? external?.attributes?.name ?? external?.name ?? external?.id ?? '').trim()
 }
+const payeeOf = (entry, direction = directionOf(entry)) => normalizeText(displayPayeeOf(entry, direction))
 
 const identityOf = (entry) => {
   const direction = directionOf(entry)
@@ -256,7 +257,16 @@ const candidateFrom = ({ entries, score, identity, identityVariants, confidence,
     direction: identity.direction,
     cadence: score.cadence,
     expectedAmount: { value: amountMedian, min: amountMin, max: amountMax },
-    source: { type: 'inferred', id, authoritative: false },
+    source: {
+      type: 'inferred',
+      id,
+      label:
+        entries
+          .map((entry) => displayPayeeOf(entry))
+          .filter((label) => normalizeText(label) === identity.payee)
+          .sort((left, right) => left.localeCompare(right))[0] ?? identity.payee,
+      authoritative: false,
+    },
     evidence: sortedEvidence(entries),
     confidence,
     matching: {
@@ -678,7 +688,7 @@ const definedCandidate = ({ item, sourceType, startDate, endDate, schedule, incl
     direction,
     cadence,
     expectedAmount: amount,
-    source: { type: sourceType, id: sourceId, authoritative: true },
+    source: { type: sourceType, id: sourceId, label: String(transaction.description ?? attributes.description ?? attributes.name ?? attributes.title ?? sourceId).trim(), authoritative: true },
     evidence: { entryIds: [], transactionIds: paidTransactionIds, dates: unique(paidDates.map((item) => dateKey(item?.date ?? item))).sort() },
     confidence: { score: 1, factors: { authoritative: true }, reasons: ['Authoritative Firefly schedule'] },
     matching: { dateWindowDays: ['monthly', 'twiceMonthly'].includes(cadence?.type) ? 4 : 2, amountTolerance: THRESHOLDS.relativeAmountMad, amountEnvelope },

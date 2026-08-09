@@ -90,6 +90,9 @@
           <span>{{ row.label }}</span
           ><strong>{{ row.value }}</strong>
         </div>
+        <van-button v-if="selectedForecastRoute" block class="mt-10" @click="openActualTransactions">
+          {{ $t('analytics.flow.view_transactions', { count: selectedForecastPoint.transactionIds.length }) }}
+        </van-button>
       </div>
     </app-popup>
   </van-cell-group>
@@ -124,6 +127,7 @@ const profileStore = useProfileStore()
 const { t } = useI18n()
 const forecastDetailsVisible = ref(false)
 const selectedForecastPoint = ref(null)
+const selectedForecastRoute = ref(null)
 const summary = computed(() => analyticsStore.categorySummary)
 const selectedCategoryIds = computed(() => (Array.isArray(analyticsStore.selectedCategoryIds) ? analyticsStore.selectedCategoryIds : []))
 const periodItems = computed(() => [3, 6, 12, 24].map((value) => ({ label: t('analytics.period.months_short', { count: value }), value })))
@@ -215,6 +219,11 @@ const forecastDetails = computed(() =>
           finalForecast: t('analytics.common.end_of_month'),
           remainingFromToday: t('analytics.category.remaining_from_today'),
           progress: '%',
+          sourceKinds: {
+            defined: t('analytics.daily_forecast.source_defined'),
+            inferred: t('analytics.daily_forecast.source_inferred'),
+            variable: t('analytics.daily_forecast.source_variable'),
+          },
         },
         formatValue: formatCurrency,
         formatSignedValue: formatSignedCurrency,
@@ -238,11 +247,17 @@ const hasRetainedData = computed(() => analyticsStore.categoryState.isStale && c
 const onSelectPoint = async ({ activation, point, transactionIds }) => {
   const selection = projectCategorySpendingSelection({ activation, point: { ...point, transactionIds }, route: RouteConstants.ROUTE_TRANSACTION_LIST, toUrl: TransactionFilterUtils.filters.id.toUrl })
   if (selection.forecastOnly) {
-    selectedForecastPoint.value = point
+    selectedForecastPoint.value = { ...point, transactionIds: selection.transactionIds }
+    selectedForecastRoute.value = selection.actualRoute
     forecastDetailsVisible.value = true
     return
   }
   if (!selection.route) return
   await navigateTo(selection.route)
+}
+const openActualTransactions = async () => {
+  if (!selectedForecastRoute.value) return
+  forecastDetailsVisible.value = false
+  await navigateTo(selectedForecastRoute.value)
 }
 </script>

@@ -65,14 +65,16 @@
       <div v-if="selectedProjectedSources.length" class="analytics-calculation-details" aria-live="polite">
         <div class="font-weight-600">{{ selectedLabel }}</div>
         <div v-for="source in selectedProjectedSources" :key="source.id" class="analytics-assumption-note">
-          <div class="font-weight-600">{{ $t(`analytics.daily_forecast.source_${source.sourceKind}`) }} · {{ formatCurrency(source.amount) }}</div>
+          <div class="font-weight-600">
+            {{ $t(`analytics.daily_forecast.source_${source.sourceKind}`) }}<template v-if="source.sourceLabel"> — {{ source.sourceLabel }}</template> · {{ formatCurrency(source.amount) }}
+          </div>
           <div v-if="source.overdue">{{ $t('analytics.daily_forecast.overdue') }}</div>
           <div v-if="source.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: source.confidence.level }) }}</div>
           <div v-for="reason in source.reasons ?? []" :key="reason">{{ reason }}</div>
           <div v-if="source.sourceId">{{ $t('analytics.daily_forecast.source_id', { id: source.sourceId }) }}</div>
           <div v-if="source.candidateId">{{ $t('analytics.daily_forecast.candidate_id', { id: source.candidateId }) }}</div>
-          <div v-if="source.expectedId">{{ $t('analytics.daily_forecast.expected_id', { id: source.expectedId }) }}</div>
           <div v-if="source.evidenceIds?.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: source.evidenceIds.join(', ') }) }}</div>
+          <div v-if="source.evidenceOmittedCount">{{ $t('analytics.common.more_items', { count: source.evidenceOmittedCount }) }}</div>
           <div v-if="source.conversion?.mode">{{ $t('analytics.daily_forecast.conversion', { mode: source.conversion.mode }) }}</div>
         </div>
       </div>
@@ -87,6 +89,7 @@ import { parseISO } from 'date-fns'
 import RouteConstants from '~/constants/RouteConstants.js'
 import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
+import { summarizeProjectedSources } from '~/utils/AnalyticsForecastUtils.js'
 import { projectLineChartSelection } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
@@ -115,13 +118,15 @@ const hasActivity = computed(() => daily.value.barGroups.some(({ points }) => po
 const hasRetainedData = computed(() => dailyState.value.isStale && daily.value.dateKeys.length > 0)
 const unavailableEvidenceSummary = computed(() => dailyState.value.unavailableEvidenceSummary ?? { count: 0, previewIds: [], omittedCount: 0 })
 const legendItems = computed(() => [
-  { id: 'actual', label: sourceLabel('actual'), color: 'var(--transfer2)' },
-  { id: 'defined', label: sourceLabel('defined'), color: 'var(--income2)' },
-  { id: 'inferred', label: sourceLabel('inferred'), color: 'var(--income2)' },
-  { id: 'variable', label: sourceLabel('variable'), color: 'var(--income2)' },
+  { id: 'sources', label: t('analytics.cash_use.total_sources'), color: 'var(--income2)' },
+  { id: 'uses', label: t('analytics.cash_use.total_uses'), color: 'var(--expense2)' },
   { id: 'available', label: t('analytics.daily_forecast.available_change'), color: 'var(--transfer2)' },
+  { id: 'actual', label: sourceLabel('actual'), color: 'var(--van-text-color-2)' },
+  { id: 'defined', label: sourceLabel('defined'), color: 'var(--van-text-color-2)' },
+  { id: 'inferred', label: sourceLabel('inferred'), color: 'var(--van-text-color-2)' },
+  { id: 'variable', label: sourceLabel('variable'), color: 'var(--van-text-color-2)' },
 ])
-const selectedProjectedSources = computed(() => [...new Map((selectedPayload.value?.values ?? []).flatMap(({ point }) => point.projectedSources ?? []).map((source) => [source.id, source])).values()])
+const selectedProjectedSources = computed(() => summarizeProjectedSources((selectedPayload.value?.values ?? []).flatMap(({ point }) => point.projectedSources ?? [])))
 const selectedLabel = computed(() => selectedPayload.value?.xLabel ?? '')
 
 const onSelect = (payload) => {
@@ -135,7 +140,10 @@ const onSelectPoint = async ({ activation, point, transactionIds }) => {
     route: RouteConstants.ROUTE_TRANSACTION_LIST,
     toUrl: TransactionFilterUtils.filters.id.toUrl,
   })
-  if (!selection.route) return
+  if (!selection.route) {
+    if (point?.kind === 'forecast') selectedPayload.value = { xLabel: point.xLabel ?? point.x, values: [{ point }] }
+    return
+  }
   await navigateTo(selection.route)
 }
 </script>

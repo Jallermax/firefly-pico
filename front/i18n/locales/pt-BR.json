@@ -159,7 +159,7 @@
       "current_month_separate": "O mês atual é exibido separadamente das médias dos meses concluídos.",
       "average_remainder": "Gasto restante médio",
       "paced_forecast": "Previsão no ritmo atual",
-      "final_forecast_rule": "A previsão para o fim do mês é o máximo entre o valor real, a média e o ritmo atual.",
+      "final_forecast_rule": "A previsão para o fim do mês combina os gastos até agora com a atividade recorrente esperada e o restante histórico; nunca fica abaixo do gasto real.",
       "remaining_from_today": "Restante a partir de hoje",
       "used_month_count": "Meses concluídos utilizados"
     },

@@ -159,7 +159,7 @@
       "current_month_separate": "현재 월은 완료된 월의 평균과 별도로 표시됩니다.",
       "average_remainder": "평균 잔여 지출",
       "paced_forecast": "현재 속도 예측",
-      "final_forecast_rule": "월말 예측은 실제, 평균, 속도 예측 중 최댓값입니다.",
+      "final_forecast_rule": "월말 예측은 현재까지의 지출에 예상 반복 활동과 과거 잔여분을 합산하며, 실제 지출보다 낮아지지 않습니다.",
       "remaining_from_today": "오늘부터 남은 금액",
       "used_month_count": "사용된 완료 월 수"
     },

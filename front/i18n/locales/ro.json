@@ -159,7 +159,7 @@
       "current_month_separate": "Luna curentă este afișată separat de mediile lunilor încheiate.",
       "average_remainder": "Cheltuială medie rămasă",
       "paced_forecast": "Prognoză în ritmul curent",
-      "final_forecast_rule": "Prognoza la sfârșitul lunii este maximul dintre valoarea efectivă, medie și ritmul curent.",
+      "final_forecast_rule": "Prognoza de sfârșit de lună combină cheltuielile de până acum cu activitatea recurentă estimată și restul istoric; nu scade niciodată sub cheltuielile reale.",
       "remaining_from_today": "Rămas de astăzi",
       "used_month_count": "Luni încheiate utilizate"
     },

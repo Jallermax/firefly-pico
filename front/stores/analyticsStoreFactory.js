@@ -832,18 +832,20 @@ export function createAnalyticsStore(id, useDependencies) {
     const financialForecast = computed(() => buildForecast(balancePeriod.value))
     const financialTrend = computed(() => {
       const forecast = financialForecast.value
-      const remainingFor = (metric) => {
+      const remainingFor = (metric, field = 'remainingFromToday') => {
         const flowKey = { netWorth: 'netWorthChange', debt: 'debtChange', savings: 'savingsChange' }[metric]
-        if (flowKey) return forecast.remainingFromToday[flowKey]
+        if (flowKey) return forecast[field]?.[flowKey]
         const savingsKind = metric === 'savingsIncluded' ? 'savingsAccessible' : metric === 'savingsExcluded' ? 'savingsRestricted' : null
         if (!savingsKind) return null
         return forecast.dailyProjectedEntries.reduce((total, entry) => total + (entry.destinationKind === savingsKind ? entry.amount : 0) - (entry.sourceKind === savingsKind ? entry.amount : 0), 0)
       }
       const trend = summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() })
       const series = trend.series.map((item) => {
-        const remainingFromToday = remainingFor(item.id)
         const flowKey = { netWorth: 'netWorthChange', debt: 'debtChange', savings: 'savingsChange' }[item.id]
         const splitSavings = ['savingsIncluded', 'savingsExcluded'].includes(item.id)
+        const exactRemainingFromToday = remainingFor(item.id)
+        const knownRemainingFromToday = remainingFor(item.id, 'knownRemainingFromToday')
+        const remainingFromToday = Number.isFinite(exactRemainingFromToday) ? exactRemainingFromToday : knownRemainingFromToday
         const projection = projectMetricForecast({
           metric: flowKey ?? 'savingsChange',
           actual: flowKey ? forecast.actualToDate[flowKey] : item.currentChange,
@@ -851,16 +853,18 @@ export function createAnalyticsStore(id, useDependencies) {
           remainingActivity: remainingFromToday,
           currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
         })
-        const status = flowKey ? forecast.statusByMetric[flowKey] : projection.status
-        const forecastAvailable = status !== 'unavailable' && Number.isFinite(remainingFromToday) && Number.isFinite(item.currentTotal)
+        const status = flowKey ? forecast.statusByMetric[flowKey] : splitSavings && forecast.statusByMetric.savingsChange === 'unavailable' ? 'unavailable' : projection.status
+        const forecastIsPartial = status === 'unavailable' && Number.isFinite(remainingFromToday)
+        const forecastAvailable = status !== 'insufficientHistory' && Number.isFinite(remainingFromToday) && Number.isFinite(item.currentTotal)
         return {
           ...item,
           forecastAvailable,
+          forecastIsPartial,
           forecastChange: forecastAvailable && Number.isFinite(item.currentChange) ? item.currentChange + remainingFromToday : null,
           forecastTotal: forecastAvailable ? item.currentTotal + remainingFromToday : null,
           remainingFromToday: forecastAvailable ? remainingFromToday : null,
           actualToDate: projection.actualToDate,
-          final: splitSavings ? projection.final : forecast.final[flowKey],
+          final: splitSavings ? projection.final : (forecast.final[flowKey] ?? forecast.knownFinal?.[flowKey]),
           progress: projection.progress,
           progressState: projection.progressState,
           status,
@@ -929,11 +933,20 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const cashUseState = computed(() => {
       const projectedUnavailability = cashUseSeries.value.audit.unavailable.flatMap(({ monthKey, projected }) => (projected ? [{ monthKey, ...projected }] : []))
+      const unavailableTransactionIds = [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort()
+      const hasDefensibleChartData = [...cashUseSeries.value.useLayers, cashUseSeries.value.ordinaryIncome, ...cashUseSeries.value.sourceBands].some(({ points }) =>
+        points.some(({ value, transactionIds = [] }) => Number.isFinite(value) && (value !== 0 || transactionIds.length > 0)),
+      )
+      const isBlockingUnavailable =
+        unavailableTransactionIds.length > 0 || cashUseSeries.value.audit.status === 'mismatch' || (!hasDefensibleChartData && cashUseSeries.value.audit.status === 'unavailable')
+      const isPartiallyUnavailable = !isBlockingUnavailable && (projectedUnavailability.length > 0 || ['partial', 'unavailable'].includes(cashUseSeries.value.audit.status))
       return {
         ...categoryState,
-        isUnavailable: !['ok', 'partial'].includes(cashUseSeries.value.audit.status),
+        isUnavailable: isBlockingUnavailable,
+        isBlockingUnavailable,
+        isPartiallyUnavailable,
         auditStatus: cashUseSeries.value.audit.status,
-        unavailableTransactionIds: [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort(),
+        unavailableTransactionIds,
         projectedUnavailability,
         projectedUnavailableSummary: summarizeUnavailableEvidence(projectedUnavailability),
       }

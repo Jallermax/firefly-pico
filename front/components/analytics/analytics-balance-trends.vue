@@ -208,6 +208,7 @@ const accountSummaries = computed(() => {
             formatValue: formatCurrency,
             insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
             unavailableLabel: t('analytics.common.partial'),
+            partialLabel: t('analytics.common.partial'),
           }),
         },
         {
@@ -219,6 +220,7 @@ const accountSummaries = computed(() => {
             formatValue: formatSignedCurrency,
             insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
             unavailableLabel: t('analytics.common.partial'),
+            partialLabel: t('analytics.common.partial'),
           }),
         },
       ],
@@ -251,6 +253,7 @@ const expenseSummary = computed(() => {
           formatValue: formatCurrency,
           insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
           unavailableLabel: t('analytics.common.partial'),
+          partialLabel: t('analytics.common.partial'),
         }),
       },
       {
@@ -262,6 +265,7 @@ const expenseSummary = computed(() => {
           formatValue: formatSignedCurrency,
           insufficientHistoryLabel: t('analytics.balance.insufficient_history'),
           unavailableLabel: t('analytics.common.partial'),
+          partialLabel: t('analytics.common.partial'),
         }),
       },
     ],

@@ -31,6 +31,51 @@ test('merged result discards partial pages when any page is invalid', async () =
   assert.deepEqual(result, { ok: false, data: [] })
 })
 
+test('merged result fetches remaining pages concurrently while preserving page order', async () => {
+  const startedPages = []
+  let releasePages
+  const pagesReleased = new Promise((resolve) => {
+    releasePages = resolve
+  })
+  const getAll = async ({ page }) => {
+    if (page === 1) return { data: [{ id: '1' }], meta: { pagination: { total_pages: 4 } } }
+    startedPages.push(page)
+    await pagesReleased
+    return { data: [{ id: String(page) }], meta: { pagination: { total_pages: 4 } } }
+  }
+
+  const resultPromise = new BaseRepository('test').getAllWithMergeResult({ getAll, pageSize: 200 })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(startedPages, [2, 3, 4])
+  releasePages()
+  assert.deepEqual(await resultPromise, { ok: true, data: [{ id: '1' }, { id: '2' }, { id: '3' }, { id: '4' }] })
+})
+
+test('merged result starts the next page as soon as a worker becomes available', async () => {
+  const startedPages = []
+  const pageResolvers = new Map()
+  const getAll = async ({ page }) => {
+    if (page === 1) return { data: [{ id: '1' }], meta: { pagination: { total_pages: 8 } } }
+    startedPages.push(page)
+    return new Promise((resolve) => pageResolvers.set(page, () => resolve({ data: [{ id: String(page) }] })))
+  }
+
+  const resultPromise = new BaseRepository('test').getAllWithMergeResult({ getAll, pageSize: 200 })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(startedPages, [2, 3, 4, 5, 6, 7])
+
+  pageResolvers.get(2)()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(startedPages, [2, 3, 4, 5, 6, 7, 8])
+
+  for (const page of [3, 4, 5, 6, 7, 8]) pageResolvers.get(page)()
+  assert.deepEqual(
+    (await resultPromise).data.map(({ id }) => id),
+    ['1', '2', '3', '4', '5', '6', '7', '8'],
+  )
+})
+
 const captureRequests = async (run) => {
   const requests = []
   const originalGet = axios.get

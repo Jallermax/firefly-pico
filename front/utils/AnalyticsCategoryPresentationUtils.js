@@ -36,6 +36,28 @@ export const buildCategoryForecastDetailsPresentation = ({ point, labels, format
   ]
   if (point.progressState === 'ready' && Number.isFinite(point.progress)) rows.push({ id: 'progress', label: labels.progress, value: `${Math.round(point.progress * 100)}%` })
   else rows.push({ id: 'progressState', value: point.progressState ?? point.status })
+  const sources = new Map()
+  for (const source of point.projectedSources ?? []) {
+    const amount = source.flowAmounts?.expenses
+    if (!Number.isFinite(amount) || amount === 0) continue
+    const identity = source.candidateId ?? source.sourceId ?? source.sourceLabel ?? source.id
+    const id = `source:${source.sourceKind}:${identity}`
+    const current = sources.get(id) ?? { ...source, id, amount: 0 }
+    current.amount += amount
+    sources.set(id, current)
+  }
+  for (const source of sources.values()) {
+    const kindLabel = labels.sourceKinds?.[source.sourceKind] ?? source.sourceKind
+    rows.push({
+      id: source.id,
+      label: source.sourceLabel ? `${kindLabel} — ${source.sourceLabel}` : kindLabel,
+      value: formatSignedValue(source.amount),
+      sourceKind: source.sourceKind,
+      sourceLabel: source.sourceLabel ?? null,
+      sourceId: source.sourceId ?? null,
+      candidateId: source.candidateId ?? null,
+    })
+  }
   return rows
 }
 

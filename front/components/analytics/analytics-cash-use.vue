@@ -50,6 +50,14 @@
         <van-button size="small" @click="analyticsStore.retryCashUse">{{ $t('analytics.common.retry') }}</van-button>
       </div>
       <div v-else-if="cashUseState.status === 'loading' && cashUseState.isStale" class="analytics-assumption-note">{{ $t('analytics.common.stale') }}</div>
+      <div v-if="cashUseState.isPartiallyUnavailable" class="analytics-warning" role="status">
+        <div v-if="projectedUnavailableSummary.count">{{ $t('analytics.common.unavailable_evidence_count', { count: projectedUnavailableSummary.count }) }}</div>
+        <details v-if="projectedUnavailableSummary.previewIds.length" class="analytics-warning-details">
+          <summary>{{ $t('analytics.common.details') }}</summary>
+          <div class="analytics-warning-evidence">{{ projectedUnavailableSummary.previewIds.join(', ') }}</div>
+          <div v-if="projectedUnavailableSummary.omittedCount">{{ $t('analytics.common.more_items', { count: projectedUnavailableSummary.omittedCount }) }}</div>
+        </details>
+      </div>
 
       <analytics-combination-chart :series="chartSeries" :value-formatter="formatCurrency" :aria-label="$t('analytics.cash_use.chart_label')" @select-point="onSelectPoint" />
 

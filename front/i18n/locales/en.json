@@ -159,7 +159,7 @@
       "current_month_separate": "The current month is shown separately from completed-month averages.",
       "average_remainder": "Average remaining spending",
       "paced_forecast": "Paced forecast",
-      "final_forecast_rule": "End-of-month forecast is the maximum of actual, average, and paced forecast.",
+      "final_forecast_rule": "End-of-month forecast combines spending so far with expected recurring activity and the historical remainder; it never falls below actual spending.",
       "remaining_from_today": "Remaining from today",
       "used_month_count": "Completed months used"
     },
