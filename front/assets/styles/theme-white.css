@@ -2395,6 +2395,8 @@ body {
 .analytics-card {
     break-inside: avoid;
     overflow: visible;
+    border-radius: 8px;
+    box-shadow: var(--analytics-card-shadow), var(--analytics-card-ring);
 }
 
 .analytics-card-title {
@@ -2524,6 +2526,13 @@ body {
     min-height: auto;
     justify-content: flex-start;
     padding: 0 16px 8px;
+}
+
+.analytics-card .van-button,
+.analytics-page .analytics-card .app-tabs-item,
+.analytics-page .app-tabs.analytics-page-switch .app-tabs-item,
+.analytics-page .analytics-savings-view-control .app-tabs-item {
+    min-height: 44px;
 }
 
 .analytics-metric-summary-grid {
@@ -3196,6 +3205,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    flex-wrap: wrap;
     max-width: 1200px;
     gap: 10px;
     margin: 0 auto 10px;
@@ -3208,21 +3218,85 @@ body {
     font-weight: 600;
 }
 
+.analytics-chart-legend {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 0 16px 8px;
+    color: var(--van-text-color-2);
+    font-size: 11px;
+}
+
+.analytics-daily-forecast-legend > span {
+    min-height: 24px;
+}
+
+.analytics-daily-forecast-marker-defined {
+    border-radius: 1px;
+    background-image: repeating-linear-gradient(45deg, transparent 0 2px, currentColor 2px 3px);
+}
+
+.analytics-daily-forecast-marker-inferred {
+    border: 1px dotted currentColor;
+    background-clip: padding-box;
+}
+
+.analytics-daily-forecast-marker-variable {
+    height: 4px;
+    border-radius: 1px;
+}
+
+.analytics-daily-forecast-marker-available {
+    border-radius: 1px;
+    transform: rotate(45deg) scale(0.85);
+}
+
+.analytics-combination-chart,
+.analytics-combination-chart-svg {
+    min-height: 280px;
+}
+
+.analytics-daily-forecast-card .analytics-category-periods,
+.analytics-cash-use-card .analytics-category-periods {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 6px;
+    overflow-x: auto;
+}
+
+.analytics-daily-forecast-card .analytics-calculation-details {
+    max-height: 220px;
+    padding: 9px 10px;
+    overflow-y: auto;
+}
+
 @media (max-width: 480px) {
     .analytics-savings-view-control {
-        align-items: stretch;
-        flex-direction: column;
+        align-items: center;
+        flex-wrap: nowrap;
         gap: 6px;
+        overflow-x: auto;
     }
 
     .analytics-savings-view-control .app-tabs {
-        display: flex;
-        width: 100%;
+        display: inline-flex;
+        flex: 0 0 auto;
+        flex-wrap: nowrap;
     }
 
     .analytics-savings-view-control .app-tabs-item {
-        flex: 1;
+        flex: 0 0 auto;
         padding-inline: 8px;
+    }
+
+    .analytics-chart-legend {
+        gap: 4px 10px;
+    }
+
+    .analytics-combination-chart,
+    .analytics-combination-chart-svg {
+        min-height: 240px;
     }
 
     .analytics-flow-detail-control {
@@ -3249,6 +3323,10 @@ body {
     margin: 0 auto;
     gap: 16px;
     padding-bottom: 100px;
+}
+
+.analytics-layout > .analytics-card {
+    min-width: 0;
 }
 
 @media (max-width: 360px) {

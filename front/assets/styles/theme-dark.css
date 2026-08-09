@@ -511,7 +511,21 @@
 }
 
 .van-theme-dark .analytics-chart-tooltip {
+    border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: rgba(0, 0, 0, 0.55) 0 3px 8px;
+}
+
+.van-theme-dark .analytics-card {
+    box-shadow: var(--analytics-card-shadow), var(--analytics-card-ring);
+}
+
+.van-theme-dark .analytics-combination-chart {
+    color: var(--van-text-color);
+}
+
+.van-theme-dark .analytics-daily-forecast-marker-defined,
+.van-theme-dark .analytics-daily-forecast-marker-inferred {
+    color: #f5f5f5;
 }
 
 .van-theme-dark .analytics-page-switch {

@@ -10,6 +10,8 @@
         <analytics-balance-trends class="analytics-layout-balance" />
         <analytics-category-spending v-if="profileStore.categoriesEnabled" class="analytics-layout-category" />
         <analytics-money-flow class="analytics-layout-flow" />
+        <analytics-daily-forecast class="analytics-layout-daily" />
+        <analytics-cash-use class="analytics-layout-cash-use" />
       </div>
     </van-pull-refresh>
   </div>

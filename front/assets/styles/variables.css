@@ -29,6 +29,8 @@
     --analytics-expenses: #fb8c00;
     --analytics-forecast: #7e57c2;
     --analytics-grid: rgba(100, 116, 139, 0.18);
+    --analytics-card-shadow: rgba(149, 157, 165, 0.16) 0 8px 24px;
+    --analytics-card-ring: rgba(100, 116, 139, 0.1) 0 0 0 1px;
     --analytics-category-1: #1e88e5;
     --analytics-category-2: #66bb6a;
     --analytics-category-3: #ec407a;
@@ -61,6 +63,8 @@
     --analytics-expenses: #ffb74d;
     --analytics-forecast: #7e57c2;
     --analytics-grid: rgba(226, 232, 240, 0.2);
+    --analytics-card-shadow: rgba(0, 0, 0, 0.3) 0 8px 24px;
+    --analytics-card-ring: rgba(255, 255, 255, 0.08) 0 0 0 1px;
     --analytics-category-1: #1e88e5;
     --analytics-category-2: #66bb6a;
     --analytics-category-3: #ec407a;

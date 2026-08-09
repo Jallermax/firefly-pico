@@ -1,5 +1,5 @@
 <template>
-  <app-tabs v-model="selectedRoute" :items="items" class="analytics-page-switch" />
+  <app-tabs v-model="selectedRoute" :items="items" :aria-label="$t('analytics.title')" class="analytics-page-switch" />
 </template>
 
 <script setup>
