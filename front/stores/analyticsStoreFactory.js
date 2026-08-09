@@ -14,7 +14,7 @@ import {
   summarizeCategoryWindow,
   summarizeTotalExpenseWindow,
 } from '../utils/AnalyticsUtils.js'
-import { buildRemainingActivityForecast, projectMetricForecast } from '../utils/AnalyticsForecastUtils.js'
+import { buildRemainingActivityForecast, classifyForecastFlowAmounts, projectMetricForecast } from '../utils/AnalyticsForecastUtils.js'
 import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../utils/AnalyticsRecurringUtils.js'
 import { buildCashUseSeries } from '../utils/AnalyticsCashUseUtils.js'
 
@@ -24,10 +24,279 @@ const SAVINGS_VIEWS = ['combined', 'split']
 const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
 const MONEY_FLOW_DETAIL_LEVELS = [5, 10, 'all']
 const CASH_USE_MODES = ['spending', 'full']
+const DAILY_FORECAST_PERIODS = [3, 6, 12]
+const DAILY_FLOW_KEYS = ['income', 'refunds', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt']
+const DAILY_SOURCE_KEYS = ['income', 'refunds', 'savingsWithdrawals', 'newDebt']
+const DAILY_USE_KEYS = ['expenses', 'savingsDeposits', 'debtRepayments']
+const DAILY_SOURCE_KINDS = ['actual', 'defined', 'inferred', 'variable']
 const CATEGORY_SERIES_LIMIT = 6
 
 const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
 const financialMetricIdsForSavingsView = (view) => [...balanceMetricIdsForSavingsView(view), 'expenses']
+const emptyDailyComponents = (value = 0) => Object.fromEntries(DAILY_FLOW_KEYS.map((key) => [key, value]))
+const roundDaily = (value, decimalPlaces) => Number(value.toFixed(decimalPlaces))
+const addDailyComponents = (target, values, decimalPlaces) => {
+  DAILY_FLOW_KEYS.forEach((key) => {
+    target[key] = target[key] === null || values[key] === null ? null : roundDaily(target[key] + (values[key] ?? 0), decimalPlaces)
+  })
+}
+const dailyTotal = (components, keys, decimalPlaces) =>
+  keys.some((key) => components[key] === null)
+    ? null
+    : roundDaily(
+        keys.reduce((total, key) => total + components[key], 0),
+        decimalPlaces,
+      )
+const finishDailyBucket = (bucket, decimalPlaces) => {
+  bucket.sources = dailyTotal(bucket.components, DAILY_SOURCE_KEYS, decimalPlaces)
+  bucket.uses = dailyTotal(bucket.components, DAILY_USE_KEYS, decimalPlaces)
+  bucket.availableCashChange = Number.isFinite(bucket.sources) && Number.isFinite(bucket.uses) ? roundDaily(bucket.sources - bucket.uses, decimalPlaces) : null
+  bucket.transactionIds = [...bucket.transactionIds].sort()
+  bucket.projectedEvidenceIds = [...bucket.projectedEvidenceIds].sort()
+  bucket.entries.sort((left, right) => String(left.sourceKind).localeCompare(String(right.sourceKind)) || String(left.id).localeCompare(String(right.id)))
+  return bucket
+}
+const newDailyBucket = () => ({ components: emptyDailyComponents(), sources: 0, uses: 0, availableCashChange: 0, entries: [], transactionIds: new Set(), projectedEvidenceIds: new Set() })
+const dailyDates = (today) => {
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const count = new Date(year, month + 1, 0).getDate()
+  return Array.from({ length: count }, (_, index) => format(new Date(year, month, index + 1), 'yyyy-MM-dd'))
+}
+const projectedEvidenceIds = (entry) => [entry.sourceId, entry.candidateId, entry.expectedId, ...(entry.evidenceIds ?? [])].filter(Boolean).map(String)
+const dailyConfidence = (confidence) => {
+  if (!confidence) return null
+  const score = Number(confidence.score)
+  const level = confidence.level ?? (!Number.isFinite(score) ? 'unavailable' : score >= 0.8 ? 'high' : score >= 0.5 ? 'medium' : 'low')
+  return { ...confidence, level }
+}
+
+const buildDailyForecastProjection = ({ ledger, forecast, today, currencyDecimalPlaces }) => {
+  const dateKeys = dailyDates(today)
+  const todayKey = format(today, 'yyyy-MM-dd')
+  const monthKey = todayKey.slice(0, 7)
+  const dayByDate = new Map(
+    dateKeys.map((date) => [
+      date,
+      {
+        date,
+        label: String(Number(date.slice(-2))),
+        isToday: date === todayKey,
+        actual: date <= todayKey ? newDailyBucket() : null,
+        projected: date > todayKey ? newDailyBucket() : null,
+      },
+    ]),
+  )
+
+  for (const entry of ledger.entries.filter(({ date }) => date?.startsWith(monthKey) && date <= todayKey)) {
+    const day = dayByDate.get(entry.date)
+    if (!day?.actual) continue
+    const classified = classifyForecastFlowAmounts({ entry, currencyDecimalPlaces })
+    addDailyComponents(day.actual.components, classified.flowAmounts, currencyDecimalPlaces)
+    const hasActivity = DAILY_FLOW_KEYS.some((key) => classified.flowAmounts[key] !== 0)
+    if (hasActivity && entry.transactionId) day.actual.transactionIds.add(String(entry.transactionId))
+    day.actual.entries.push({
+      id: entry.id,
+      date: entry.date,
+      amount: classified.amount,
+      sourceKind: 'actual',
+      transactionId: entry.transactionId,
+      transactionIds: entry.transactionId ? [String(entry.transactionId)] : [],
+      evidenceIds: [],
+      flowAmounts: classified.flowAmounts,
+      affectedMetricIds: classified.affectedMetricIds,
+      status: classified.status,
+      conversion: entry.conversion ?? null,
+    })
+  }
+
+  for (const entry of forecast.dailyProjectedEntries.filter(({ date }) => date > todayKey && date.startsWith(monthKey))) {
+    const day = dayByDate.get(entry.date)
+    if (!day?.projected) continue
+    addDailyComponents(day.projected.components, entry.flowAmounts, currencyDecimalPlaces)
+    projectedEvidenceIds(entry).forEach((id) => day.projected.projectedEvidenceIds.add(id))
+    day.projected.entries.push({
+      ...entry,
+      confidence: dailyConfidence(entry.confidence),
+      statusByMetric: { ...forecast.statusByMetric },
+      transactionIds: [],
+      evidenceIds: [...(entry.evidenceIds ?? [])].map(String).sort(),
+    })
+  }
+
+  if (forecast.status === 'insufficientHistory') {
+    dateKeys
+      .filter((date) => date > todayKey)
+      .forEach((date) => {
+        dayByDate.get(date).projected.components = emptyDailyComponents(null)
+      })
+  }
+
+  const days = dateKeys.map((date) => {
+    const day = dayByDate.get(date)
+    if (day.actual) finishDailyBucket(day.actual, currencyDecimalPlaces)
+    if (day.projected) finishDailyBucket(day.projected, currencyDecimalPlaces)
+    const components = emptyDailyComponents()
+    if (day.actual) addDailyComponents(components, day.actual.components, currencyDecimalPlaces)
+    if (day.projected) addDailyComponents(components, day.projected.components, currencyDecimalPlaces)
+    const sources = dailyTotal(components, DAILY_SOURCE_KEYS, currencyDecimalPlaces)
+    const uses = dailyTotal(components, DAILY_USE_KEYS, currencyDecimalPlaces)
+    const availableCashChange = Number.isFinite(sources) && Number.isFinite(uses) ? roundDaily(sources - uses, currencyDecimalPlaces) : null
+    return {
+      ...day,
+      components,
+      sources,
+      uses,
+      availableCashChange,
+      transactionIds: day.actual?.transactionIds ?? [],
+      projectedEvidenceIds: day.projected?.projectedEvidenceIds ?? [],
+    }
+  })
+
+  let cumulative = 0
+  const cumulativeTransactionIds = new Set()
+  const cumulativeProjectedSources = new Map()
+  days.forEach((day) => {
+    day.transactionIds.forEach((id) => cumulativeTransactionIds.add(id))
+    ;(day.projected?.entries ?? []).forEach((entry) => cumulativeProjectedSources.set(entry.id, entry))
+    cumulative = cumulative === null || day.availableCashChange === null ? null : roundDaily(cumulative + day.availableCashChange, currencyDecimalPlaces)
+    day.cumulativeAvailableCashChange = cumulative
+    day.cumulativeTransactionIds = [...cumulativeTransactionIds].sort()
+    day.cumulativeProjectedSources = [...cumulativeProjectedSources.values()]
+  })
+
+  const barGroups = DAILY_SOURCE_KINDS.flatMap((sourceKind) =>
+    ['sources', 'uses'].map((direction) => ({
+      id: `${sourceKind}:${direction}`,
+      sourceKind,
+      direction,
+      labelKey: `analytics.daily_forecast.${sourceKind}_${direction}`,
+      points: days.map((day) => {
+        const bucket = sourceKind === 'actual' ? day.actual : day.projected
+        const applicable = sourceKind === 'actual' ? day.date <= todayKey : day.date > todayKey
+        const entries = applicable ? (bucket?.entries ?? []).filter((entry) => entry.sourceKind === sourceKind) : []
+        const components = emptyDailyComponents()
+        entries.forEach((entry) => addDailyComponents(components, entry.flowAmounts, currencyDecimalPlaces))
+        const rawValue =
+          applicable && !(sourceKind !== 'actual' && forecast.status === 'insufficientHistory')
+            ? dailyTotal(components, direction === 'sources' ? DAILY_SOURCE_KEYS : DAILY_USE_KEYS, currencyDecimalPlaces)
+            : null
+        const transactionIds = [...new Set(entries.flatMap((entry) => entry.transactionIds ?? []))].sort()
+        const evidenceIds = [...new Set(entries.flatMap(projectedEvidenceIds))].sort()
+        return {
+          x: day.date,
+          xLabel: day.label,
+          value: direction === 'uses' && Number.isFinite(rawValue) ? -rawValue : rawValue,
+          kind: sourceKind === 'actual' ? 'actual' : 'forecast',
+          sourceKind,
+          direction,
+          isToday: day.isToday,
+          transactionIds,
+          evidenceIds,
+          projectedSources: sourceKind === 'actual' ? [] : entries,
+          status: sourceKind === 'actual' ? (entries.some(({ status }) => status === 'unavailable') ? 'unavailable' : 'ready') : forecast.status,
+        }
+      }),
+    })),
+  )
+
+  const actualUnavailableTransactionIds = [
+    ...new Set(days.flatMap(({ actual }) => (actual?.entries ?? []).filter(({ status }) => status === 'unavailable').flatMap(({ transactionIds }) => transactionIds))),
+  ].sort()
+  const componentDeltas = Object.fromEntries(
+    DAILY_FLOW_KEYS.map((key) => {
+      const expected = ['unavailable', 'insufficientHistory'].includes(forecast.statusByMetric[key])
+        ? null
+        : roundDaily((forecast.actualToDate[key] ?? 0) + (forecast.remainingFromToday[key] ?? 0), currencyDecimalPlaces)
+      const actual = days.some(({ components }) => components[key] === null)
+        ? null
+        : roundDaily(
+            days.reduce((total, day) => total + day.components[key], 0),
+            currencyDecimalPlaces,
+          )
+      return [key, expected === null || actual === null ? null : roundDaily(actual - expected, currencyDecimalPlaces)]
+    }),
+  )
+  const expectedAvailable = ['unavailable', 'insufficientHistory'].includes(forecast.statusByMetric.availableCashChange)
+    ? null
+    : roundDaily(forecast.actualToDate.availableCashChange + forecast.remainingFromToday.availableCashChange, currencyDecimalPlaces)
+  const actualAvailable = days.at(-1)?.cumulativeAvailableCashChange ?? 0
+  const availableCashDelta = expectedAvailable === null || actualAvailable === null ? null : roundDaily(actualAvailable - expectedAvailable, currencyDecimalPlaces)
+  const reconciliationStatus =
+    Object.values(componentDeltas).some((value) => value === null) || availableCashDelta === null
+      ? 'unavailable'
+      : Object.values(componentDeltas).some((value) => value !== 0) || availableCashDelta !== 0
+        ? 'mismatch'
+        : 'ok'
+
+  return {
+    monthKey,
+    dateKeys,
+    todayIndex: dateKeys.indexOf(todayKey),
+    openingValue: 0,
+    days,
+    barGroups,
+    availableLine: {
+      id: 'availableCashChange',
+      labelKey: 'analytics.daily_forecast.available_change',
+      openingValue: 0,
+      points: days.map((day) => ({
+        x: day.date,
+        xLabel: day.label,
+        value: day.cumulativeAvailableCashChange,
+        kind: day.date <= todayKey ? 'actual' : 'forecast',
+        isToday: day.isToday,
+        transactionIds: day.date <= todayKey ? day.cumulativeTransactionIds : [],
+        actualTransactionIds: day.cumulativeTransactionIds,
+        projectedSources: day.cumulativeProjectedSources,
+      })),
+    },
+    confidence: forecast.confidence,
+    status: forecast.status,
+    statusByMetric: forecast.statusByMetric,
+    monthlyTotals: {
+      components: Object.fromEntries(
+        DAILY_FLOW_KEYS.map((key) => [key, componentDeltas[key] === null ? null : roundDaily(forecast.actualToDate[key] + forecast.remainingFromToday[key], currencyDecimalPlaces)]),
+      ),
+      sources:
+        componentDeltas.income === null || componentDeltas.refunds === null || componentDeltas.savingsWithdrawals === null || componentDeltas.newDebt === null
+          ? null
+          : roundDaily(
+              forecast.actualToDate.income +
+                forecast.remainingFromToday.income +
+                forecast.actualToDate.refunds +
+                forecast.remainingFromToday.refunds +
+                forecast.actualToDate.savingsWithdrawals +
+                forecast.remainingFromToday.savingsWithdrawals +
+                forecast.actualToDate.newDebt +
+                forecast.remainingFromToday.newDebt,
+              currencyDecimalPlaces,
+            ),
+      uses:
+        componentDeltas.expenses === null || componentDeltas.savingsDeposits === null || componentDeltas.debtRepayments === null
+          ? null
+          : roundDaily(
+              forecast.actualToDate.expenses +
+                forecast.remainingFromToday.expenses +
+                forecast.actualToDate.savingsDeposits +
+                forecast.remainingFromToday.savingsDeposits +
+                forecast.actualToDate.debtRepayments +
+                forecast.remainingFromToday.debtRepayments,
+              currencyDecimalPlaces,
+            ),
+      availableCashChange: expectedAvailable,
+    },
+    reconciliation: { status: reconciliationStatus, componentDeltas, availableCashDelta },
+    audit: {
+      fulfilledExpectedIds: forecast.audit.recurring.fulfilledExpectedIds,
+      remainingExpectedIds: forecast.audit.recurring.remainingExpectedIds,
+      unavailableTransactionIds: actualUnavailableTransactionIds,
+      unavailableEntryIds: forecast.audit.unavailable.entryIds,
+      unavailableCandidateIds: forecast.audit.unavailable.candidateIds,
+      missingCurrencies: forecast.audit.unavailable.missingCurrencies,
+    },
+  }
+}
 
 export function createAnalyticsStore(id, useDependencies) {
   return defineStore(id, () => {
@@ -62,6 +331,7 @@ export function createAnalyticsStore(id, useDependencies) {
     const storedGraphDetail = useStoredValue('analyticsMoneyFlowDetail', 5)
     const storedCashUseMode = useStoredValue('analyticsCashUseMode', 'spending')
     const storedCashUseDetail = useStoredValue('analyticsCashUseDetail', 5)
+    const storedDailyForecastMonths = useStoredValue('analyticsDailyForecastMonths', 6)
     const normalizeSavingsView = (view) => (SAVINGS_VIEWS.includes(view) ? view : 'combined')
     const normalizeMetrics = (metrics, availableMetrics, view) => {
       const compatibleMetrics = (Array.isArray(metrics) ? metrics : []).flatMap((metric) => {
@@ -120,6 +390,12 @@ export function createAnalyticsStore(id, useDependencies) {
       get: () => normalizeGraphDetail(storedCashUseDetail.value),
       set: (value) => {
         storedCashUseDetail.value = normalizeGraphDetail(value)
+      },
+    })
+    const dailyForecastMonths = computed({
+      get: () => (DAILY_FORECAST_PERIODS.includes(Number(storedDailyForecastMonths.value)) ? Number(storedDailyForecastMonths.value) : 6),
+      set: (value) => {
+        storedDailyForecastMonths.value = DAILY_FORECAST_PERIODS.includes(Number(value)) ? Number(value) : 6
       },
     })
     const selectedFlowMonth = ref(startOfMonth(getNow()))
@@ -573,6 +849,23 @@ export function createAnalyticsStore(id, useDependencies) {
       unavailableTransactionIds: [...new Set(cashUseSeries.value.audit.unavailable.flatMap(({ transactionIds }) => transactionIds))].sort(),
       projectedUnavailability: cashUseSeries.value.audit.unavailable.flatMap(({ monthKey, projected }) => (projected ? [{ monthKey, ...projected }] : [])),
     }))
+    const dailyForecast = computed(() =>
+      buildDailyForecastProjection({ ledger: ledger.value, forecast: buildForecast(dailyForecastMonths.value), today: getNow(), currencyDecimalPlaces: displayCurrencyDecimalPlaces.value }),
+    )
+    const dailyForecastState = computed(() => ({
+      ...categoryState,
+      forecastStatus: dailyForecast.value.status,
+      isPartial: ['partial', 'insufficientHistory'].includes(dailyForecast.value.status),
+      isUnavailable:
+        dailyForecast.value.status === 'unavailable' ||
+        dailyForecast.value.reconciliation.status === 'mismatch' ||
+        dailyForecast.value.audit.unavailableTransactionIds.length > 0 ||
+        dailyForecast.value.audit.unavailableCandidateIds.length > 0 ||
+        dailyForecast.value.audit.missingCurrencies.length > 0,
+      unavailableTransactionIds: dailyForecast.value.audit.unavailableTransactionIds,
+      unavailableCandidateIds: dailyForecast.value.audit.unavailableCandidateIds,
+      missingCurrencies: dailyForecast.value.audit.missingCurrencies,
+    }))
 
     async function loadTransactions(startDate, endDate) {
       const query = [`date_after:${startDate}`, `date_before:${endDate}`, ...getExcludedTransactionFilters()]
@@ -694,6 +987,10 @@ export function createAnalyticsStore(id, useDependencies) {
       await loadSnapshot({ force: true })
     }
 
+    async function retryDailyForecast() {
+      await loadSnapshot({ force: true })
+    }
+
     return {
       balancePeriod,
       categoryAverageMonths,
@@ -707,6 +1004,7 @@ export function createAnalyticsStore(id, useDependencies) {
       graphDetail,
       cashUseMode,
       cashUseDetail,
+      dailyForecastMonths,
       selectedFlowMonth,
       balanceState,
       categoryState,
@@ -731,6 +1029,8 @@ export function createAnalyticsStore(id, useDependencies) {
       cashUseSeries,
       cashUseCategoryRankingItems,
       cashUseState,
+      dailyForecast,
+      dailyForecastState,
       selectedFlow,
       flowMonthMin,
       flowMonthMax,
@@ -742,6 +1042,7 @@ export function createAnalyticsStore(id, useDependencies) {
       retryCategory,
       retryFlow,
       retryCashUse,
+      retryDailyForecast,
       canMoveFlowMonth,
       moveFlowMonth,
     }

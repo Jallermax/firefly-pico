@@ -35,6 +35,15 @@
         <pattern id="analytics-combination-gap-negative" width="8" height="8" patternUnits="userSpaceOnUse">
           <path d="M 0 0 L 8 8" stroke="var(--expense2)" stroke-width="2" opacity="0.55" />
         </pattern>
+        <pattern id="analytics-combination-defined" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width="2" opacity="0.7" />
+        </pattern>
+        <pattern id="analytics-combination-inferred" width="7" height="7" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.4" fill="currentColor" opacity="0.7" />
+        </pattern>
+        <pattern id="analytics-combination-variable" width="8" height="8" patternUnits="userSpaceOnUse">
+          <path d="M 0 4 H 8" stroke="currentColor" stroke-width="1.5" opacity="0.65" />
+        </pattern>
       </defs>
 
       <g aria-hidden="true">
@@ -56,6 +65,18 @@
       </g>
 
       <g aria-hidden="true">
+        <rect
+          v-for="bar in renderedBars"
+          :key="bar.key"
+          :x="bar.x"
+          :y="bar.y"
+          :width="bar.width"
+          :height="bar.height"
+          :fill="bar.fill"
+          :style="{ color: bar.color }"
+          :opacity="bar.sourceKind === 'actual' ? 0.86 : 0.78"
+          rx="1"
+        />
         <template v-for="layer in renderedUseLayers" :key="layer.id">
           <path v-for="(path, index) in layer.paths" :key="`${layer.id}:${index}`" :d="path.d" :fill="areaFill(layer, path)" :style="{ color: layer.color }" opacity="0.72" />
           <path v-for="(path, index) in layer.refundPaths" :key="`${layer.id}:refund:${index}`" :d="path.d" fill="url(#analytics-combination-refund)" :style="{ color: layer.color }" opacity="0.9" />
@@ -82,6 +103,15 @@
           :stroke="totalSources.color"
           stroke-width="1.5"
           :stroke-dasharray="path.forecast ? '5 4' : '2 3'"
+        />
+        <path
+          v-for="(path, index) in availableLinePaths"
+          :key="`available:${index}`"
+          :d="path.d"
+          fill="none"
+          :stroke="availableLine.color"
+          stroke-width="2.5"
+          :stroke-dasharray="path.forecast ? '7 5' : null"
         />
       </g>
 
@@ -127,6 +157,7 @@
           {{ $t('analytics.cash_use.progress') }}: {{ Math.round(selectedRow.point.progress * 100) }}%
         </span>
         <span v-if="selectedRow.point.status === 'partial'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.partial') }}</span>
+        <span v-if="selectedRow.point.sourceKind && selectedRow.point.sourceKind !== 'actual'" class="analytics-chart-tooltip-qualifier">{{ selectedRow.label }}</span>
         <span v-if="Number.isFinite(selectedRow.point.refundCoverage?.totalRefunded ?? selectedRow.point.refundCoverage?.refunded)" class="analytics-chart-tooltip-qualifier">
           {{ $t('analytics.cash_use.refund_coverage') }}: {{ valueFormatter(selectedRow.point.refundCoverage.totalRefunded ?? selectedRow.point.refundCoverage.refunded) }}
         </span>
@@ -162,24 +193,33 @@ const isPinned = computed(() => interaction.value.isPinned)
 const isKeyboardSelection = computed(() => interaction.value.isKeyboardSelection)
 
 const layout = computed(() => buildLineChartLayout({ isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
-const xValues = computed(() => props.series.monthKeys ?? [])
+const xValues = computed(() => props.series.dateKeys ?? props.series.monthKeys ?? [])
 const pointCount = computed(() => xValues.value.length)
 const innerWidth = computed(() => layout.value.width - layout.value.padding.left - layout.value.padding.right)
 const innerHeight = computed(() => layout.value.height - layout.value.padding.top - layout.value.padding.bottom)
 const xAt = (index) => layout.value.padding.left + (index / Math.max(1, pointCount.value - 1)) * innerWidth.value
-const yMax = computed(() => {
+const yValues = computed(() => {
   const values = [
     ...(props.series.useLayers ?? []).flatMap(({ points }) => points.flatMap(({ top }) => (Number.isFinite(top) ? [top] : []))),
     ...(props.series.sourceBands ?? []).flatMap(({ points }) => points.flatMap(({ top }) => (Number.isFinite(top) ? [top] : []))),
     ...(props.series.gap?.points ?? []).flatMap(({ top }) => (Number.isFinite(top) ? [top] : [])),
     ...(props.series.ordinaryIncome?.points ?? []).flatMap(({ value }) => (Number.isFinite(value) ? [value] : [])),
     ...(props.series.totalSources?.points ?? []).flatMap(({ value }) => (Number.isFinite(value) ? [value] : [])),
+    ...(props.series.barGroups ?? []).flatMap(({ points }) => points.flatMap(({ value }) => (Number.isFinite(value) ? [value] : []))),
+    ...(props.series.availableLine?.points ?? []).flatMap(({ value }) => (Number.isFinite(value) ? [value] : [])),
   ]
-  return Math.max(1, ...values)
+  return values
 })
-const yAt = (value) => layout.value.padding.top + ((yMax.value - value) / yMax.value) * innerHeight.value
+const yMax = computed(() => Math.max(1, ...yValues.value))
+const yMin = computed(() => Math.min(0, ...yValues.value))
+const yRange = computed(() => Math.max(1, yMax.value - yMin.value))
+const yAt = (value) => layout.value.padding.top + ((yMax.value - value) / yRange.value) * innerHeight.value
 const pointAt = (points, key) => points.find((point) => point.x === key)
-const xLabelAt = (key) => pointAt(props.series.ordinaryIncome?.points ?? [], key)?.xLabel ?? (key.endsWith(':forecast') ? key.slice(0, 7) : key)
+const xLabelAt = (key) =>
+  pointAt(props.series.ordinaryIncome?.points ?? [], key)?.xLabel ??
+  pointAt(props.series.availableLine?.points ?? [], key)?.xLabel ??
+  pointAt(props.series.barGroups?.[0]?.points ?? [], key)?.xLabel ??
+  (key.endsWith(':forecast') ? key.slice(0, 7) : key)
 
 const areaPaths = (points, predicate = () => true) =>
   buildCombinationAreaGeometry({ points, xValues: xValues.value, xAt, yAt, predicate, isolatedWidth: Math.max(12, Math.min(24, innerWidth.value / Math.max(2, pointCount.value * 2))) })
@@ -221,6 +261,49 @@ const totalUses = computed(() => props.series.totalUses ?? { points: [] })
 const totalSources = computed(() => props.series.totalSources ?? { points: [], color: 'var(--van-text-color-2)' })
 const ordinaryIncomePaths = computed(() => linePaths(ordinaryIncome.value.points))
 const totalSourcePaths = computed(() => linePaths(totalSources.value.points))
+const availableLine = computed(() => props.series.availableLine ?? { points: [], color: 'var(--van-text-color)' })
+const availableLinePaths = computed(() => {
+  const paths = linePaths(availableLine.value.points)
+  const firstPoint = availableLine.value.points.find(({ value }) => Number.isFinite(value))
+  if (!firstPoint || !Number.isFinite(availableLine.value.openingValue)) return paths
+  const firstIndex = xValues.value.indexOf(firstPoint.x)
+  if (firstIndex < 0) return paths
+  const step = pointCount.value > 1 ? innerWidth.value / (pointCount.value - 1) : innerWidth.value
+  const openingX = Math.max(4, xAt(firstIndex) - Math.min(20, step * 0.65))
+  return [{ d: `M ${openingX} ${yAt(availableLine.value.openingValue)} L ${xAt(firstIndex)} ${yAt(firstPoint.value)}`, forecast: firstPoint.kind === 'forecast' }, ...paths]
+})
+const barSourceKinds = computed(() => [...new Set((props.series.barGroups ?? []).map(({ sourceKind }) => sourceKind))])
+const barSpacing = computed(() => (pointCount.value > 1 ? innerWidth.value / (pointCount.value - 1) : innerWidth.value))
+const barWidth = computed(() => Math.max(2, Math.min(10, (barSpacing.value * 0.78) / Math.max(1, barSourceKinds.value.length))))
+const barFill = (group) => {
+  if (group.sourceKind === 'defined') return 'url(#analytics-combination-defined)'
+  if (group.sourceKind === 'inferred') return 'url(#analytics-combination-inferred)'
+  if (group.sourceKind === 'variable') return 'url(#analytics-combination-variable)'
+  return group.color
+}
+const renderedBars = computed(() =>
+  (props.series.barGroups ?? []).flatMap((group) => {
+    const sourceIndex = barSourceKinds.value.indexOf(group.sourceKind)
+    const groupWidth = barWidth.value * barSourceKinds.value.length
+    return group.points.flatMap((point, index) => {
+      if (!Number.isFinite(point.value) || point.value === 0) return []
+      const valueY = yAt(point.value)
+      const zeroY = yAt(0)
+      return [
+        {
+          key: `${group.id}:${point.x}`,
+          sourceKind: group.sourceKind,
+          x: xAt(index) - groupWidth / 2 + sourceIndex * barWidth.value,
+          y: Math.min(valueY, zeroY),
+          width: barWidth.value,
+          height: Math.max(1, Math.abs(zeroY - valueY)),
+          fill: barFill(group),
+          color: group.color,
+        },
+      ]
+    })
+  }),
+)
 const areaFill = (item, path) => {
   if (path.forecast) return 'url(#analytics-combination-forecast)'
   if (item.pattern === 'refund') return 'url(#analytics-combination-refund)'
@@ -244,6 +327,16 @@ const row = ({ seriesId, label, color, point, value = point?.value, yValue = val
 const selectedRows = computed(() => {
   const key = selectedXValue.value
   if (!key) return []
+  if ((props.series.barGroups ?? []).length > 0) {
+    const bars = props.series.barGroups
+      .map((group) => {
+        const point = pointAt(group.points, key)
+        return row({ seriesId: group.id, label: point?.label ?? group.label ?? group.id, color: group.color, point })
+      })
+      .filter(({ point }) => Number.isFinite(point?.value))
+    const linePoint = pointAt(availableLine.value.points, key)
+    return [...bars, row({ seriesId: availableLine.value.id, label: availableLine.value.label ?? availableLine.value.id, color: availableLine.value.color, point: linePoint })]
+  }
   const uses = (props.series.useLayers ?? []).map((layer) => {
     const point = pointAt(layer.points, key)
     return row({ seriesId: layer.id, label: point?.label ?? layer.label ?? layer.id, color: layer.color, point, yValue: point?.top })
@@ -285,7 +378,7 @@ const selectedRows = computed(() => {
 const gridLines = computed(() =>
   Array.from({ length: GRID_LINE_COUNT }, (_, index) => {
     const ratio = index / (GRID_LINE_COUNT - 1)
-    return { y: layout.value.padding.top + ratio * innerHeight.value, label: props.valueFormatter(yMax.value * (1 - ratio)) }
+    return { y: layout.value.padding.top + ratio * innerHeight.value, label: props.valueFormatter(yMax.value - yRange.value * ratio) }
   }),
 )
 const xAxisLabels = computed(() => {

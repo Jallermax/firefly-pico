@@ -135,6 +135,14 @@ const flowAmountsFor = (context, amount, currencyDecimalPlaces) => {
 
 const affectedMetricsFor = (context, currencyDecimalPlaces) => FLOW_KEYS.filter((key) => flowAmountsFor(context, 1, currencyDecimalPlaces)[key] !== 0)
 
+export function classifyForecastFlowAmounts({ entry, accountContexts = null, currencyDecimalPlaces }) {
+  const { context } = projectionContext(entry, accountContexts)
+  const amount = amountOf(entry)
+  const affectedMetricIds = affectedMetricsFor(context, currencyDecimalPlaces)
+  const flowAmounts = Number.isFinite(amount) ? flowAmountsFor(context, amount, currencyDecimalPlaces) : Object.fromEntries(FLOW_KEYS.map((key) => [key, affectedMetricIds.includes(key) ? null : 0]))
+  return { status: Number.isFinite(amount) ? 'ready' : 'unavailable', amount, ...context, affectedMetricIds, flowAmounts }
+}
+
 const addAmounts = (target, values, currencyDecimalPlaces, transactionId = null, ids = null) => {
   for (const key of FLOW_KEYS) {
     target[key] = roundAmount(target[key] + (values[key] ?? 0), currencyDecimalPlaces)
