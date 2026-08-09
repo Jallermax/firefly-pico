@@ -34,7 +34,9 @@ const normalizedTags = (...values) =>
       .filter(Boolean),
   )
 
-const isRefundTag = (tags) => tags.some((tag) => tag.trim().toLowerCase() === '#refund')
+const isRefundTag = (tags) => tags.some((tag) => ['refund', '#refund'].includes(tag.trim().toLowerCase()))
+
+const isIncomingRefundLeg = ({ sourceKind, destinationKind }) => sourceKind === 'expense' && ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(destinationKind)
 
 const linkValue = (attributes, key) => idOf(attributes?.[key] ?? attributes?.[key.replace('_id', 'Id')])
 
@@ -185,7 +187,7 @@ export function buildAnalyticsLedger({ transactions = [], transactionLinks = [],
         if (Number.isFinite(entry.value)) unclassifiedValue += Math.abs(entry.value)
         else hasUnavailableUnclassifiedValue = true
       }
-      if (isRefundTag(tags)) markRefund({ entry, signal: 'tag' })
+      if (isRefundTag(tags) && isIncomingRefundLeg(entry)) markRefund({ entry, signal: 'tag' })
     }
   }
 

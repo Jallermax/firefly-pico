@@ -25,7 +25,7 @@ const split = ({ journalId, amount, date, source, destination, categoryId = null
   tags,
 })
 
-const transaction = (id, parts) => ({ id, attributes: { transactions: parts } })
+const transaction = (id, parts, tags = []) => ({ id, attributes: { transactions: parts, tags } })
 
 const checking = account({ id: 'checking', type: 'asset' })
 const creditCard = account({ id: 'credit-card', type: 'asset', role: 'ccAsset', balance: '-400' })
@@ -37,6 +37,16 @@ const expense = account({ id: 'expense', type: 'expense' })
 const accounts = [checking, creditCard, savingsAccessible, savingsRestricted, loan, revenue, expense]
 const refundLinkType = { id: 'refund-type', attributes: { name: 'Refund', inward: 'refunded', outward: 'refund' } }
 const refundLinkTypeByOutward = { id: 'refund-type-by-outward', attributes: { name: 'Transaction relationship', inward: 'refunded', outward: 'refund' } }
+const noRefund = () => ({
+  isRefund: false,
+  signals: [],
+  linkedPurchaseTransactionId: null,
+  linkedPurchaseMonthKey: null,
+  coverageCategoryId: null,
+  coverageMonthKey: null,
+  coverageValue: null,
+  isLinked: false,
+})
 
 const build = ({ transactions, transactionLinks = [], linkTypes = [], ledgerAccounts = accounts, rates = { USD: 1, EUR: 0.9 } }) =>
   buildAnalyticsLedger({ transactions, transactionLinks, linkTypes, accounts: ledgerAccounts, displayCurrencyCode: 'USD', primaryCurrencyCode: 'USD', rates })
@@ -157,6 +167,82 @@ test('deduplicates linked and tagged refunds while preserving cash and coverage 
     isLinked: false,
   })
   assert.deepEqual(ledger.audit.unmatchedRefundLinkIds, [])
+})
+
+test('accepts both refund tag forms only on truthful incoming refund legs', () => {
+  const ledger = build({
+    transactions: [
+      transaction('plain-tag-refund', [
+        split({ journalId: 'plain-tag-refund-journal', amount: 18, date: '2026-02-07', source: expense, destination: checking, categoryId: 'food', tags: [' Refund '] }),
+      ]),
+      transaction(
+        'hash-tag-refund',
+        [split({ journalId: 'hash-tag-refund-journal', amount: 22, date: '2026-02-08', source: expense, destination: savingsAccessible, categoryId: 'travel' })],
+        [' #REFUND '],
+      ),
+    ],
+  })
+
+  assert.deepEqual(
+    ledger.entries.map(({ transactionId, sourceKind, destinationKind, refund }) => ({ transactionId, sourceKind, destinationKind, refund })),
+    [
+      {
+        transactionId: 'plain-tag-refund',
+        sourceKind: 'expense',
+        destinationKind: 'available',
+        refund: {
+          isRefund: true,
+          signals: ['tag'],
+          linkedPurchaseTransactionId: null,
+          linkedPurchaseMonthKey: null,
+          coverageCategoryId: 'food',
+          coverageMonthKey: '2026-02',
+          coverageValue: 18,
+          isLinked: false,
+        },
+      },
+      {
+        transactionId: 'hash-tag-refund',
+        sourceKind: 'expense',
+        destinationKind: 'savingsAccessible',
+        refund: {
+          isRefund: true,
+          signals: ['tag'],
+          linkedPurchaseTransactionId: null,
+          linkedPurchaseMonthKey: null,
+          coverageCategoryId: 'travel',
+          coverageMonthKey: '2026-02',
+          coverageValue: 22,
+          isLinked: false,
+        },
+      },
+    ],
+  )
+})
+
+test('does not relabel outgoing tagged purchases funded by balance-holding accounts', () => {
+  const ledger = build({
+    transactions: [
+      transaction('available-purchase', [
+        split({ journalId: 'available-purchase-journal', amount: 30, date: '2026-02-09', source: checking, destination: expense, categoryId: 'food', tags: ['#refund'] }),
+      ]),
+      transaction('savings-purchase', [
+        split({ journalId: 'savings-purchase-journal', amount: 40, date: '2026-02-10', source: savingsAccessible, destination: expense, categoryId: 'travel', tags: ['refund'] }),
+      ]),
+      transaction('liability-purchase', [
+        split({ journalId: 'liability-purchase-journal', amount: 50, date: '2026-02-11', source: loan, destination: expense, categoryId: 'home', tags: ['#REFUND'] }),
+      ]),
+    ],
+  })
+
+  assert.deepEqual(
+    ledger.entries.map(({ transactionId, sourceKind, destinationKind, refund }) => ({ transactionId, sourceKind, destinationKind, refund })),
+    [
+      { transactionId: 'available-purchase', sourceKind: 'available', destinationKind: 'expense', refund: noRefund() },
+      { transactionId: 'savings-purchase', sourceKind: 'savingsAccessible', destinationKind: 'expense', refund: noRefund() },
+      { transactionId: 'liability-purchase', sourceKind: 'liability', destinationKind: 'expense', refund: noRefund() },
+    ],
+  )
 })
 
 test('reports unavailable FX and unknown endpoints without inventing zero values', () => {
