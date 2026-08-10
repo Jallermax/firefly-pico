@@ -986,6 +986,28 @@ test('Cash Use painted refund overlays resolve through the logical composite ser
   assert.deepEqual(pinned.pinnedSelection, { mode: 'seriesMonth', seriesId: 'refund-coverage', monthIndex: 1 })
 })
 
+test('Cash Use painted refund overlays retain the logical composite descriptor', () => {
+  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const legend = readFileSync(new URL('../../components/charts/analytics-cash-use-legend.vue', import.meta.url), 'utf8')
+  const monthRow = readFileSync(new URL('../../components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
+  const descriptor = { color: 'rebeccapurple', pattern: 'refund', patternVariant: 'dash', markerKind: 'area', legendOrdinal: 12 }
+  const series = AnalyticsCashUseUtils.buildCashUseRefundCoverageSeries({ descriptor })
+
+  assert.deepEqual(Object.fromEntries(['color', 'pattern', 'patternVariant', 'markerKind', 'legendOrdinal'].map((key) => [key, series[key]])), descriptor)
+  assert.match(chart, /const refundCoverageDescriptor = computed/)
+  assert.match(chart, /refundDescriptor: refundCoverageDescriptor\.value/)
+  assert.match(chart, /:fill="paintUrl\(layer\.refundDescriptor\.pattern\)"/)
+  assert.match(chart, /:style="\{ color: layer\.refundDescriptor\.color \}"/)
+  assert.match(chart, /:data-pattern="layer\.refundDescriptor\.pattern"/)
+  assert.match(chart, /:data-pattern-variant="layer\.refundDescriptor\.patternVariant"/)
+  assert.match(chart, /:data-marker-kind="layer\.refundDescriptor\.markerKind"/)
+  assert.match(chart, /:data-legend-ordinal="layer\.refundDescriptor\.legendOrdinal"/)
+  assert.match(legend, /:data-pattern-variant="item\.patternVariant"/)
+  assert.match(monthRow, /:data-pattern-variant="series\.patternVariant"/)
+  assert.match(legend, /:aria-label="item\.ariaLabel \?\? item\.label"/)
+  assert.match(monthRow, /:aria-label="series\.ariaLabel \?\? series\.label"/)
+})
+
 test('combination highlight geometry keeps the selected area and month band on one interval', () => {
   const segment = AnalyticsCashUseUtils.buildCombinationSelectedSegment({
     points: [

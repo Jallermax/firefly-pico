@@ -132,10 +132,14 @@
                 :key="`${layer.id}:refund:${index}`"
                 :class="areaClass(layer.refundSeriesId)"
                 :d="path.d"
-                :fill="paintUrl('refund')"
-                data-pattern="refund"
-                data-marker-kind="area"
-                :style="{ color: layer.color }"
+                :fill="paintUrl(layer.refundDescriptor.pattern)"
+                :stroke="areaStroke(layer.refundDescriptor)"
+                :stroke-dasharray="patternVariantStrokeDasharray(layer.refundDescriptor.patternVariant)"
+                :data-pattern="layer.refundDescriptor.pattern"
+                :data-pattern-variant="layer.refundDescriptor.patternVariant"
+                :data-marker-kind="layer.refundDescriptor.markerKind"
+                :data-legend-ordinal="layer.refundDescriptor.legendOrdinal"
+                :style="{ color: layer.refundDescriptor.color }"
                 opacity="0.9"
               />
             </template>
@@ -388,10 +392,14 @@ const refundCoveragePoints = (points) =>
   }))
 const refundHoverPoints = (points) =>
   refundCoveragePoints(points).map((point) => ((point.refundCoverage?.totalRefunded ?? point.refundCoverage?.refunded) > 0 ? point : { ...point, bottom: null, top: null }))
+const refundCoverageDescriptor = computed(
+  () => props.legendItems.find(({ id }) => id === 'refund-coverage') ?? { label: t('analytics.cash_use.refund_coverage'), color: 'var(--expense2)', pattern: 'refund', markerKind: 'area' },
+)
 const renderedUseLayers = computed(() =>
   (props.series.useLayers ?? []).map((layer) => ({
     ...layer,
     refundSeriesId: 'refund-coverage',
+    refundDescriptor: refundCoverageDescriptor.value,
     paths: areaPaths(layer.points),
     refundPaths: areaPaths(refundCoveragePoints(layer.points), ({ refundCoverage }) => (refundCoverage?.totalRefunded ?? refundCoverage?.refunded) > 0),
   })),
@@ -401,7 +409,7 @@ const refundCoverageSeries = computed(() =>
   buildCashUseRefundCoverageSeries({
     useLayers: props.series.useLayers ?? [],
     monthKeys: xValues.value,
-    descriptor: props.legendItems.find(({ id }) => id === 'refund-coverage') ?? { label: t('analytics.cash_use.refund_coverage'), color: 'var(--expense2)', pattern: 'refund', markerKind: 'area' },
+    descriptor: refundCoverageDescriptor.value,
   }),
 )
 const renderedPositiveGap = computed(() => areaPaths(props.series.gap?.points ?? [], ({ direction }) => direction === 'positive'))
