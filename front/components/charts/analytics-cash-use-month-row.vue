@@ -39,7 +39,7 @@ const props = defineProps({
 
 defineEmits(['activate'])
 
-const canNavigate = (point) => Array.isArray(point?.transactionIds) && point.transactionIds.length > 0
+const canNavigate = (point) => !['unavailable', 'insufficientHistory'].includes(point?.status) && Array.isArray(point?.transactionIds) && point.transactionIds.length > 0
 const cells = computed(() => {
   const innerWidth = props.canvasWidth - props.padding.left - props.padding.right
   return props.monthKeys.map((monthKey, index) => {

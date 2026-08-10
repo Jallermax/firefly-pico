@@ -190,7 +190,7 @@
             />
           </g>
 
-          <path v-if="selectedSegment" class="analytics-combination-selected-segment" :d="selectedSegment.d" fill="none" />
+          <path v-for="(selectedSegment, index) in selectedSegments" :key="`selected-segment:${index}`" class="analytics-combination-selected-segment" :d="selectedSegment.d" fill="none" />
 
           <g v-if="selectionMode === 'month' && selectedIndex >= 0" aria-hidden="true">
             <line class="analytics-chart-crosshair" :x1="selectedX" :x2="selectedX" :y1="chartLayout.crosshairY1" :y2="chartLayout.crosshairY2" />
@@ -271,7 +271,9 @@ import { useAppStore } from '~/stores/appStore.js'
 import {
   buildCombinationAreaGeometry,
   buildCombinationMonthBand,
+  buildCombinationSelectionDescription,
   buildCombinationSelectedSegment,
+  buildCashUseRefundCoverageSeries,
   displayCombinationSelection,
   reduceCombinationChartInteraction,
   resolveCombinationChartTarget,
@@ -395,6 +397,13 @@ const renderedUseLayers = computed(() =>
   })),
 )
 const renderedSourceBands = computed(() => (props.series.sourceBands ?? []).map((layer) => ({ ...layer, paths: areaPaths(layer.points) })))
+const refundCoverageSeries = computed(() =>
+  buildCashUseRefundCoverageSeries({
+    useLayers: props.series.useLayers ?? [],
+    monthKeys: xValues.value,
+    descriptor: props.legendItems.find(({ id }) => id === 'refund-coverage') ?? { label: t('analytics.cash_use.refund_coverage'), color: 'var(--expense2)', pattern: 'refund', markerKind: 'area' },
+  }),
+)
 const renderedPositiveGap = computed(() => areaPaths(props.series.gap?.points ?? [], ({ direction }) => direction === 'positive'))
 const renderedNegativeGap = computed(() => areaPaths(props.series.gap?.points ?? [], ({ direction }) => direction === 'negative'))
 const ordinaryIncome = computed(() => props.series.ordinaryIncome ?? { points: [], color: 'var(--income2)' })
@@ -483,6 +492,7 @@ const lineClass = (seriesId) => ({
 })
 const seriesRegistry = computed(() => [
   ...(props.series.useLayers ?? []),
+  refundCoverageSeries.value,
   ...(props.series.sourceBands ?? []),
   ordinaryIncome.value,
   totalSources.value,
@@ -510,9 +520,10 @@ const selectedMonthBand = computed(() => {
   if (!['month', 'seriesMonth'].includes(displaySelection.value.mode)) return null
   return buildCombinationMonthBand({ monthIndex: displaySelection.value.monthIndex, xAt })
 })
-const selectedSegment = computed(() => {
-  if (displaySelection.value.mode !== 'seriesMonth' || !selectedSeries.value) return null
-  return buildCombinationSelectedSegment({ points: selectedSeries.value.points, xValues: xValues.value, monthIndex: displaySelection.value.monthIndex, xAt, yAt })
+const selectedSegments = computed(() => {
+  if (displaySelection.value.mode !== 'seriesMonth' || !selectedSeries.value) return []
+  const series = selectedSeries.value.segmentSeries ?? [selectedSeries.value]
+  return series.map((item) => buildCombinationSelectedSegment({ points: item.points, xValues: xValues.value, monthIndex: displaySelection.value.monthIndex, xAt, yAt })).filter(Boolean)
 })
 const selectedXValue = computed(() => xValues.value[selectedIndex.value])
 const selectedX = computed(() => (selectedIndex.value < 0 ? 0 : xAt(selectedIndex.value)))
@@ -520,8 +531,8 @@ const selectedXLabel = computed(() => (selectedXValue.value ? xLabelAt(selectedX
 const tooltipOnRight = computed(() => selectedIndex.value < pointCount.value / 2)
 const todayX = computed(() => (Number.isInteger(props.series.todayIndex) && props.series.todayIndex >= 0 ? xAt(props.series.todayIndex) : null))
 const selectedSeriesMonthLabel = computed(() => {
-  const point = selectedSeries.value?.points?.find((item) => item.x === selectedXValue.value)
-  return point ? `${selectedSeries.value.label}: ${props.valueFormatter(point.value)}` : ''
+  const description = buildCombinationSelectionDescription({ selection: displaySelection.value, series: selectedSeries.value, valueFormatter: props.valueFormatter })
+  return description ? `${description.label}: ${description.valueLabel}` : ''
 })
 
 const row = ({ seriesId, label, color, point, value = point?.value, yValue = value }) => ({
@@ -598,6 +609,18 @@ const xAxisLabels = computed(() => {
   }))
 })
 const liveDescription = computed(() => {
+  if (['series', 'seriesMonth'].includes(displaySelection.value.mode)) {
+    const description = buildCombinationSelectionDescription({ selection: displaySelection.value, series: selectedSeries.value, valueFormatter: props.valueFormatter })
+    if (!description) return ''
+    const qualifiers = [
+      description.kind === 'forecast' ? t('analytics.common.forecast') : t('analytics.common.actual'),
+      description.status === 'partial' ? t('analytics.common.partial') : null,
+      ['unavailable', 'insufficientHistory'].includes(description.status) ? t('analytics.common.unavailable_amounts', { ids: description.unavailableTransactionIds.join(', ') }) : null,
+      description.status === 'ready' ? t('analytics.common.exact_values') : null,
+      description.canNavigate ? t('toolbar.transactions') : null,
+    ]
+    return [description.label, description.monthLabel, description.valueLabel, ...qualifiers.filter(Boolean)].join('. ')
+  }
   if (selectionMode.value === 'area') return activeAreaLabel.value
   return selectedIndex.value < 0 ? '' : [selectedXLabel.value, ...selectedRows.value.map(({ label, point }) => `${label}: ${point.valueLabel}`)].join('. ')
 })
@@ -629,7 +652,7 @@ const onLegendPreview = (seriesId) => applyInteraction({ type: 'legendPreview', 
 const onLegendLeave = () => applyInteraction({ type: 'legendLeave' })
 const onLegendToggle = (seriesId) => applyInteraction({ type: 'legendToggle', seriesId })
 const onMonthRowActivate = ({ point, activation }) => {
-  if (!point?.transactionIds?.length) return
+  if (['unavailable', 'insufficientHistory'].includes(point?.status) || !point?.transactionIds?.length) return
   emit('select-point', buildLineChartSelectionPayload({ seriesId: pinnedSelection.value?.seriesId, point, activation }))
 }
 const pointerTarget = (event) => {

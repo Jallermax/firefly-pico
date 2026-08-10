@@ -253,7 +253,19 @@ export function reduceCombinationChartInteraction(state, event) {
     else if (event.key === 'End') monthIndex = pointCount - 1
     else return finish(current)
     if (!hasMonthSelection && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) monthIndex = 0
-    return finish({ ...current, previewSelection: normalizeSelection({ mode: 'month', monthIndex: Math.min(pointCount - 1, Math.max(0, monthIndex)) }), effect: { type: 'select' } }, true)
+    const seriesId = currentSelection?.seriesId ?? current.pinnedSelection?.seriesId ?? null
+    return finish(
+      {
+        ...current,
+        previewSelection: normalizeSelection(
+          seriesId
+            ? { mode: 'seriesMonth', seriesId, monthIndex: Math.min(pointCount - 1, Math.max(0, monthIndex)) }
+            : { mode: 'month', monthIndex: Math.min(pointCount - 1, Math.max(0, monthIndex)) },
+        ),
+        effect: { type: 'select' },
+      },
+      true,
+    )
   }
   if (event?.type === 'rowSelect') return finish({ ...current, effect: { type: 'selectRow', item: event.item, activation: event.activation } })
   return finish(current)
@@ -568,6 +580,75 @@ const uniqueProjectedSources = (sources) => {
     seen.add(id)
     return true
   })
+}
+
+const refundCoverageValue = (point) => {
+  const coverage = point?.refundCoverage
+  return Object.hasOwn(coverage ?? {}, 'totalRefunded') ? coverage.totalRefunded : (coverage?.refunded ?? 0)
+}
+const refundOverlayPoint = (point) => {
+  const value = refundCoverageValue(point)
+  if (!(value > 0) || !Number.isFinite(point?.bottom) || !Number.isFinite(point?.top)) return { ...point, bottom: null, top: null }
+  return { ...point, bottom: Math.max(point.bottom, point.top - value) }
+}
+
+export function buildCashUseRefundCoverageSeries({ useLayers = [], monthKeys = [], descriptor = {} }) {
+  const points = monthKeys.map((x) => {
+    const components = useLayers.map((layer) => layer.points.find((point) => point.x === x)).filter(Boolean)
+    const kind = components.some((point) => point.kind === 'forecast') ? 'forecast' : 'actual'
+    const unavailableTransactionIds = unique(components.flatMap((point) => point.refundCoverage?.unavailableTransactionIds ?? []))
+    const values = components.map(refundCoverageValue)
+    const unavailable = unavailableTransactionIds.length > 0 || values.some((value) => !Number.isFinite(value))
+    const value = unavailable ? null : round(values.reduce((total, item) => total + item, 0))
+    const actualValue = unavailable
+      ? null
+      : round(
+          components.reduce((total, point) => total + (Number.isFinite(point.refundCoverage?.refunded) ? point.refundCoverage.refunded : point.kind === 'actual' ? refundCoverageValue(point) : 0), 0),
+        )
+    const transactionIds = unique(
+      components.flatMap((point) => {
+        if (!(Number.isFinite(point.refundCoverage?.refunded) ? point.refundCoverage.refunded : point.kind === 'actual' && refundCoverageValue(point)) > 0) return []
+        return [...(point.refundCoverage?.purchaseTransactionIds ?? []), ...(point.refundCoverage?.refundTransactionIds ?? [])]
+      }),
+    )
+    return {
+      x,
+      xLabel: components.find(({ xLabel }) => xLabel)?.xLabel ?? x,
+      kind,
+      value,
+      actualValue,
+      projectedValue: kind === 'forecast' && Number.isFinite(value) && Number.isFinite(actualValue) ? round(value - actualValue) : 0,
+      transactionIds,
+      unavailableTransactionIds,
+      projectedSources: uniqueProjectedSources(components.flatMap((point) => point.refundCoverage?.projectedSources ?? [])),
+      status: unavailable ? 'unavailable' : kind === 'forecast' ? aggregateForecastStatus(components.map((point) => ({ status: point.refundCoverage?.projectedStatus ?? point.status }))) : 'ready',
+    }
+  })
+  return {
+    id: 'refund-coverage',
+    label: 'refund-coverage',
+    color: 'var(--expense2)',
+    pattern: 'refund',
+    markerKind: 'area',
+    ...descriptor,
+    points,
+    segmentSeries: useLayers.map((layer) => ({ ...layer, points: layer.points.map(refundOverlayPoint) })),
+  }
+}
+
+export function buildCombinationSelectionDescription({ selection, series, valueFormatter }) {
+  if (!selection?.mode || !series?.label || !Array.isArray(series.points) || series.points.length === 0) return null
+  const point = series.points[selection.monthIndex >= 0 ? selection.monthIndex : series.points.length - 1]
+  if (!point) return null
+  return {
+    label: series.label,
+    monthLabel: point.xLabel ?? point.x,
+    valueLabel: valueFormatter(point.value),
+    kind: point.kind,
+    status: point.status ?? 'ready',
+    canNavigate: !['unavailable', 'insufficientHistory'].includes(point.status) && Array.isArray(point.transactionIds) && point.transactionIds.length > 0,
+    unavailableTransactionIds: point.unavailableTransactionIds ?? [],
+  }
 }
 
 const aggregateForecastStatus = (points) => {

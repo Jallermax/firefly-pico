@@ -1002,6 +1002,193 @@ test('combination interaction separates legend previews from pinned selections',
   assert.deepEqual(interactionFor(state, { type: 'legendToggle', seriesId: 'category:housing' }), { ...initial, effect: { type: 'clear' } })
 })
 
+test('combination interaction keeps a pinned legend series during keyboard month traversal', () => {
+  const initial = { previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect: null }
+  let state = interactionFor(initial, { type: 'legendToggle', seriesId: 'refund-coverage', pointCount: 3 })
+
+  for (const [key, monthIndex] of [
+    ['ArrowRight', 0],
+    ['End', 2],
+    ['Home', 0],
+  ]) {
+    state = interactionFor(state, { type: 'key', key, pointCount: 3 })
+    assert.deepEqual(AnalyticsCashUseUtils.displayCombinationSelection(state), { mode: 'seriesMonth', seriesId: 'refund-coverage', monthIndex }, key)
+    assert.deepEqual(state.pinnedSelection, { mode: 'series', seriesId: 'refund-coverage', monthIndex: -1 }, key)
+  }
+})
+
+test('Cash Use refund coverage aggregates overlay values and exact actual evidence for selection', () => {
+  const refundCoverage = AnalyticsCashUseUtils.buildCashUseRefundCoverageSeries({
+    monthKeys: ['2026-06', '2026-07:forecast'],
+    useLayers: [
+      {
+        id: 'category:food',
+        points: [
+          {
+            x: '2026-06',
+            xLabel: 'Jun 2026',
+            kind: 'actual',
+            top: 90,
+            bottom: 40,
+            transactionIds: ['food-purchase', 'food-unrelated'],
+            refundCoverage: { totalRefunded: 20, purchaseTransactionIds: ['food-purchase'], refundTransactionIds: ['food-refund'], unavailableTransactionIds: [] },
+          },
+          {
+            x: '2026-07:forecast',
+            xLabel: 'Jul 2026',
+            kind: 'forecast',
+            top: 0,
+            bottom: 0,
+            transactionIds: [],
+            projectedSources: [{ id: 'food-forecast' }, { id: 'food-forecast' }],
+            refundCoverage: { totalRefunded: 0, purchaseTransactionIds: [], refundTransactionIds: [], unavailableTransactionIds: [], projectedSources: [{ id: 'food-refund-forecast' }] },
+          },
+        ],
+      },
+      {
+        id: 'category:travel',
+        points: [
+          {
+            x: '2026-06',
+            xLabel: 'Jun 2026',
+            kind: 'actual',
+            top: 150,
+            bottom: 90,
+            transactionIds: ['travel-purchase', 'travel-unrelated'],
+            refundCoverage: { totalRefunded: 5, purchaseTransactionIds: ['travel-purchase'], refundTransactionIds: ['travel-refund'], unavailableTransactionIds: [] },
+          },
+          {
+            x: '2026-07:forecast',
+            xLabel: 'Jul 2026',
+            kind: 'forecast',
+            top: 0,
+            bottom: 0,
+            transactionIds: [],
+            projectedSources: [{ id: 'travel-forecast' }],
+            refundCoverage: { totalRefunded: 0, purchaseTransactionIds: [], refundTransactionIds: [], unavailableTransactionIds: [], projectedSources: [{ id: 'travel-refund-forecast' }] },
+          },
+        ],
+      },
+    ],
+    descriptor: { label: 'Refund coverage', color: 'pink', pattern: 'refund', markerKind: 'area' },
+  })
+
+  assert.deepEqual(refundCoverage.points[0], {
+    x: '2026-06',
+    xLabel: 'Jun 2026',
+    kind: 'actual',
+    value: 25,
+    actualValue: 25,
+    projectedValue: 0,
+    transactionIds: ['food-purchase', 'food-refund', 'travel-purchase', 'travel-refund'],
+    unavailableTransactionIds: [],
+    projectedSources: [],
+    status: 'ready',
+  })
+  assert.equal(refundCoverage.points[1].value, 0)
+  assert.deepEqual(refundCoverage.points[1].transactionIds, [])
+  assert.deepEqual(refundCoverage.points[1].projectedSources, [{ id: 'food-refund-forecast' }, { id: 'travel-refund-forecast' }])
+  assert.equal(refundCoverage.segmentSeries.length, 2)
+  assert.equal(refundCoverage.segmentSeries[0].points[0].bottom, 70)
+  assert.equal(refundCoverage.segmentSeries[0].points[1].bottom, null)
+
+  const partialRefundCoverage = AnalyticsCashUseUtils.buildCashUseRefundCoverageSeries({
+    monthKeys: ['2026-08:forecast'],
+    useLayers: [
+      {
+        id: 'category:food',
+        points: [
+          {
+            x: '2026-08:forecast',
+            xLabel: 'Aug 2026',
+            kind: 'forecast',
+            top: 100,
+            bottom: 50,
+            refundCoverage: {
+              refunded: 5,
+              totalRefunded: 9,
+              purchaseTransactionIds: ['food-purchase'],
+              refundTransactionIds: ['food-refund'],
+              unavailableTransactionIds: [],
+              projectedSources: [{ id: 'food-refund-forecast' }],
+              projectedStatus: 'partial',
+            },
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.deepEqual(partialRefundCoverage.points[0], {
+    x: '2026-08:forecast',
+    xLabel: 'Aug 2026',
+    kind: 'forecast',
+    value: 9,
+    actualValue: 5,
+    projectedValue: 4,
+    transactionIds: ['food-purchase', 'food-refund'],
+    unavailableTransactionIds: [],
+    projectedSources: [{ id: 'food-refund-forecast' }],
+    status: 'partial',
+  })
+
+  const unavailableRefundCoverage = AnalyticsCashUseUtils.buildCashUseRefundCoverageSeries({
+    monthKeys: ['2026-08'],
+    useLayers: [
+      {
+        id: 'category:food',
+        points: [
+          {
+            x: '2026-08',
+            xLabel: 'Aug 2026',
+            kind: 'actual',
+            transactionIds: ['food-purchase'],
+            refundCoverage: { totalRefunded: 0, unavailableTransactionIds: ['missing-refund'] },
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.equal(unavailableRefundCoverage.points[0].status, 'unavailable')
+})
+
+test('Cash Use selection descriptions expose month, value, status, and navigation eligibility', () => {
+  const series = {
+    id: 'refund-coverage',
+    label: 'Refund coverage',
+    points: [
+      { x: '2026-06', xLabel: 'Jun 2026', kind: 'actual', value: 25, transactionIds: ['food-refund'] },
+      { x: '2026-07:forecast', xLabel: 'Jul 2026', kind: 'forecast', value: null, transactionIds: [], status: 'unavailable', unavailableTransactionIds: ['future-refund'] },
+    ],
+  }
+
+  assert.deepEqual(
+    AnalyticsCashUseUtils.buildCombinationSelectionDescription({
+      selection: { mode: 'series', seriesId: 'refund-coverage', monthIndex: -1 },
+      series,
+      valueFormatter: (value) => (Number.isFinite(value) ? `$${value}` : '—'),
+    }),
+    { label: 'Refund coverage', monthLabel: 'Jul 2026', valueLabel: '—', kind: 'forecast', status: 'unavailable', canNavigate: false, unavailableTransactionIds: ['future-refund'] },
+  )
+  assert.deepEqual(
+    AnalyticsCashUseUtils.buildCombinationSelectionDescription({
+      selection: { mode: 'seriesMonth', seriesId: 'refund-coverage', monthIndex: 0 },
+      series,
+      valueFormatter: (value) => (Number.isFinite(value) ? `$${value}` : '—'),
+    }),
+    { label: 'Refund coverage', monthLabel: 'Jun 2026', valueLabel: '$25', kind: 'actual', status: 'ready', canNavigate: true, unavailableTransactionIds: [] },
+  )
+  assert.equal(
+    AnalyticsCashUseUtils.buildCombinationSelectionDescription({
+      selection: { mode: 'seriesMonth', seriesId: 'refund-coverage', monthIndex: 1 },
+      series: { ...series, points: [series.points[0], { ...series.points[1], transactionIds: ['unavailable-refund'] }] },
+      valueFormatter: (value) => (Number.isFinite(value) ? `$${value}` : '—'),
+    }).canNavigate,
+    false,
+  )
+})
+
 test('combination interaction supports touch pins, month navigation, repair, dismissal, and row activation', () => {
   const initial = { previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect: null }
   const target = { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 2 }
@@ -1408,9 +1595,15 @@ test('Cash Use chart source wires exact v2 legend, selected segment, and pinned 
   assert.match(chart, /v-if="pinnedSelection\?\.seriesId"/)
   assert.match(chart, /<analytics-cash-use-month-row/)
   assert.match(chart, /displaySelection\.mode === 'seriesMonth'/)
+  assert.match(chart, /buildCombinationSelectionDescription/)
+  assert.match(chart, /description\.status === 'ready' \? t\('analytics\.common\.exact_values'\) : null/)
+  assert.match(chart, /description\.canNavigate \? t\('toolbar\.transactions'\) : null/)
 
   assert.match(monthRow, /const point = props\.series\.points\.find/)
-  assert.match(monthRow, /const canNavigate = \(point\) => Array\.isArray\(point\?\.transactionIds\) && point\.transactionIds\.length > 0/)
+  assert.match(
+    monthRow,
+    /const canNavigate = \(point\) => !\['unavailable', 'insufficientHistory'\]\.includes\(point\?\.status\) && Array\.isArray\(point\?\.transactionIds\) && point\.transactionIds\.length > 0/,
+  )
   assert.match(monthRow, /:disabled="!cell\.canNavigate"/)
   assert.match(monthRow, /@click="\$emit\('activate', \{ point: cell\.point, activation: 'pointer' \}\)"/)
 })
