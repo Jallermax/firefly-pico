@@ -170,8 +170,8 @@ test('Cash Use renders overflow variants with one shared chart and legend dash e
     assert.equal(styles[id].patternVariant, patternVariant, id)
     assert.equal(styles[id].strokeDasharray, strokeDasharray, id)
     assert.equal(AnalyticsCashUseUtils.cashUsePatternVariantStrokeDasharray(patternVariant), strokeDasharray, id)
-    assert.match(css, new RegExp(`\\[data-pattern-variant\\^='stroke-${String(dash).padStart(2, '0')}-'\\] \\{ --pattern-variant-dash: ${dash}px; \\}`), `${id} dash`)
-    assert.match(css, new RegExp(`\\[data-pattern-variant\\$='-${String(gap).padStart(2, '0')}'\\] \\{ --pattern-variant-gap: ${gap}px; \\}`), `${id} gap`)
+    assert.match(css, new RegExp(`\\[data-pattern-variant\\^='stroke-${String(dash).padStart(2, '0')}-'\\]\\s*\\{\\s*--pattern-variant-dash:\\s*${dash}px;\\s*\\}`), `${id} dash`)
+    assert.match(css, new RegExp(`\\[data-pattern-variant\\$='-${String(gap).padStart(2, '0')}'\\]\\s*\\{\\s*--pattern-variant-gap:\\s*${gap}px;\\s*\\}`), `${id} gap`)
   }
   assert.match(chart, /:stroke-dasharray="layer\.strokeDasharray"/)
   assert.match(chart, /const areaStroke = \(item\) => \(item\.strokeDasharray \? 'var\(--van-text-color\)' : null\)/)

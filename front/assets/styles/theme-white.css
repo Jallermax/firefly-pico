@@ -3496,39 +3496,103 @@ body {
     pointer-events: none;
 }
 
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-01-'] { --pattern-variant-dash: 1px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-02-'] { --pattern-variant-dash: 2px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-03-'] { --pattern-variant-dash: 3px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-04-'] { --pattern-variant-dash: 4px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-05-'] { --pattern-variant-dash: 5px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-06-'] { --pattern-variant-dash: 6px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-07-'] { --pattern-variant-dash: 7px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-08-'] { --pattern-variant-dash: 8px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-09-'] { --pattern-variant-dash: 9px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-10-'] { --pattern-variant-dash: 10px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-11-'] { --pattern-variant-dash: 11px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-12-'] { --pattern-variant-dash: 12px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-13-'] { --pattern-variant-dash: 13px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-14-'] { --pattern-variant-dash: 14px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-15-'] { --pattern-variant-dash: 15px; }
-.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-16-'] { --pattern-variant-dash: 16px; }
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-01-'] {
+  --pattern-variant-dash: 1px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-02-'] {
+  --pattern-variant-dash: 2px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-03-'] {
+  --pattern-variant-dash: 3px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-04-'] {
+  --pattern-variant-dash: 4px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-05-'] {
+  --pattern-variant-dash: 5px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-06-'] {
+  --pattern-variant-dash: 6px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-07-'] {
+  --pattern-variant-dash: 7px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-08-'] {
+  --pattern-variant-dash: 8px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-09-'] {
+  --pattern-variant-dash: 9px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-10-'] {
+  --pattern-variant-dash: 10px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-11-'] {
+  --pattern-variant-dash: 11px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-12-'] {
+  --pattern-variant-dash: 12px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-13-'] {
+  --pattern-variant-dash: 13px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-14-'] {
+  --pattern-variant-dash: 14px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-15-'] {
+  --pattern-variant-dash: 15px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant^='stroke-16-'] {
+  --pattern-variant-dash: 16px;
+}
 
-.analytics-cash-use-legend-marker[data-pattern-variant$='-01'] { --pattern-variant-gap: 1px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-02'] { --pattern-variant-gap: 2px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-03'] { --pattern-variant-gap: 3px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-04'] { --pattern-variant-gap: 4px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-05'] { --pattern-variant-gap: 5px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-06'] { --pattern-variant-gap: 6px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-07'] { --pattern-variant-gap: 7px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-08'] { --pattern-variant-gap: 8px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-09'] { --pattern-variant-gap: 9px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-10'] { --pattern-variant-gap: 10px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-11'] { --pattern-variant-gap: 11px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-12'] { --pattern-variant-gap: 12px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-13'] { --pattern-variant-gap: 13px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-14'] { --pattern-variant-gap: 14px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-15'] { --pattern-variant-gap: 15px; }
-.analytics-cash-use-legend-marker[data-pattern-variant$='-16'] { --pattern-variant-gap: 16px; }
+.analytics-cash-use-legend-marker[data-pattern-variant$='-01'] {
+  --pattern-variant-gap: 1px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-02'] {
+  --pattern-variant-gap: 2px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-03'] {
+  --pattern-variant-gap: 3px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-04'] {
+  --pattern-variant-gap: 4px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-05'] {
+  --pattern-variant-gap: 5px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-06'] {
+  --pattern-variant-gap: 6px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-07'] {
+  --pattern-variant-gap: 7px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-08'] {
+  --pattern-variant-gap: 8px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-09'] {
+  --pattern-variant-gap: 9px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-10'] {
+  --pattern-variant-gap: 10px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-11'] {
+  --pattern-variant-gap: 11px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-12'] {
+  --pattern-variant-gap: 12px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-13'] {
+  --pattern-variant-gap: 13px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-14'] {
+  --pattern-variant-gap: 14px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-15'] {
+  --pattern-variant-gap: 15px;
+}
+.analytics-cash-use-legend-marker[data-pattern-variant$='-16'] {
+  --pattern-variant-gap: 16px;
+}
 
 .analytics-combination-selected-month-band {
     fill: var(--analytics-selection-band);
