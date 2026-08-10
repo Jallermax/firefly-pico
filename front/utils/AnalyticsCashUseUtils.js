@@ -5,6 +5,7 @@ const MONEY_KINDS = new Set(['available', 'savingsAccessible', 'savingsRestricte
 const SAVINGS_KINDS = new Set(['savingsAccessible', 'savingsRestricted'])
 const UNCATEGORIZED_ID = 'uncategorized'
 const CATEGORY_PATTERNS = ['solid', 'category-dots', 'category-horizontal', 'category-grid']
+const CATEGORY_PATTERN_VARIANTS = ['outline', 'offset', 'inverse', 'dense', 'sparse', 'cross', 'wave', 'dash']
 
 const unique = (values) => [...new Set(values.filter((value) => value !== null && value !== undefined && value !== '').map(String))].sort()
 const round = (value) => (Number.isFinite(value) ? Number(value.toFixed(8)) : value)
@@ -211,12 +212,14 @@ export function buildCashUseVisualStyles({ series, categoryColors, sourceColors,
   const expenseLayers = series.useLayers.filter(({ kind }) => ['expenseCategory', 'otherExpense'].includes(kind))
   expenseLayers.forEach((layer, index) => {
     const isOther = layer.kind === 'otherExpense'
+    const primaryTupleCount = categoryColors.length * CATEGORY_PATTERNS.length
     const patternIndex = Math.floor(index / categoryColors.length)
-    const overflowIndex = index - categoryColors.length * CATEGORY_PATTERNS.length
+    const overflowTier = Math.floor(index / primaryTupleCount) - 1
     const color = categoryColors[index % categoryColors.length]
     styles[layer.id] = {
-      color: isOther ? semanticColors.transfer : overflowIndex >= 0 ? `oklch(0.68 0.14 ${((overflowIndex * 137.50776405003785) % 360).toFixed(6)})` : color,
+      color: isOther ? semanticColors.transfer : color,
       pattern: isOther ? 'category-dots' : CATEGORY_PATTERNS[patternIndex % CATEGORY_PATTERNS.length],
+      ...(isOther ? {} : { patternVariant: overflowTier < 0 ? 'primary' : CATEGORY_PATTERN_VARIANTS[overflowTier % CATEGORY_PATTERN_VARIANTS.length], legendOrdinal: index + 1 }),
       markerKind: 'area',
     }
   })

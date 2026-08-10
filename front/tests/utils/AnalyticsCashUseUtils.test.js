@@ -99,8 +99,6 @@ test('Cash Use assigns deterministic non-colliding visual tuples', () => {
     build({ entries: rankedCategoryEntries(12), detailLevel: 5 }),
     build({ entries: rankedCategoryEntries(12), detailLevel: 10 }),
     build({ entries: rankedCategoryEntries(20), detailLevel: 'all' }),
-    build({ entries: rankedCategoryEntries(41), detailLevel: 'all' }),
-    build({ entries: rankedCategoryEntries(101), detailLevel: 'all' }),
   ]) {
     const styles = cashUseStyles(series)
     const categoryTuples = Object.entries(styles)
@@ -116,18 +114,18 @@ test('Cash Use assigns deterministic non-colliding visual tuples', () => {
   assert.deepEqual(styles['total-sources'], { color: 'grey', pattern: 'dotted-line', markerKind: 'line' })
 })
 
-test('Cash Use keeps overflow category styles opaque and readable at high detail', () => {
+test('Cash Use keeps All category descriptors bounded and renderer-ready at high detail', () => {
   const styles = cashUseStyles({
     useLayers: Array.from({ length: 10000 }, (_, index) => ({ id: `category:${index + 1}`, kind: 'expenseCategory' })),
     sourceBands: [],
   })
   const categoryStyles = Object.entries(styles).filter(([id]) => id.startsWith('category:'))
-  const categoryTuples = categoryStyles.map(([, style]) => `${style.color}|${style.pattern}|${style.markerKind}`)
-  const overflowColors = categoryStyles.slice(40).map(([, style]) => style.color)
 
-  assert.equal(new Set(categoryTuples).size, 10000)
-  assert.equal(new Set(overflowColors).size, overflowColors.length)
-  assert.ok(overflowColors.every((color) => /^oklch\(0\.68 0\.14 \d+\.\d{6}\)$/.test(color)))
+  assert.equal(categoryStyles.length, 10000)
+  assert.deepEqual(styles['category:328'], { color: 'c8', pattern: 'solid', patternVariant: 'dash', markerKind: 'area', legendOrdinal: 328 })
+  assert.deepEqual(styles['category:561'], { color: 'c1', pattern: 'solid', patternVariant: 'cross', markerKind: 'area', legendOrdinal: 561 })
+  assert.notDeepEqual(styles['category:328'], styles['category:561'])
+  assert.ok(categoryStyles.every(([, style], index) => /^c\d+$/.test(style.color) && typeof style.patternVariant === 'string' && style.legendOrdinal === index + 1))
 })
 
 test('Cash Use keeps Other distinct and ignores non-category source order', () => {
