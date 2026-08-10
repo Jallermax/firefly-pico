@@ -155,16 +155,15 @@ const hasLegacyInteractionFields = (state) => ['selectedIndex', 'mode', 'selecte
 
 export const displayCombinationSelection = (state) => state?.previewSelection ?? state?.pinnedSelection ?? normalizeSelection()
 
-const withLegacyInteractionFields = (state, legacy, isKeyboardSelection = state.isKeyboardSelection ?? false) => {
+const withLegacyInteractionFields = (state, legacy, isKeyboardSelection = state.isKeyboardSelection ?? false, legacySelection = displayCombinationSelection(state)) => {
   if (!legacy) return state
-  const selection = displayCombinationSelection(state)
-  const selected = ['month', 'seriesMonth'].includes(selection.mode)
+  const selected = ['month', 'seriesMonth'].includes(legacySelection.mode)
   return {
     ...state,
-    selectedIndex: selected ? selection.monthIndex : -1,
-    mode: selection.mode === 'seriesMonth' ? 'area' : selection.mode === 'month' ? 'month' : null,
-    selectedSeriesId: selection.mode === 'seriesMonth' || selection.mode === 'series' ? selection.seriesId : null,
-    isPinned: Boolean(state.pinnedSelection && sameSelection(selection, state.pinnedSelection)),
+    selectedIndex: selected ? legacySelection.monthIndex : -1,
+    mode: legacySelection.mode === 'seriesMonth' ? 'area' : legacySelection.mode === 'month' ? 'month' : null,
+    selectedSeriesId: legacySelection.mode === 'seriesMonth' || legacySelection.mode === 'series' ? legacySelection.seriesId : null,
+    isPinned: Boolean(state.pinnedSelection && sameSelection(legacySelection, state.pinnedSelection)),
     isKeyboardSelection,
   }
 }
@@ -195,11 +194,13 @@ export const buildCombinationMonthBand = ({ monthIndex, xAt }) =>
 export function reduceCombinationChartInteraction(state, event) {
   const current = interactionState(state)
   const legacy = hasLegacyInteractionFields(state)
-  const finish = (next, isKeyboardSelection = next.isKeyboardSelection ?? false) => withLegacyInteractionFields(next, legacy, isKeyboardSelection)
+  const finish = (next, isKeyboardSelection = next.isKeyboardSelection ?? false, legacySelection) => withLegacyInteractionFields(next, legacy, isKeyboardSelection, legacySelection)
+  const hasPointCount = Number.isFinite(Number(event?.pointCount))
   const pointCount = Number(event?.pointCount) || 0
   const target = selectionForEvent(event)
   if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return finish(clearedInteraction(), false)
   if (event?.type === 'pointCountChanged') {
+    if (pointCount === 0) return finish(emptyInteraction(), false)
     return finish({ ...current, previewSelection: repairSelection(current.previewSelection, pointCount), pinnedSelection: repairSelection(current.pinnedSelection, pointCount) })
   }
   if (event?.type === 'legendPreview' && event.seriesId) return finish({ ...current, previewSelection: normalizeSelection({ mode: 'series', seriesId: event.seriesId }) }, false)
@@ -208,13 +209,14 @@ export function reduceCombinationChartInteraction(state, event) {
     const selection = normalizeSelection({ mode: 'series', seriesId: event.seriesId })
     return finish(sameSelection(current.pinnedSelection, selection) ? clearedInteraction() : { ...current, previewSelection: null, pinnedSelection: selection, effect: { type: 'select' } }, false)
   }
-  if (event?.type === 'pointerMove') return finish({ ...current, previewSelection: target }, false)
+  if (event?.type === 'pointerMove') return finish({ ...current, previewSelection: target }, false, legacy && current.pinnedSelection && !current.isDragging ? current.pinnedSelection : undefined)
   if (event?.type === 'pointerLeave') return finish(current.isDragging ? current : { ...current, previewSelection: null }, current.isDragging ? current.isKeyboardSelection : false)
   if (event?.type === 'pointerDown') {
     if (!target) return finish(current, false)
     return finish({ ...current, previewSelection: target, isDragging: true, pointerStart: target }, false)
   }
   if (event?.type === 'pointerUp') {
+    if (hasPointCount && pointCount === 0) return finish(emptyInteraction(), false)
     if (!current.isDragging) return finish(current, false)
     const selection = target ?? current.previewSelection ?? current.pointerStart
     if (!selection) return finish({ ...current, isDragging: false, pointerStart: null }, false)
