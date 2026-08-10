@@ -941,6 +941,7 @@ test('combination interaction controller emits an explicit clear effect for ever
 test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {
   const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
   const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
 
   assert.match(chart, /buildCombinationAreaGeometry/)
   assert.match(chart, /resolveCombinationChartTarget/)
@@ -959,6 +960,7 @@ test('combination chart and card wire accessible interaction targets and exact e
   assert.match(chart, /:key="selectedRow\.seriesId"/)
   assert.match(chart, /class="analytics-chart-tooltip-row"[\s\S]*minHeight: '44px'/)
   assert.match(chart, /refundCoverage\?\.totalRefunded \?\?[^\n]+> 0/)
+  assert.match(chart, /v-if="\(selectedRow\.point\.refundCoverage\?\.totalRefunded \?\? selectedRow\.point\.refundCoverage\?\.refunded\) > 0"/)
   assert.match(chart, /valueFormatter\(selectedRow\.point\.refundCoverage\.totalRefunded \?\? selectedRow\.point\.refundCoverage\.refunded\)/)
   assert.match(card, /analyticsStore\.cashUseCategoryRankingItems/)
   assert.match(card, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
@@ -970,6 +972,8 @@ test('combination chart and card wire accessible interaction targets and exact e
   assert.match(card, /refund-coverage/)
   assert.match(card, /gap-positive/)
   assert.match(card, /gap-negative/)
+  assert.match(styles, /\.analytics-cash-use-legend\s*\{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;/s)
+  assert.match(styles, /@media \(max-width: 480px\)[\s\S]*\.analytics-cash-use-legend\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;/)
   assert.doesNotMatch(card, /flatMap\(\(\{ metricIds, sourceIds, candidateIds, evidenceIds \}\)/)
 
   assert.deepEqual(

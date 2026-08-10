@@ -3333,9 +3333,10 @@ body {
 .analytics-cash-use-legend {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px 12px;
     padding: 8px 16px 2px;
-    overflow-x: auto;
+    overflow-x: visible;
     font-size: 11px;
     color: var(--van-text-color-2);
     scrollbar-width: none;
@@ -3455,7 +3456,9 @@ body {
     }
 
     .analytics-cash-use-legend {
+        flex-wrap: nowrap;
         padding-inline: 12px;
+        overflow-x: auto;
     }
 
     .analytics-flow-detail-control {

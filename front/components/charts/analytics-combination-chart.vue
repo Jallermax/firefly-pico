@@ -181,7 +181,7 @@
         </span>
         <span v-if="selectedRow.point.status === 'partial'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.partial') }}</span>
         <span v-if="selectedRow.point.sourceKind && selectedRow.point.sourceKind !== 'actual'" class="analytics-chart-tooltip-qualifier">{{ selectedRow.label }}</span>
-        <span v-if="Number.isFinite(selectedRow.point.refundCoverage?.totalRefunded ?? selectedRow.point.refundCoverage?.refunded)" class="analytics-chart-tooltip-qualifier">
+        <span v-if="(selectedRow.point.refundCoverage?.totalRefunded ?? selectedRow.point.refundCoverage?.refunded) > 0" class="analytics-chart-tooltip-qualifier">
           {{ $t('analytics.cash_use.refund_coverage') }}: {{ valueFormatter(selectedRow.point.refundCoverage.totalRefunded ?? selectedRow.point.refundCoverage.refunded) }}
         </span>
       </button>
