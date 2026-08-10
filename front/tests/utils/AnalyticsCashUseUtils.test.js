@@ -122,40 +122,64 @@ test('Cash Use keeps All category descriptors bounded and renderer-ready at high
   const categoryStyles = Object.entries(styles).filter(([id]) => id.startsWith('category:'))
 
   assert.equal(categoryStyles.length, 10000)
-  assert.deepEqual(styles['category:328'], { color: 'c8', pattern: 'solid', patternVariant: 'dash', markerKind: 'area', legendOrdinal: 328 })
-  assert.deepEqual(styles['category:561'], { color: 'c1', pattern: 'solid', patternVariant: 'cross', markerKind: 'area', legendOrdinal: 561 })
+  assert.deepEqual(styles['category:328'], { color: 'c8', pattern: 'solid', patternVariant: 'stroke-08-01', strokeDasharray: '8 1', markerKind: 'area', legendOrdinal: 328 })
+  assert.deepEqual(styles['category:561'], { color: 'c1', pattern: 'solid', patternVariant: 'stroke-14-01', strokeDasharray: '14 1', markerKind: 'area', legendOrdinal: 561 })
   assert.notDeepEqual(styles['category:328'], styles['category:561'])
-  assert.ok(categoryStyles.every(([, style], index) => /^c\d+$/.test(style.color) && typeof style.patternVariant === 'string' && style.legendOrdinal === index + 1))
+  assert.ok(
+    categoryStyles.every(
+      ([, style], index) =>
+        /^c\d+$/.test(style.color) &&
+        (style.patternVariant === 'primary' || /^stroke-\d{2}-\d{2}$/.test(style.patternVariant)) &&
+        (style.patternVariant === 'primary' || AnalyticsCashUseUtils.cashUsePatternVariantStrokeDasharray(style.patternVariant) === style.strokeDasharray) &&
+        style.legendOrdinal === index + 1,
+    ),
+  )
+})
+
+test('Cash Use emits 10000 unique color pattern and stroke descriptors without cycling', () => {
+  const styles = cashUseStyles({
+    useLayers: Array.from({ length: 10000 }, (_, index) => ({ id: `category:${index + 1}`, kind: 'expenseCategory' })),
+    sourceBands: [],
+  })
+  const tuple = ({ color, pattern, strokeDasharray }) => `${color}|${pattern}|${strokeDasharray ?? 'none'}`
+  const tuples = Array.from({ length: 10000 }, (_, index) => tuple(styles[`category:${index + 1}`]))
+
+  assert.notEqual(tuples[40], tuples[360], 'category 41 and 361')
+  assert.notEqual(tuples[240], tuples[560], 'category 241 and 561')
+  assert.equal(new Set(tuples).size, 10000)
 })
 
 test('Cash Use renders overflow variants with one shared chart and legend dash encoding', () => {
   const styles = cashUseStyles({
-    useLayers: Array.from({ length: 600 }, (_, index) => ({ id: `category:${index + 1}`, kind: 'expenseCategory' })),
+    useLayers: Array.from({ length: 700 }, (_, index) => ({ id: `category:${index + 1}`, kind: 'expenseCategory' })),
     sourceBands: [],
   })
   const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
   const css = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
-  const expected = {
-    outline: ['1 0', 'linear-gradient(var(--legend-color), var(--legend-color))'],
-    offset: ['4 2', 'var(--legend-color) 0 4px, transparent 4px 6px'],
-    inverse: ['2 2', 'var(--legend-color) 0 2px, transparent 2px 4px'],
-    dense: ['1 1', 'var(--legend-color) 0 1px, transparent 1px 2px'],
-    sparse: ['6 3', 'var(--legend-color) 0 6px, transparent 6px 9px'],
-    cross: ['3 1 1 1', 'var(--legend-color) 0 3px, transparent 3px 4px, var(--legend-color) 4px 5px, transparent 5px 6px'],
-    wave: ['5 2 1 2', 'var(--legend-color) 0 5px, transparent 5px 7px, var(--legend-color) 7px 8px, transparent 8px 10px'],
-    dash: ['7 3', 'var(--legend-color) 0 7px, transparent 7px 10px'],
-  }
+  const expected = [
+    ['category:41', 'stroke-01-01', '1 1'],
+    ['category:241', 'stroke-06-01', '6 1'],
+    ['category:361', 'stroke-09-01', '9 1'],
+    ['category:561', 'stroke-14-01', '14 1'],
+    ['category:681', 'stroke-01-02', '1 2'],
+  ]
 
-  assert.equal(styles['category:328'].patternVariant, 'dash')
-  assert.equal(styles['category:561'].patternVariant, 'cross')
   assert.equal(typeof AnalyticsCashUseUtils.cashUsePatternVariantStrokeDasharray, 'function')
-  for (const [variant, [dasharray, cssEncoding]] of Object.entries(expected)) {
-    assert.equal(AnalyticsCashUseUtils.cashUsePatternVariantStrokeDasharray?.(variant), dasharray, variant)
-    const rule = css.match(new RegExp(`\\.analytics-cash-use-legend-marker\\[data-pattern-variant='${variant}'\\]\\s*\\{([^}]*)\\}`))?.[1]
-    assert.ok(rule?.includes(cssEncoding), variant)
+  for (const [id, patternVariant, strokeDasharray] of expected) {
+    const [dash, gap] = strokeDasharray.split(' ')
+    assert.equal(styles[id].patternVariant, patternVariant, id)
+    assert.equal(styles[id].strokeDasharray, strokeDasharray, id)
+    assert.equal(AnalyticsCashUseUtils.cashUsePatternVariantStrokeDasharray(patternVariant), strokeDasharray, id)
+    assert.match(css, new RegExp(`\\[data-pattern-variant\\^='stroke-${String(dash).padStart(2, '0')}-'\\] \\{ --pattern-variant-dash: ${dash}px; \\}`), `${id} dash`)
+    assert.match(css, new RegExp(`\\[data-pattern-variant\\$='-${String(gap).padStart(2, '0')}'\\] \\{ --pattern-variant-gap: ${gap}px; \\}`), `${id} gap`)
   }
-  assert.match(chart, /:stroke-dasharray="cashUsePatternVariantStrokeDasharray\(layer\.patternVariant\)"/)
-  assert.match(css, /\.analytics-cash-use-legend-marker\[data-pattern-variant\]:not\(\[data-pattern-variant='primary'\]\)::after/)
+  assert.match(chart, /:stroke-dasharray="layer\.strokeDasharray"/)
+  assert.match(chart, /const areaStroke = \(item\) => \(item\.strokeDasharray \? 'var\(--van-text-color\)' : null\)/)
+  assert.match(css, /\.analytics-cash-use-legend-marker\[data-pattern-variant\^='stroke-'\]::after/)
+  assert.match(
+    css,
+    /repeating-linear-gradient\(90deg, var\(--van-text-color\) 0 var\(--pattern-variant-dash\), transparent var\(--pattern-variant-dash\) calc\(var\(--pattern-variant-dash\) \+ var\(--pattern-variant-gap\)\)\)/,
+  )
 })
 
 test('Cash Use keeps Other distinct and ignores non-category source order', () => {

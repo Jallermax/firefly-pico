@@ -119,7 +119,7 @@
                 :d="path.d"
                 :fill="areaFill(layer, path)"
                 :stroke="areaStroke(layer)"
-                :stroke-dasharray="cashUsePatternVariantStrokeDasharray(layer.patternVariant)"
+                :stroke-dasharray="layer.strokeDasharray"
                 :data-pattern="layer.pattern"
                 :data-pattern-variant="layer.patternVariant"
                 :data-marker-kind="layer.markerKind"
@@ -134,7 +134,7 @@
                 :d="path.d"
                 :fill="paintUrl(layer.refundDescriptor.pattern)"
                 :stroke="areaStroke(layer.refundDescriptor)"
-                :stroke-dasharray="cashUsePatternVariantStrokeDasharray(layer.refundDescriptor.patternVariant)"
+                :stroke-dasharray="layer.refundDescriptor.strokeDasharray"
                 :data-pattern="layer.refundDescriptor.pattern"
                 :data-pattern-variant="layer.refundDescriptor.patternVariant"
                 :data-marker-kind="layer.refundDescriptor.markerKind"
@@ -151,7 +151,7 @@
                 :d="path.d"
                 :fill="areaFill(band, path)"
                 :stroke="areaStroke(band)"
-                :stroke-dasharray="cashUsePatternVariantStrokeDasharray(band.patternVariant)"
+                :stroke-dasharray="band.strokeDasharray"
                 :data-pattern="band.pattern"
                 :data-pattern-variant="band.patternVariant"
                 :data-marker-kind="band.markerKind"
@@ -278,7 +278,6 @@ import {
   buildCombinationSelectionDescription,
   buildCombinationSelectedSegment,
   buildCashUseRefundCoverageSeries,
-  cashUsePatternVariantStrokeDasharray,
   displayCombinationSelection,
   reduceCombinationChartInteraction,
   resolveCombinationChartTarget,
@@ -466,7 +465,7 @@ const areaFill = (item, path) => {
   if (['refund', 'accessible-savings', 'restricted-savings', 'debt', 'category-dots', 'category-horizontal', 'category-grid'].includes(item.pattern)) return paintUrl(item.pattern)
   return item.color
 }
-const areaStroke = (item) => (item.patternVariant && item.patternVariant !== 'primary' ? item.color : null)
+const areaStroke = (item) => (item.strokeDasharray ? 'var(--van-text-color)' : null)
 const hoverAreas = computed(() => [
   ...(props.series.useLayers ?? []).flatMap((layer) => [
     { seriesId: layer.id, label: layer.label ?? layer.id, points: layer.points },

@@ -5,17 +5,7 @@ const MONEY_KINDS = new Set(['available', 'savingsAccessible', 'savingsRestricte
 const SAVINGS_KINDS = new Set(['savingsAccessible', 'savingsRestricted'])
 const UNCATEGORIZED_ID = 'uncategorized'
 const CATEGORY_PATTERNS = ['solid', 'category-dots', 'category-horizontal', 'category-grid']
-const CATEGORY_PATTERN_VARIANTS = ['outline', 'offset', 'inverse', 'dense', 'sparse', 'cross', 'wave', 'dash']
-const CATEGORY_PATTERN_VARIANT_STROKE_DASHARRAYS = {
-  outline: '1 0',
-  offset: '4 2',
-  inverse: '2 2',
-  dense: '1 1',
-  sparse: '6 3',
-  cross: '3 1 1 1',
-  wave: '5 2 1 2',
-  dash: '7 3',
-}
+const CATEGORY_STROKE_COMPONENT_MAX = 16
 
 const unique = (values) => [...new Set(values.filter((value) => value !== null && value !== undefined && value !== '').map(String))].sort()
 const round = (value) => (Number.isFinite(value) ? Number(value.toFixed(8)) : value)
@@ -179,7 +169,17 @@ const repairSeriesSelection = (selection, seriesIds) => (!selection?.seriesId ||
 const hasLegacyInteractionFields = (state) => ['selectedIndex', 'mode', 'selectedSeriesId', 'isPinned', 'isKeyboardSelection'].some((key) => Object.hasOwn(state ?? {}, key))
 
 export const displayCombinationSelection = (state) => state?.previewSelection ?? state?.pinnedSelection ?? normalizeSelection()
-export const cashUsePatternVariantStrokeDasharray = (patternVariant) => CATEGORY_PATTERN_VARIANT_STROKE_DASHARRAYS[patternVariant] ?? null
+export const cashUsePatternVariantStrokeDasharray = (patternVariant) => {
+  const match = String(patternVariant ?? '').match(/^stroke-(\d{2})-(\d{2})$/)
+  return match ? `${Number(match[1])} ${Number(match[2])}` : null
+}
+
+const categoryOverflowStroke = (overflowTier) => {
+  const dash = (overflowTier % CATEGORY_STROKE_COMPONENT_MAX) + 1
+  const gap = (Math.floor(overflowTier / CATEGORY_STROKE_COMPONENT_MAX) % CATEGORY_STROKE_COMPONENT_MAX) + 1
+  const patternVariant = `stroke-${String(dash).padStart(2, '0')}-${String(gap).padStart(2, '0')}`
+  return { patternVariant, strokeDasharray: cashUsePatternVariantStrokeDasharray(patternVariant) }
+}
 
 const withLegacyInteractionFields = (state, legacy, isKeyboardSelection = state.isKeyboardSelection ?? false, legacySelection = displayCombinationSelection(state)) => {
   if (!legacy) return state
@@ -325,7 +325,7 @@ export function buildCashUseVisualStyles({ series, categoryColors, sourceColors,
     styles[layer.id] = {
       color: isOther ? semanticColors.transfer : color,
       pattern: isOther ? 'category-dots' : CATEGORY_PATTERNS[patternIndex % CATEGORY_PATTERNS.length],
-      ...(isOther ? {} : { patternVariant: overflowTier < 0 ? 'primary' : CATEGORY_PATTERN_VARIANTS[overflowTier % CATEGORY_PATTERN_VARIANTS.length], legendOrdinal: index + 1 }),
+      ...(isOther ? {} : { ...(overflowTier < 0 ? { patternVariant: 'primary' } : categoryOverflowStroke(overflowTier)), legendOrdinal: index + 1 }),
       markerKind: 'area',
     }
   })
