@@ -186,6 +186,56 @@ test('category forecast details aggregate projected activity by readable source 
   })
 })
 
+test('category forecast details collapse daily variable remainder into one readable source row', () => {
+  const projectedSources = Array.from({ length: 20 }, (_, index) => ({
+    id: `projected:variable:${index + 1}`,
+    sourceKind: 'variable',
+    sourceId: `projected:variable:${index + 1}`,
+    evidenceIds: [`history-${index + 1}`],
+    flowAmounts: { expenses: 25 },
+  }))
+  projectedSources.push({
+    id: 'projected:defined:rent:1',
+    sourceKind: 'defined',
+    sourceLabel: 'Rent',
+    sourceId: 'rent',
+    candidateId: 'defined:recurring:rent',
+    evidenceIds: ['rent-definition'],
+    flowAmounts: { expenses: 500 },
+  })
+
+  const presentation = CategoryPresentation.buildCategoryForecastDetailsPresentation({
+    point: {
+      actualToDate: 0,
+      final: 1000,
+      remainingFromToday: 1000,
+      progress: 0,
+      progressState: 'ready',
+      projectedSources,
+    },
+    labels: {
+      currentActual: 'Current actual',
+      finalForecast: 'Final forecast',
+      remainingFromToday: 'Remaining',
+      progress: 'Progress',
+      sourceKinds: { defined: 'Recurring', variable: 'Historical average' },
+    },
+    formatValue: (value) => `${value} USD`,
+    formatSignedValue: (value) => `${value > 0 ? '+' : ''}${value} USD`,
+  })
+  const sourceRows = presentation.filter(({ sourceKind }) => sourceKind)
+
+  assert.deepEqual(
+    sourceRows.map(({ id, label, value }) => ({ id, label, value })),
+    [
+      { id: 'source:defined:defined:recurring:rent', label: 'Recurring — Rent', value: '+500 USD' },
+      { id: 'source:variable:variable', label: 'Historical average', value: '+500 USD' },
+    ],
+  )
+  assert.deepEqual(sourceRows[1].evidenceIds, ['history-1', 'history-10', 'history-11', 'history-12', 'history-13', 'history-14', 'history-15', 'history-16'])
+  assert.equal(sourceRows[1].evidenceOmittedCount, 12)
+})
+
 test('category detail retains non-ready Task 8 progress state without legacy averages or pacing', () => {
   const presentation = CategoryPresentation.buildCategoryForecastDetailsPresentation({
     point: { actualToDate: -10, final: -8, remainingFromToday: 2, progress: null, progressState: 'opposite', status: 'partial' },

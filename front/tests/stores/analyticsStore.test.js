@@ -866,6 +866,8 @@ test('repairs the financial trend view and keeps balance and change selections i
 
 test('derives financial trends from the shared ledger and reconstructed balances', async () => {
   now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsCategoryAverageMonths', 3)
+  storageOverrides.set('analyticsDailyForecastMonths', 3)
   const today = now
   const checking = { ...activeAsset(), attributes: { ...activeAsset().attributes, current_balance_date: '2026-08-10' } }
   const savings = {
@@ -913,6 +915,12 @@ test('derives financial trends from the shared ledger and reconstructed balances
   assert.equal(store.financialTrend.forecast?.actualToDate?.expenses, 10)
   assert.equal(store.financialTrend.forecast?.final?.expenses, expectedForecast)
   assert.deepEqual(store.financialTrend.forecast?.actualTransactionIds?.expenses, ['current'])
+  assert.equal(
+    store.categorySummary.series.reduce((total, category) => total + (category.final ?? 0), 0),
+    expectedForecast,
+  )
+  assert.equal(store.dailyForecast.monthlyTotals.components.expenses, expectedForecast)
+  assert.equal(store.cashUseSeries.totalUses.points.at(-1).value, expectedForecast)
 })
 
 test('withholds partial category and expense calculations while retaining balance metrics', async () => {
