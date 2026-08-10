@@ -391,7 +391,7 @@ const refundHoverPoints = (points) =>
 const renderedUseLayers = computed(() =>
   (props.series.useLayers ?? []).map((layer) => ({
     ...layer,
-    refundSeriesId: `refund-coverage:${layer.id}`,
+    refundSeriesId: 'refund-coverage',
     paths: areaPaths(layer.points),
     refundPaths: areaPaths(refundCoveragePoints(layer.points), ({ refundCoverage }) => (refundCoverage?.totalRefunded ?? refundCoverage?.refunded) > 0),
   })),
@@ -463,7 +463,7 @@ const areaStroke = (item) => (item.patternVariant && item.patternVariant !== 'pr
 const hoverAreas = computed(() => [
   ...(props.series.useLayers ?? []).flatMap((layer) => [
     { seriesId: layer.id, label: layer.label ?? layer.id, points: layer.points },
-    { seriesId: `refund-coverage:${layer.id}`, label: t('analytics.cash_use.refund_coverage'), points: refundHoverPoints(layer.points) },
+    { seriesId: 'refund-coverage', label: t('analytics.cash_use.refund_coverage'), points: refundHoverPoints(layer.points) },
   ]),
   ...(props.series.sourceBands ?? []).map((band) => ({ seriesId: band.id, label: band.label ?? band.id, points: band.points })),
   {

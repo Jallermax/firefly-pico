@@ -967,6 +967,25 @@ test('combination target resolver selects the topmost painted boundary', () => {
   assert.deepEqual(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, clientPoint: { x: 130, y: 120 } }), { mode: 'seriesMonth', seriesId: 'upper', monthIndex: 1 })
 })
 
+test('Cash Use painted refund overlays resolve through the logical composite series', () => {
+  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const target = AnalyticsCashUseUtils.resolveCombinationChartTarget({
+    bounds: { left: 0, top: 0, width: 360, height: 240 },
+    viewBox: { width: 360, height: 240 },
+    padding: { left: 80, right: 80, top: 20, bottom: 20 },
+    xValues: ['2026-06', '2026-07'],
+    areas: [{ seriesId: 'refund-coverage', points: ['2026-06', '2026-07'].map((x) => ({ x, bottom: 0, top: 40, kind: 'actual' })) }],
+    yAt: (value) => 160 - value,
+    clientPoint: { x: 130, y: 120 },
+  })
+  const selected = interactionFor({ previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect: null }, { type: 'pointerDown', target })
+  const pinned = interactionFor(selected, { type: 'pointerUp', target })
+
+  assert.match(chart, /refundSeriesId: 'refund-coverage'/)
+  assert.deepEqual(target, { mode: 'seriesMonth', seriesId: 'refund-coverage', monthIndex: 1 })
+  assert.deepEqual(pinned.pinnedSelection, { mode: 'seriesMonth', seriesId: 'refund-coverage', monthIndex: 1 })
+})
+
 test('combination highlight geometry keeps the selected area and month band on one interval', () => {
   const segment = AnalyticsCashUseUtils.buildCombinationSelectedSegment({
     points: [
@@ -1131,6 +1150,16 @@ test('Cash Use refund coverage aggregates overlay values and exact actual eviden
     projectedSources: [{ id: 'food-refund-forecast' }],
     status: 'partial',
   })
+  assert.deepEqual(
+    projectLineChartSelection({
+      activation: 'pointer',
+      transactionIds: partialRefundCoverage.points[0].transactionIds,
+      kind: partialRefundCoverage.points[0].kind,
+      route: '/transactions/list',
+      toUrl: (ids) => `id=${ids.join(',')}`,
+    }),
+    { activation: 'pointer', transactionIds: ['food-purchase', 'food-refund'], route: '/transactions/list?id=food-purchase,food-refund', forecastOnly: false },
+  )
 
   const unavailableRefundCoverage = AnalyticsCashUseUtils.buildCashUseRefundCoverageSeries({
     monthKeys: ['2026-08'],
@@ -1606,4 +1635,9 @@ test('Cash Use chart source wires exact v2 legend, selected segment, and pinned 
   )
   assert.match(monthRow, /:disabled="!cell\.canNavigate"/)
   assert.match(monthRow, /@click="\$emit\('activate', \{ point: cell\.point, activation: 'pointer' \}\)"/)
+  assert.match(monthRow, /cell\.point\?\.kind === 'forecast'/)
+  assert.match(monthRow, /analytics\.cash_use\.actual_to_date/)
+  assert.match(monthRow, /analytics\.cash_use\.projected_remaining/)
+  assert.match(monthRow, /analytics\.daily_forecast\.evidence_ids/)
+  assert.match(monthRow, /const projectedEvidenceIds = \(point\)/)
 })
