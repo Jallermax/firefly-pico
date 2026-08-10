@@ -128,6 +128,36 @@ test('Cash Use keeps All category descriptors bounded and renderer-ready at high
   assert.ok(categoryStyles.every(([, style], index) => /^c\d+$/.test(style.color) && typeof style.patternVariant === 'string' && style.legendOrdinal === index + 1))
 })
 
+test('Cash Use renders overflow variants with one shared chart and legend dash encoding', () => {
+  const styles = cashUseStyles({
+    useLayers: Array.from({ length: 600 }, (_, index) => ({ id: `category:${index + 1}`, kind: 'expenseCategory' })),
+    sourceBands: [],
+  })
+  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const css = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const expected = {
+    outline: ['1 0', 'linear-gradient(var(--legend-color), var(--legend-color))'],
+    offset: ['4 2', 'var(--legend-color) 0 4px, transparent 4px 6px'],
+    inverse: ['2 2', 'var(--legend-color) 0 2px, transparent 2px 4px'],
+    dense: ['1 1', 'var(--legend-color) 0 1px, transparent 1px 2px'],
+    sparse: ['6 3', 'var(--legend-color) 0 6px, transparent 6px 9px'],
+    cross: ['3 1 1 1', 'var(--legend-color) 0 3px, transparent 3px 4px, var(--legend-color) 4px 5px, transparent 5px 6px'],
+    wave: ['5 2 1 2', 'var(--legend-color) 0 5px, transparent 5px 7px, var(--legend-color) 7px 8px, transparent 8px 10px'],
+    dash: ['7 3', 'var(--legend-color) 0 7px, transparent 7px 10px'],
+  }
+
+  assert.equal(styles['category:328'].patternVariant, 'dash')
+  assert.equal(styles['category:561'].patternVariant, 'cross')
+  assert.equal(typeof AnalyticsCashUseUtils.cashUsePatternVariantStrokeDasharray, 'function')
+  for (const [variant, [dasharray, cssEncoding]] of Object.entries(expected)) {
+    assert.equal(AnalyticsCashUseUtils.cashUsePatternVariantStrokeDasharray?.(variant), dasharray, variant)
+    const rule = css.match(new RegExp(`\\.analytics-cash-use-legend-marker\\[data-pattern-variant='${variant}'\\]\\s*\\{([^}]*)\\}`))?.[1]
+    assert.ok(rule?.includes(cssEncoding), variant)
+  }
+  assert.match(chart, /:stroke-dasharray="cashUsePatternVariantStrokeDasharray\(layer\.patternVariant\)"/)
+  assert.match(css, /\.analytics-cash-use-legend-marker\[data-pattern-variant\]:not\(\[data-pattern-variant='primary'\]\)::after/)
+})
+
 test('Cash Use keeps Other distinct and ignores non-category source order', () => {
   const entries = [
     ...rankedCategoryEntries(12),
@@ -1058,6 +1088,29 @@ test('combination interaction keeps a pinned legend series during keyboard month
   }
 })
 
+test('combination interaction repairs preview and pinned selections when the available series change', () => {
+  const initial = {
+    previewSelection: { mode: 'seriesMonth', seriesId: 'category:ten', monthIndex: 1 },
+    pinnedSelection: { mode: 'series', seriesId: 'category:five', monthIndex: -1 },
+    isDragging: true,
+    pointerStart: { mode: 'seriesMonth', seriesId: 'category:ten', monthIndex: 1 },
+    effect: null,
+  }
+  const previewRepaired = interactionFor(initial, { type: 'seriesRegistryChanged', seriesIds: ['category:five'], pointCount: 3 })
+
+  assert.equal(previewRepaired.previewSelection, null)
+  assert.deepEqual(previewRepaired.pinnedSelection, initial.pinnedSelection)
+  assert.equal(previewRepaired.pointerStart, null)
+  assert.equal(previewRepaired.isDragging, false)
+
+  const pinRepaired = interactionFor(previewRepaired, { type: 'seriesRegistryChanged', seriesIds: ['category:one'], pointCount: 3 })
+  assert.equal(pinRepaired.pinnedSelection, null)
+  assert.deepEqual(pinRepaired.effect, { type: 'clear' })
+
+  const monthSelection = { ...initial, previewSelection: null, pinnedSelection: { mode: 'month', seriesId: null, monthIndex: 2 }, isDragging: false, pointerStart: null }
+  assert.deepEqual(interactionFor(monthSelection, { type: 'seriesRegistryChanged', seriesIds: [], pointCount: 3 }).pinnedSelection, monthSelection.pinnedSelection)
+})
+
 test('Cash Use refund coverage aggregates overlay values and exact actual evidence for selection', () => {
   const refundCoverage = AnalyticsCashUseUtils.buildCashUseRefundCoverageSeries({
     monthKeys: ['2026-06', '2026-07:forecast'],
@@ -1577,6 +1630,23 @@ test('combination chart and card wire accessible interaction targets and exact e
   }
 })
 
+test('Cash Use legend debt and horizontal gradients use renderable color-stop grammar', () => {
+  const styles = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(styles, /var\(--legend-color\)\s+3px\s+4px\s+6px/)
+  assert.match(styles, /data-pattern='debt'[\s\S]*transparent 0 3px, var\(--legend-color\) 3px 4px, transparent 4px 6px/)
+  assert.match(styles, /data-pattern='category-horizontal'[\s\S]*transparent 0 3px, var\(--legend-color\) 3px 4px, transparent 4px 6px/)
+})
+
+test('Cash Use v2 series-month selection renders only its compact positioned callout', () => {
+  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+
+  assert.match(chart, /v-if="!legendItems\.length && selectionMode === 'area' && activeAreaLabel" class="analytics-combination-area-label"/)
+  assert.match(chart, /v-if="legendItems\.length && displaySelection\.mode === 'seriesMonth'" class="analytics-combination-series-month-callout" :style="areaLabelPosition"/)
+  assert.match(styles, /\.analytics-combination-series-month-callout\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*4;[^}]*pointer-events:\s*none;/s)
+})
+
 test('cash use consumes the page-level Savings view without rendering a duplicate control', () => {
   const page = readFileSync(new URL('../../pages/analytics.vue', import.meta.url), 'utf8')
   const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
@@ -1693,6 +1763,7 @@ test('Cash Use chart source wires exact v2 legend, selected segment, and pinned 
   assert.match(chart, /<analytics-cash-use-month-row/)
   assert.match(chart, /displaySelection\.mode === 'seriesMonth'/)
   assert.match(chart, /buildCombinationSelectionDescription/)
+  assert.match(chart, /seriesRegistry\.value\.map\(\(\{ id \}\) => id\)[\s\S]*type: 'seriesRegistryChanged'/)
   assert.match(chart, /description\.status === 'ready' \? t\('analytics\.common\.exact_values'\) : null/)
   assert.match(chart, /description\.canNavigate \? t\('toolbar\.transactions'\) : null/)
 

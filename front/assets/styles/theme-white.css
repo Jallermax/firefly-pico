@@ -3440,6 +3440,7 @@ body {
 .analytics-cash-use-legend-marker {
     width: 18px;
     height: 10px;
+    position: relative;
     background: var(--legend-color);
     background-color: var(--legend-color);
 }
@@ -3463,11 +3464,13 @@ body {
 }
 
 .analytics-cash-use-legend-marker[data-pattern='debt'] {
-    background-image: repeating-linear-gradient(45deg, transparent 0 3px, var(--legend-color) 3px 4px 6px), repeating-linear-gradient(-45deg, transparent 0 3px, var(--legend-color) 3px 4px 6px);
+    background-image:
+        repeating-linear-gradient(45deg, transparent 0 3px, var(--legend-color) 3px 4px, transparent 4px 6px),
+        repeating-linear-gradient(-45deg, transparent 0 3px, var(--legend-color) 3px 4px, transparent 4px 6px);
 }
 
 .analytics-cash-use-legend-marker[data-pattern='category-horizontal'] {
-    background-image: repeating-linear-gradient(0deg, transparent 0 3px, var(--legend-color) 3px 4px 6px);
+    background-image: repeating-linear-gradient(0deg, transparent 0 3px, var(--legend-color) 3px 4px, transparent 4px 6px);
 }
 
 .analytics-cash-use-legend-marker[data-marker-kind='line'] {
@@ -3480,38 +3483,57 @@ body {
     background: repeating-linear-gradient(90deg, var(--legend-color) 0 3px, transparent 3px 6px) !important;
 }
 
+.analytics-cash-use-legend-marker[data-pattern-variant]:not([data-pattern-variant='primary'])::after {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+        var(--pattern-variant-horizontal) top / 100% 1px no-repeat,
+        var(--pattern-variant-horizontal) bottom / 100% 1px no-repeat,
+        var(--pattern-variant-vertical) left / 1px 100% no-repeat,
+        var(--pattern-variant-vertical) right / 1px 100% no-repeat;
+    content: '';
+    pointer-events: none;
+}
+
 .analytics-cash-use-legend-marker[data-pattern-variant='outline'] {
-    background-color: transparent;
-    border: 1px solid var(--legend-color);
+    --pattern-variant-horizontal: linear-gradient(var(--legend-color), var(--legend-color));
+    --pattern-variant-vertical: linear-gradient(var(--legend-color), var(--legend-color));
 }
 
 .analytics-cash-use-legend-marker[data-pattern-variant='offset'] {
-    background-position: 3px 2px;
+    --pattern-variant-horizontal: repeating-linear-gradient(90deg, var(--legend-color) 0 4px, transparent 4px 6px);
+    --pattern-variant-vertical: repeating-linear-gradient(180deg, var(--legend-color) 0 4px, transparent 4px 6px);
 }
 
 .analytics-cash-use-legend-marker[data-pattern-variant='inverse'] {
-    filter: contrast(1.25) brightness(0.82);
+    --pattern-variant-horizontal: repeating-linear-gradient(90deg, var(--legend-color) 0 2px, transparent 2px 4px);
+    --pattern-variant-vertical: repeating-linear-gradient(180deg, var(--legend-color) 0 2px, transparent 2px 4px);
 }
 
 .analytics-cash-use-legend-marker[data-pattern-variant='dense'] {
-    background-size: 4px 4px;
+    --pattern-variant-horizontal: repeating-linear-gradient(90deg, var(--legend-color) 0 1px, transparent 1px 2px);
+    --pattern-variant-vertical: repeating-linear-gradient(180deg, var(--legend-color) 0 1px, transparent 1px 2px);
 }
 
 .analytics-cash-use-legend-marker[data-pattern-variant='sparse'] {
-    background-size: 9px 9px;
+    --pattern-variant-horizontal: repeating-linear-gradient(90deg, var(--legend-color) 0 6px, transparent 6px 9px);
+    --pattern-variant-vertical: repeating-linear-gradient(180deg, var(--legend-color) 0 6px, transparent 6px 9px);
 }
 
 .analytics-cash-use-legend-marker[data-pattern-variant='cross'] {
-    box-shadow: inset 0 0 0 1px var(--legend-color), 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+    --pattern-variant-horizontal: repeating-linear-gradient(90deg, var(--legend-color) 0 3px, transparent 3px 4px, var(--legend-color) 4px 5px, transparent 5px 6px);
+    --pattern-variant-vertical: repeating-linear-gradient(180deg, var(--legend-color) 0 3px, transparent 3px 4px, var(--legend-color) 4px 5px, transparent 5px 6px);
 }
 
 .analytics-cash-use-legend-marker[data-pattern-variant='wave'] {
-    background-position: 2px 1px;
-    border-radius: 8px;
+    --pattern-variant-horizontal: repeating-linear-gradient(90deg, var(--legend-color) 0 5px, transparent 5px 7px, var(--legend-color) 7px 8px, transparent 8px 10px);
+    --pattern-variant-vertical: repeating-linear-gradient(180deg, var(--legend-color) 0 5px, transparent 5px 7px, var(--legend-color) 7px 8px, transparent 8px 10px);
 }
 
 .analytics-cash-use-legend-marker[data-pattern-variant='dash'] {
-    background-size: 10px 6px;
+    --pattern-variant-horizontal: repeating-linear-gradient(90deg, var(--legend-color) 0 7px, transparent 7px 10px);
+    --pattern-variant-vertical: repeating-linear-gradient(180deg, var(--legend-color) 0 7px, transparent 7px 10px);
 }
 
 .analytics-combination-selected-month-band {
@@ -3541,6 +3563,21 @@ body {
 
 .analytics-combination-canvas {
     position: relative;
+}
+
+.analytics-combination-series-month-callout {
+    position: absolute;
+    z-index: 4;
+    max-width: 190px;
+    padding: 6px 9px;
+    border-radius: 7px;
+    color: var(--van-text-color);
+    background: var(--van-background-2);
+    box-shadow: rgba(0, 0, 0, 0.24) 0 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.25;
+    pointer-events: none;
 }
 
 .analytics-cash-use-month-row {

@@ -6,6 +6,16 @@ const SAVINGS_KINDS = new Set(['savingsAccessible', 'savingsRestricted'])
 const UNCATEGORIZED_ID = 'uncategorized'
 const CATEGORY_PATTERNS = ['solid', 'category-dots', 'category-horizontal', 'category-grid']
 const CATEGORY_PATTERN_VARIANTS = ['outline', 'offset', 'inverse', 'dense', 'sparse', 'cross', 'wave', 'dash']
+const CATEGORY_PATTERN_VARIANT_STROKE_DASHARRAYS = {
+  outline: '1 0',
+  offset: '4 2',
+  inverse: '2 2',
+  dense: '1 1',
+  sparse: '6 3',
+  cross: '3 1 1 1',
+  wave: '5 2 1 2',
+  dash: '7 3',
+}
 
 const unique = (values) => [...new Set(values.filter((value) => value !== null && value !== undefined && value !== '').map(String))].sort()
 const round = (value) => (Number.isFinite(value) ? Number(value.toFixed(8)) : value)
@@ -165,9 +175,11 @@ const repairSelection = (selection, pointCount) => {
   if (pointCount <= 0) return null
   return { ...selection, monthIndex: Math.min(pointCount - 1, Math.max(0, selection.monthIndex)) }
 }
+const repairSeriesSelection = (selection, seriesIds) => (!selection?.seriesId || seriesIds.has(selection.seriesId) ? selection : null)
 const hasLegacyInteractionFields = (state) => ['selectedIndex', 'mode', 'selectedSeriesId', 'isPinned', 'isKeyboardSelection'].some((key) => Object.hasOwn(state ?? {}, key))
 
 export const displayCombinationSelection = (state) => state?.previewSelection ?? state?.pinnedSelection ?? normalizeSelection()
+export const cashUsePatternVariantStrokeDasharray = (patternVariant) => CATEGORY_PATTERN_VARIANT_STROKE_DASHARRAYS[patternVariant] ?? null
 
 const withLegacyInteractionFields = (state, legacy, isKeyboardSelection = state.isKeyboardSelection ?? false, legacySelection = displayCombinationSelection(state)) => {
   if (!legacy) return state
@@ -216,6 +228,20 @@ export function reduceCombinationChartInteraction(state, event) {
   if (event?.type === 'pointCountChanged') {
     if (pointCount === 0) return finish(emptyInteraction(), false)
     return finish({ ...current, previewSelection: repairSelection(current.previewSelection, pointCount), pinnedSelection: repairSelection(current.pinnedSelection, pointCount) })
+  }
+  if (event?.type === 'seriesRegistryChanged') {
+    const seriesIds = new Set((event.seriesIds ?? []).map(String))
+    const previewSelection = repairSeriesSelection(current.previewSelection, seriesIds)
+    const pinnedSelection = repairSeriesSelection(current.pinnedSelection, seriesIds)
+    const pointerStart = repairSeriesSelection(current.pointerStart, seriesIds)
+    return finish({
+      ...current,
+      previewSelection,
+      pinnedSelection,
+      isDragging: Boolean(pointerStart) && current.isDragging,
+      pointerStart,
+      effect: current.pinnedSelection && !pinnedSelection ? { type: 'clear' } : null,
+    })
   }
   if (event?.type === 'legendPreview' && event.seriesId) return finish({ ...current, previewSelection: normalizeSelection({ mode: 'series', seriesId: event.seriesId }) }, false)
   if (event?.type === 'legendLeave') return finish({ ...current, previewSelection: null }, false)

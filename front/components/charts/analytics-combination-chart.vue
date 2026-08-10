@@ -119,7 +119,7 @@
                 :d="path.d"
                 :fill="areaFill(layer, path)"
                 :stroke="areaStroke(layer)"
-                :stroke-dasharray="patternVariantStrokeDasharray(layer.patternVariant)"
+                :stroke-dasharray="cashUsePatternVariantStrokeDasharray(layer.patternVariant)"
                 :data-pattern="layer.pattern"
                 :data-pattern-variant="layer.patternVariant"
                 :data-marker-kind="layer.markerKind"
@@ -134,7 +134,7 @@
                 :d="path.d"
                 :fill="paintUrl(layer.refundDescriptor.pattern)"
                 :stroke="areaStroke(layer.refundDescriptor)"
-                :stroke-dasharray="patternVariantStrokeDasharray(layer.refundDescriptor.patternVariant)"
+                :stroke-dasharray="cashUsePatternVariantStrokeDasharray(layer.refundDescriptor.patternVariant)"
                 :data-pattern="layer.refundDescriptor.pattern"
                 :data-pattern-variant="layer.refundDescriptor.patternVariant"
                 :data-marker-kind="layer.refundDescriptor.markerKind"
@@ -151,7 +151,7 @@
                 :d="path.d"
                 :fill="areaFill(band, path)"
                 :stroke="areaStroke(band)"
-                :stroke-dasharray="patternVariantStrokeDasharray(band.patternVariant)"
+                :stroke-dasharray="cashUsePatternVariantStrokeDasharray(band.patternVariant)"
                 :data-pattern="band.pattern"
                 :data-pattern-variant="band.patternVariant"
                 :data-marker-kind="band.markerKind"
@@ -211,7 +211,7 @@
           </g>
         </svg>
 
-        <div v-if="selectionMode === 'area' && activeAreaLabel" class="analytics-combination-area-label" :style="areaLabelPosition">
+        <div v-if="!legendItems.length && selectionMode === 'area' && activeAreaLabel" class="analytics-combination-area-label" :style="areaLabelPosition">
           {{ $t('analytics.cash_use.area_label', { label: activeAreaLabel }) }}
         </div>
 
@@ -247,7 +247,7 @@
           </button>
         </div>
 
-        <div v-if="displaySelection.mode === 'seriesMonth'" class="analytics-combination-series-month-callout">
+        <div v-if="legendItems.length && displaySelection.mode === 'seriesMonth'" class="analytics-combination-series-month-callout" :style="areaLabelPosition">
           {{ selectedSeriesMonthLabel }}
         </div>
 
@@ -278,6 +278,7 @@ import {
   buildCombinationSelectionDescription,
   buildCombinationSelectedSegment,
   buildCashUseRefundCoverageSeries,
+  cashUsePatternVariantStrokeDasharray,
   displayCombinationSelection,
   reduceCombinationChartInteraction,
   resolveCombinationChartTarget,
@@ -465,8 +466,6 @@ const areaFill = (item, path) => {
   if (['refund', 'accessible-savings', 'restricted-savings', 'debt', 'category-dots', 'category-horizontal', 'category-grid'].includes(item.pattern)) return paintUrl(item.pattern)
   return item.color
 }
-const patternVariantStrokeDasharray = (patternVariant) =>
-  ({ outline: '1 0', offset: '4 2', inverse: '2 2', dense: '1 1', sparse: '6 3', cross: '3 1 1 1', wave: '5 2 1 2', dash: '7 3' })[patternVariant] ?? null
 const areaStroke = (item) => (item.patternVariant && item.patternVariant !== 'primary' ? item.color : null)
 const hoverAreas = computed(() => [
   ...(props.series.useLayers ?? []).flatMap((layer) => [
@@ -718,6 +717,11 @@ const onRootKeydown = (event) => {
 const emitRow = (item, activation) => applyInteraction({ type: 'rowSelect', item, activation })
 
 watch(pointCount, () => applyInteraction({ type: 'pointCountChanged' }))
+watch(
+  () => seriesRegistry.value.map(({ id }) => id).filter(Boolean),
+  (seriesIds) => applyInteraction({ type: 'seriesRegistryChanged', seriesIds }),
+  { immediate: true },
+)
 watch(
   () => [pinnedSelection.value?.seriesId, displaySelection.value.monthIndex],
   async ([seriesId, monthIndex]) => {
