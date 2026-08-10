@@ -927,186 +927,107 @@ test('area geometry retains explicit zero points and does not bridge unavailable
   assert.match(paths[1].d, /M 290 8 L 310 8/)
 })
 
-test('combination target resolver distinguishes month corridors from interpolated filled areas', () => {
-  assert.equal(typeof AnalyticsCashUseUtils.interpolateCombinationArea, 'function')
-  assert.equal(typeof AnalyticsCashUseUtils.resolveCombinationChartTarget, 'function')
-  const input = {
-    bounds: { left: 100, top: 50, width: 800, height: 440 },
-    viewBox: { width: 400, height: 220 },
-    padding: { left: 40, right: 40, top: 20, bottom: 30 },
-    xValues: ['2026-06', '2026-07', '2026-08'],
+test('combination target resolver gives areas their right-hand month while guides take precedence', () => {
+  const targetFixture = {
+    bounds: { left: 0, top: 0, width: 360, height: 240 },
+    viewBox: { width: 360, height: 240 },
+    padding: { left: 80, right: 80, top: 20, bottom: 20 },
+    xValues: ['2026-05', '2026-06', '2026-07'],
     areas: [
       {
-        seriesId: 'expense:housing',
-        points: [
-          { x: '2026-06', bottom: 0, top: 100 },
-          { x: '2026-07', bottom: 0, top: 100 },
-          { x: '2026-08', bottom: 0, top: 100 },
-        ],
+        seriesId: 'category:housing',
+        points: ['2026-05', '2026-06', '2026-07'].map((x, index) => ({ x, bottom: 0, top: 40, kind: index === 2 ? 'forecast' : 'actual' })),
       },
     ],
-    yAt: (value) => 190 - value,
-    pointerType: 'mouse',
+    yAt: (value) => 160 - value,
   }
+  const resolveTarget = ({ x, y, pointerType = 'mouse' }) => AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...targetFixture, clientPoint: { x, y }, pointerType })
 
-  assert.deepEqual(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, clientPoint: { x: 500, y: 250 } }), { mode: 'month', index: 1 })
-  assert.deepEqual(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, clientPoint: { x: 340, y: 330 } }), {
-    mode: 'area',
-    index: 1,
-    seriesId: 'expense:housing',
-  })
-  assert.equal(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, clientPoint: { x: 340, y: 80 } }), null)
-  assert.deepEqual(
-    AnalyticsCashUseUtils.interpolateCombinationArea({
-      points: [
-        { x: '2026-06', bottom: 0, top: 100 },
-        { x: '2026-07', bottom: 20, top: 200 },
-      ],
-      xValues: ['2026-06', '2026-07'],
-      position: 0.5,
-    }),
-    {
-      bottom: 10,
-      top: 150,
-      point: null,
-      leftPoint: { x: '2026-06', bottom: 0, top: 100 },
-      rightPoint: { x: '2026-07', bottom: 20, top: 200 },
-    },
-  )
+  assert.deepEqual(resolveTarget({ x: 130, y: 120 }), { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 1 })
+  assert.deepEqual(resolveTarget({ x: 179, y: 120 }), { mode: 'month', seriesId: null, monthIndex: 1 })
+  assert.deepEqual(resolveTarget({ x: 80, y: 120 }), { mode: 'month', seriesId: null, monthIndex: 0 })
+  assert.deepEqual(resolveTarget({ x: 230, y: 120 }), { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 2 })
+  assert.deepEqual(resolveTarget({ x: 158, y: 120, pointerType: 'touch' }), { mode: 'month', seriesId: null, monthIndex: 1 })
+  assert.deepEqual(resolveTarget({ x: 157, y: 120, pointerType: 'touch' }), { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 1 })
 })
 
-test('combination target resolver uses visual paint order for shared boundaries and keeps touch guides 44px wide', () => {
+test('combination target resolver selects the topmost painted boundary', () => {
   const input = {
-    bounds: { left: 0, top: 0, width: 400, height: 220 },
-    viewBox: { width: 400, height: 220 },
-    padding: { left: 40, right: 40, top: 20, bottom: 30 },
-    xValues: ['one', 'two', 'three'],
+    bounds: { left: 0, top: 0, width: 360, height: 240 },
+    viewBox: { width: 360, height: 240 },
+    padding: { left: 80, right: 80, top: 20, bottom: 20 },
+    xValues: ['may', 'june', 'july'],
     areas: [
-      { seriesId: 'lower', points: ['one', 'two', 'three'].map((x) => ({ x, bottom: 0, top: 100 })) },
-      { seriesId: 'upper', points: ['one', 'two', 'three'].map((x) => ({ x, bottom: 100, top: 200 })) },
-      { seriesId: 'negative-gap', points: ['one', 'two', 'three'].map((x) => ({ x, bottom: -50, top: 0 })) },
+      { seriesId: 'lower', points: ['may', 'june', 'july'].map((x) => ({ x, bottom: 0, top: 40 })) },
+      { seriesId: 'upper', points: ['may', 'june', 'july'].map((x) => ({ x, bottom: 40, top: 80 })) },
     ],
-    yAt: (value) => 190 - value,
+    yAt: (value) => 160 - value,
   }
 
-  assert.deepEqual(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, pointerType: 'mouse', clientPoint: { x: 120, y: 90 } }), {
-    mode: 'area',
-    index: 1,
-    seriesId: 'upper',
-  })
-  assert.deepEqual(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, pointerType: 'mouse', clientPoint: { x: 120, y: 215 } }), {
-    mode: 'area',
-    index: 1,
-    seriesId: 'negative-gap',
-  })
-  assert.deepEqual(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, pointerType: 'touch', clientPoint: { x: 179, y: 90 } }), { mode: 'month', index: 1 })
+  assert.deepEqual(AnalyticsCashUseUtils.resolveCombinationChartTarget({ ...input, clientPoint: { x: 130, y: 120 } }), { mode: 'seriesMonth', seriesId: 'upper', monthIndex: 1 })
 })
 
-test('combination interaction controller pins a point and dismisses it completely on a second tap', () => {
-  const initial = {
-    selectedIndex: -1,
-    mode: null,
-    selectedSeriesId: null,
-    isPinned: false,
-    isKeyboardSelection: false,
-    isDragging: false,
-    pointerStartedOnPinnedIndex: -1,
-    pointerStartedOnPinnedSeriesId: null,
-    effect: null,
-  }
-  let state = interactionFor(initial, { type: 'pointerDown', index: 1, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 1, mode: 'month', isDragging: true })
-  state = interactionFor(state, { type: 'pointerUp', index: 1, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 1, mode: 'month', isPinned: true, effect: { type: 'select' } })
-  state = interactionFor(state, { type: 'pointerDown', index: 1, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 1, mode: 'month', isDragging: true, pointerStartedOnPinnedIndex: 1 })
-  state = interactionFor(state, { type: 'pointerUp', index: 1, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, effect: { type: 'clear' } })
+test('combination highlight geometry keeps the selected area and month band on one interval', () => {
+  const segment = AnalyticsCashUseUtils.buildCombinationSelectedSegment({
+    points: [
+      { x: 'may', top: 90, bottom: 160 },
+      { x: 'june', top: 80, bottom: 150 },
+    ],
+    xValues: ['may', 'june'],
+    monthIndex: 1,
+    xAt: (index) => 180 + index * 100,
+    yAt: (value) => value,
+  })
+  const band = AnalyticsCashUseUtils.buildCombinationMonthBand({ monthIndex: 2, xAt: (index) => 80 + index * 100 })
+
+  assert.equal(segment.d, 'M 180 90 L 280 80 L 280 150 L 180 160 Z')
+  assert.deepEqual(band, { x: 180, width: 100, monthIndex: 2 })
+  assert.equal(AnalyticsCashUseUtils.buildCombinationSelectedSegment({ points: [], xValues: [], monthIndex: 0, xAt: () => 0, yAt: () => 0 }), null)
+  assert.equal(AnalyticsCashUseUtils.buildCombinationMonthBand({ monthIndex: 0, xAt: () => 0 }), null)
 })
 
-test('combination interaction controller owns pointer, keyboard, outside, and row-selection transitions', () => {
-  const initial = {
-    selectedIndex: -1,
-    mode: null,
-    selectedSeriesId: null,
-    isPinned: false,
-    isKeyboardSelection: false,
-    isDragging: false,
-    pointerStartedOnPinnedIndex: -1,
-    pointerStartedOnPinnedSeriesId: null,
-    effect: null,
-  }
-  let state = interactionFor(initial, { type: 'pointerMove', index: 2, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 2, mode: 'month' })
-  state = interactionFor(state, { type: 'pointerLeave', pointCount: 3 })
-  assert.deepEqual(state, initial)
-  state = interactionFor(initial, { type: 'key', key: 'ArrowRight', pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 0, mode: 'month', isKeyboardSelection: true, effect: { type: 'select' } })
+test('combination interaction separates legend previews from pinned selections', () => {
+  const initial = { previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect: null }
+  let state = interactionFor(initial, { type: 'legendPreview', seriesId: 'category:housing' })
+  assert.deepEqual(AnalyticsCashUseUtils.displayCombinationSelection(state), { mode: 'series', seriesId: 'category:housing', monthIndex: -1 })
+
+  state = interactionFor(state, { type: 'legendToggle', seriesId: 'category:housing' })
+  assert.deepEqual(state.pinnedSelection, { mode: 'series', seriesId: 'category:housing', monthIndex: -1 })
+
+  state = interactionFor(state, { type: 'pointerMove', target: { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 2 } })
+  assert.equal(AnalyticsCashUseUtils.displayCombinationSelection(state).monthIndex, 2)
+
+  state = interactionFor(state, { type: 'pointerLeave' })
+  assert.deepEqual(AnalyticsCashUseUtils.displayCombinationSelection(state), state.pinnedSelection)
+  assert.deepEqual(interactionFor(state, { type: 'legendToggle', seriesId: 'category:housing' }), { ...initial, effect: { type: 'clear' } })
+})
+
+test('combination interaction supports touch pins, month navigation, repair, dismissal, and row activation', () => {
+  const initial = { previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect: null }
+  const target = { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 2 }
+  let state = interactionFor(initial, { type: 'pointerDown', target, pointerType: 'touch' })
+  assert.deepEqual(state, { ...initial, previewSelection: target, isDragging: true, pointerStart: target })
+  state = interactionFor(state, { type: 'pointerUp', target, pointerType: 'touch' })
+  assert.deepEqual(state.pinnedSelection, target)
+  assert.equal(state.effect.type, 'select')
+
+  state = interactionFor(initial, { type: 'key', key: 'Home', pointCount: 3 })
+  assert.deepEqual(AnalyticsCashUseUtils.displayCombinationSelection(state), { mode: 'month', seriesId: null, monthIndex: 0 })
   state = interactionFor(state, { type: 'key', key: 'End', pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 2, mode: 'month', isKeyboardSelection: true, effect: { type: 'select' } })
+  assert.equal(AnalyticsCashUseUtils.displayCombinationSelection(state).monthIndex, 2)
+  state = interactionFor(state, { type: 'key', key: 'ArrowLeft', pointCount: 3 })
+  assert.equal(AnalyticsCashUseUtils.displayCombinationSelection(state).monthIndex, 1)
+  state = interactionFor(state, { type: 'key', key: 'ArrowRight', pointCount: 3 })
+  assert.equal(AnalyticsCashUseUtils.displayCombinationSelection(state).monthIndex, 2)
   state = interactionFor(state, { type: 'key', key: 'Enter', pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 2, mode: 'month', isPinned: true, isKeyboardSelection: true, effect: { type: 'select' } })
-  const item = { seriesId: 'category:food', point: { transactionIds: ['actual-food'] } }
-  state = interactionFor(state, { type: 'rowSelect', item, activation: 'keyboard', pointCount: 3 })
-  assert.deepEqual(state.effect, { type: 'selectRow', item, activation: 'keyboard' })
-  state = interactionFor(state, { type: 'outside', pointCount: 3 })
-  assert.deepEqual(state, { ...initial, effect: { type: 'clear' } })
-})
+  assert.deepEqual(state.pinnedSelection, { mode: 'month', seriesId: null, monthIndex: 2 })
+  state = interactionFor(state, { type: 'pointCountChanged', pointCount: 2 })
+  assert.deepEqual(state.pinnedSelection, { mode: 'month', seriesId: null, monthIndex: 1 })
 
-test('combination interaction controller previews and pins area or month targets without mode leakage', () => {
-  const initial = {
-    selectedIndex: -1,
-    mode: null,
-    selectedSeriesId: null,
-    isPinned: false,
-    isKeyboardSelection: false,
-    isDragging: false,
-    pointerStartedOnPinnedIndex: -1,
-    pointerStartedOnPinnedSeriesId: null,
-    effect: null,
-  }
-  const area = { mode: 'area', index: 0, seriesId: 'expense:housing' }
-  let state = interactionFor(initial, { type: 'pointerMove', target: area, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 0, mode: 'area', selectedSeriesId: 'expense:housing' })
-  state = interactionFor(state, { type: 'pointerDown', target: area, pointCount: 3 })
-  state = interactionFor(state, { type: 'pointerUp', target: area, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 0, mode: 'area', selectedSeriesId: 'expense:housing', isPinned: true, effect: { type: 'select' } })
-  assert.deepEqual(interactionFor(state, { type: 'pointerMove', target: { mode: 'month', index: 2 }, pointCount: 3 }), { ...state, effect: null })
-  state = interactionFor(state, { type: 'pointerDown', target: area, pointCount: 3 })
-  state = interactionFor(state, { type: 'pointerUp', target: area, pointCount: 3 })
-  assert.deepEqual(state, { ...initial, effect: { type: 'clear' } })
-
-  state = interactionFor(initial, { type: 'key', key: 'End', pointCount: 3 })
-  assert.deepEqual(state, { ...initial, selectedIndex: 2, mode: 'month', isKeyboardSelection: true, effect: { type: 'select' } })
-})
-
-test('combination interaction controller emits an explicit clear effect for every dismissal path', () => {
-  const selected = {
-    selectedIndex: 1,
-    mode: 'month',
-    selectedSeriesId: null,
-    isPinned: true,
-    isKeyboardSelection: true,
-    isDragging: false,
-    pointerStartedOnPinnedIndex: -1,
-    pointerStartedOnPinnedSeriesId: null,
-    effect: { type: 'select' },
-  }
-  const cleared = {
-    selectedIndex: -1,
-    mode: null,
-    selectedSeriesId: null,
-    isPinned: false,
-    isKeyboardSelection: false,
-    isDragging: false,
-    pointerStartedOnPinnedIndex: -1,
-    pointerStartedOnPinnedSeriesId: null,
-    effect: { type: 'clear' },
-  }
-
-  assert.deepEqual(interactionFor(selected, { type: 'clear', pointCount: 3 }), cleared)
-  assert.deepEqual(interactionFor(selected, { type: 'outside', pointCount: 3 }), cleared)
-  assert.deepEqual(interactionFor(selected, { type: 'key', key: 'Escape', pointCount: 3 }), cleared)
+  const item = { seriesId: 'category:housing', point: { transactionIds: ['housing-1'] } }
+  assert.deepEqual(interactionFor(state, { type: 'rowSelect', item, activation: 'keyboard' }).effect, { type: 'selectRow', item, activation: 'keyboard' })
+  assert.deepEqual(interactionFor(state, { type: 'outside' }), { ...initial, effect: { type: 'clear' } })
+  assert.deepEqual(interactionFor(state, { type: 'key', key: 'Escape' }), { ...initial, effect: { type: 'clear' } })
 })
 
 test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {

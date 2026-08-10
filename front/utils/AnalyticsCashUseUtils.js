@@ -92,100 +92,133 @@ export function resolveCombinationChartTarget({ clientPoint, bounds, viewBox, pa
   const svgX = ((clientPoint.x - bounds.left) / bounds.width) * viewBox.width
   const svgY = ((clientPoint.y - bounds.top) / bounds.height) * viewBox.height
   const innerWidth = viewBox.width - padding.left - padding.right
-  if (!Number.isFinite(svgX) || !Number.isFinite(svgY) || svgX < padding.left || svgX > viewBox.width - padding.right || svgY < 0 || svgY > viewBox.height) return null
+  if (
+    !Number.isFinite(svgX) ||
+    !Number.isFinite(svgY) ||
+    !Number.isFinite(innerWidth) ||
+    innerWidth <= 0 ||
+    svgX < padding.left ||
+    svgX > viewBox.width - padding.right ||
+    svgY < 0 ||
+    svgY > viewBox.height
+  )
+    return null
   const position = xValues.length > 1 ? ((svgX - padding.left) / innerWidth) * (xValues.length - 1) : 0
-  const index = Math.min(xValues.length - 1, Math.max(0, Math.round(position)))
-  const guideSvgX = padding.left + (index / Math.max(1, xValues.length - 1)) * innerWidth
+  const guideIndex = Math.min(xValues.length - 1, Math.max(0, Math.round(position)))
+  const guideSvgX = padding.left + (guideIndex / Math.max(1, xValues.length - 1)) * innerWidth
   const guideClientX = bounds.left + (guideSvgX / viewBox.width) * bounds.width
-  if (Math.abs(clientPoint.x - guideClientX) <= (pointerType === 'touch' ? 22 : 10)) return { mode: 'month', index }
+  if (Math.abs(clientPoint.x - guideClientX) <= (pointerType === 'touch' ? 22 : 10)) return { mode: 'month', seriesId: null, monthIndex: guideIndex }
 
+  const monthIndex = Math.ceil(Math.min(xValues.length - 1, Math.max(0, position)))
+  if (monthIndex <= 0) return null
   for (let areaIndex = areas.length - 1; areaIndex >= 0; areaIndex--) {
     const area = areas[areaIndex]
     const interpolated = interpolateCombinationArea({ points: area.points, xValues, position })
     if (!interpolated) continue
     const y1 = yAt(interpolated.bottom)
     const y2 = yAt(interpolated.top)
-    if (svgY >= Math.min(y1, y2) && svgY <= Math.max(y1, y2)) return { mode: 'area', index, seriesId: area.seriesId }
+    if (svgY >= Math.min(y1, y2) && svgY <= Math.max(y1, y2)) return { mode: 'seriesMonth', seriesId: area.seriesId, monthIndex }
   }
   return null
 }
 
-const clearedInteraction = (effect = null) => ({
-  selectedIndex: -1,
-  mode: null,
-  selectedSeriesId: null,
-  isPinned: false,
-  isKeyboardSelection: false,
-  isDragging: false,
-  pointerStartedOnPinnedIndex: -1,
-  pointerStartedOnPinnedSeriesId: null,
-  effect,
-})
-const dismissedInteraction = () => clearedInteraction({ type: 'clear' })
-const interactionIndex = (index, pointCount) => (pointCount > 0 ? Math.min(pointCount - 1, Math.max(0, index)) : -1)
-const eventTarget = (event, pointCount) => {
-  if (event?.target?.mode === 'area' && Number.isInteger(event.target.index) && event.target.seriesId)
-    return { mode: 'area', index: interactionIndex(event.target.index, pointCount), seriesId: String(event.target.seriesId) }
-  if (event?.target?.mode === 'month' && Number.isInteger(event.target.index)) return { mode: 'month', index: interactionIndex(event.target.index, pointCount), seriesId: null }
-  const rawIndex = Number(event?.index)
-  return Number.isInteger(rawIndex) && rawIndex >= 0 ? { mode: 'month', index: interactionIndex(rawIndex, pointCount), seriesId: null } : null
+const normalizeSelection = (selection = {}) => {
+  const { mode, seriesId = null, monthIndex = -1 } = selection ?? {}
+  const normalizedMode = ['month', 'series', 'seriesMonth'].includes(mode) ? mode : null
+  return {
+    mode: normalizedMode,
+    seriesId: normalizedMode === 'month' ? null : normalizedMode && seriesId ? String(seriesId) : null,
+    monthIndex: normalizedMode === 'series' ? -1 : Number.isInteger(monthIndex) ? monthIndex : -1,
+  }
 }
-const withTarget = (state, target) => ({ ...state, selectedIndex: target.index, mode: target.mode, selectedSeriesId: target.seriesId, isKeyboardSelection: false })
+const selectionOrNull = (selection) => {
+  const normalized = normalizeSelection(selection)
+  return normalized.mode ? normalized : null
+}
+const emptyInteraction = (effect = null) => ({ previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect })
+const interactionState = (state) => ({
+  ...emptyInteraction(),
+  ...state,
+  previewSelection: selectionOrNull(state?.previewSelection),
+  pinnedSelection: selectionOrNull(state?.pinnedSelection),
+  effect: null,
+})
+const clearedInteraction = () => emptyInteraction({ type: 'clear' })
+const sameSelection = (left, right) => left?.mode === right?.mode && left?.seriesId === right?.seriesId && left?.monthIndex === right?.monthIndex
+const selectionForEvent = (event) => selectionOrNull(event?.target ?? (Number.isInteger(event?.index) ? { mode: 'month', monthIndex: event.index } : null))
+const repairSelection = (selection, pointCount) => {
+  if (!selection || selection.mode === 'series') return selection
+  if (pointCount <= 0) return null
+  return { ...selection, monthIndex: Math.min(pointCount - 1, Math.max(0, selection.monthIndex)) }
+}
+
+export const displayCombinationSelection = (state) => state?.previewSelection ?? state?.pinnedSelection ?? normalizeSelection()
+
+export function buildCombinationSelectedSegment({ points = [], xValues = [], monthIndex, xAt, yAt }) {
+  if (!Number.isInteger(monthIndex) || monthIndex <= 0 || typeof xAt !== 'function' || typeof yAt !== 'function') return null
+  const pointByX = new Map(points.map((point) => [point.x, point]))
+  const previous = pointByX.get(xValues[monthIndex - 1])
+  const current = pointByX.get(xValues[monthIndex])
+  if (![previous, current].every((point) => Number.isFinite(point?.top) && Number.isFinite(point?.bottom))) return null
+  return {
+    d: areaPath({
+      segment: [
+        { index: monthIndex - 1, point: previous },
+        { index: monthIndex, point: current },
+      ],
+      xAt,
+      yAt,
+      isolatedWidth: 0,
+    }),
+    monthIndex,
+  }
+}
+
+export const buildCombinationMonthBand = ({ monthIndex, xAt }) =>
+  monthIndex <= 0 || typeof xAt !== 'function' ? null : { x: xAt(monthIndex - 1), width: xAt(monthIndex) - xAt(monthIndex - 1), monthIndex }
 
 export function reduceCombinationChartInteraction(state, event) {
-  const current = { ...clearedInteraction(), ...state, effect: null }
+  const current = interactionState(state)
   const pointCount = Number(event?.pointCount) || 0
-  const target = eventTarget(event, pointCount)
-  if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return dismissedInteraction()
+  const target = selectionForEvent(event)
+  if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return clearedInteraction()
   if (event?.type === 'pointCountChanged') {
-    if (pointCount === 0) return clearedInteraction()
-    return current.selectedIndex >= pointCount ? { ...current, selectedIndex: pointCount - 1 } : current
+    return { ...current, previewSelection: repairSelection(current.previewSelection, pointCount), pinnedSelection: repairSelection(current.pinnedSelection, pointCount) }
   }
-  if (event?.type === 'pointerMove') {
-    if (current.isPinned && !current.isDragging) return current
-    return target ? withTarget(current, target) : clearedInteraction()
+  if (event?.type === 'legendPreview' && event.seriesId) return { ...current, previewSelection: normalizeSelection({ mode: 'series', seriesId: event.seriesId }) }
+  if (event?.type === 'legendLeave') return { ...current, previewSelection: null }
+  if (event?.type === 'legendToggle' && event.seriesId) {
+    const selection = normalizeSelection({ mode: 'series', seriesId: event.seriesId })
+    return sameSelection(current.pinnedSelection, selection) ? clearedInteraction() : { ...current, previewSelection: null, pinnedSelection: selection, effect: { type: 'select' } }
   }
-  if (event?.type === 'pointerLeave') return !current.isPinned && !current.isDragging ? clearedInteraction() : current
+  if (event?.type === 'pointerMove') return { ...current, previewSelection: target }
+  if (event?.type === 'pointerLeave') return current.isDragging ? current : { ...current, previewSelection: null }
   if (event?.type === 'pointerDown') {
     if (!target) return current
-    const samePinnedTarget = current.isPinned && current.selectedIndex === target.index && current.mode === target.mode && current.selectedSeriesId === target.seriesId
-    return {
-      ...withTarget(current, target),
-      isPinned: false,
-      isDragging: true,
-      pointerStartedOnPinnedIndex: samePinnedTarget ? target.index : -1,
-      pointerStartedOnPinnedSeriesId: samePinnedTarget ? target.seriesId : null,
-    }
+    return { ...current, previewSelection: target, isDragging: true, pointerStart: target }
   }
   if (event?.type === 'pointerUp') {
     if (!current.isDragging) return current
-    const selectedTarget = target ?? (current.selectedIndex >= 0 ? { mode: current.mode, index: current.selectedIndex, seriesId: current.selectedSeriesId } : null)
-    if (!selectedTarget) return clearedInteraction()
-    if (current.pointerStartedOnPinnedIndex === selectedTarget.index && current.pointerStartedOnPinnedSeriesId === selectedTarget.seriesId) return dismissedInteraction()
-    return {
-      ...withTarget(current, selectedTarget),
-      isPinned: true,
-      isDragging: false,
-      pointerStartedOnPinnedIndex: -1,
-      pointerStartedOnPinnedSeriesId: null,
-      effect: { type: 'select' },
-    }
+    const selection = target ?? current.previewSelection ?? current.pointerStart
+    if (!selection) return { ...current, isDragging: false, pointerStart: null }
+    if (sameSelection(current.pinnedSelection, selection) && sameSelection(current.pointerStart, selection)) return clearedInteraction()
+    return { ...current, previewSelection: null, pinnedSelection: selection, isDragging: false, pointerStart: null, effect: { type: 'select' } }
   }
   if (event?.type === 'key') {
-    if (event.key === 'Escape') return dismissedInteraction()
+    if (event.key === 'Escape') return clearedInteraction()
     if (pointCount === 0) return current
     if (event.key === 'Enter') {
-      const selectedIndex = current.selectedIndex < 0 ? 0 : current.selectedIndex
-      return { ...current, selectedIndex, mode: 'month', selectedSeriesId: null, isPinned: true, isKeyboardSelection: true, effect: { type: 'select' } }
+      const selection = selectionOrNull(displayCombinationSelection(current)) ?? normalizeSelection({ mode: 'month', monthIndex: 0 })
+      return { ...current, previewSelection: null, pinnedSelection: repairSelection(selection, pointCount), effect: { type: 'select' } }
     }
-    let selectedIndex = current.selectedIndex
-    if (event.key === 'ArrowLeft') selectedIndex--
-    else if (event.key === 'ArrowRight') selectedIndex++
-    else if (event.key === 'Home') selectedIndex = 0
-    else if (event.key === 'End') selectedIndex = pointCount - 1
+    const currentSelection = selectionOrNull(displayCombinationSelection(current))
+    let monthIndex = currentSelection?.mode === 'seriesMonth' || currentSelection?.mode === 'month' ? currentSelection.monthIndex : 0
+    if (event.key === 'ArrowLeft') monthIndex--
+    else if (event.key === 'ArrowRight') monthIndex++
+    else if (event.key === 'Home') monthIndex = 0
+    else if (event.key === 'End') monthIndex = pointCount - 1
     else return current
-    if (current.selectedIndex < 0 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) selectedIndex = 0
-    return { ...current, selectedIndex: interactionIndex(selectedIndex, pointCount), mode: 'month', selectedSeriesId: null, isKeyboardSelection: true, effect: { type: 'select' } }
+    return { ...current, previewSelection: normalizeSelection({ mode: 'month', monthIndex: Math.min(pointCount - 1, Math.max(0, monthIndex)) }), effect: { type: 'select' } }
   }
   if (event?.type === 'rowSelect') return { ...current, effect: { type: 'selectRow', item: event.item, activation: event.activation } }
   return current
