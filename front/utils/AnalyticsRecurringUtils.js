@@ -751,10 +751,95 @@ const amountEnvelopesOverlap = (left, right) => {
   return leftEnvelope.min <= rightEnvelope.max && rightEnvelope.min <= leftEnvelope.max
 }
 
+const mergeCandidateEvidence = (target, candidate, { fillIdentity = true } = {}) => {
+  target.evidence = {
+    entryIds: unique([...target.evidence.entryIds, ...candidate.evidence.entryIds]).sort(),
+    transactionIds: unique([...target.evidence.transactionIds, ...candidate.evidence.transactionIds]).sort(),
+    dates: unique([...target.evidence.dates, ...candidate.evidence.dates]).sort(),
+  }
+  target.expectedDates = unique([...(target.expectedDates ?? []), ...(candidate.expectedDates ?? [])]).sort()
+  target.suppressedCandidateIds = unique([...(target.suppressedCandidateIds ?? []), ...(candidate.suppressedCandidateIds ?? []), candidate.id]).sort()
+  if (fillIdentity) {
+    target.identity = Object.fromEntries(Object.keys(target.identity).map((key) => [key, target.identity[key] ?? candidate.identity[key]]))
+    target.signature = signatureOf(target.identity)
+  }
+}
+
+const canonicalDefinedCandidates = (defined) => {
+  const sourcePriority = { recurringTransaction: 0, subscription: 1 }
+  const result = []
+  for (const candidate of [...defined].sort((left, right) => (sourcePriority[left.source.type] ?? 9) - (sourcePriority[right.source.type] ?? 9) || left.id.localeCompare(right.id))) {
+    const match = result.find(
+      (existing) =>
+        compatibleIdentity(existing.identity, candidate.identity) &&
+        cadencePhaseCompatible(existing.cadence, candidate.cadence, Math.min(existing.matching?.dateWindowDays ?? 4, candidate.matching?.dateWindowDays ?? 4)) &&
+        amountEnvelopesOverlap(existing, candidate),
+    )
+    if (!match) {
+      result.push({ ...structuredClone(candidate), suppressedCandidateIds: unique(candidate.suppressedCandidateIds ?? []).sort() })
+      continue
+    }
+    mergeCandidateEvidence(match, candidate)
+  }
+  return result
+}
+
+const routeCompatible = (left, right) => {
+  if (left.direction !== right.direction) return false
+  const keys = ['sourceAccountId', 'sourceKind', 'destinationAccountId', 'destinationKind']
+  if (keys.some((key) => left[key] && right[key] && left[key] !== right[key])) return false
+  return keys.some((key) => left[key] && right[key] && left[key] === right[key])
+}
+
+const parentEvidenceKey = (candidate) => {
+  const transactionIds = unique(candidate.evidence?.transactionIds ?? []).sort()
+  return transactionIds.length >= THRESHOLDS.occurrences ? transactionIds.join('|') : null
+}
+
+const bundleAmountCandidate = (candidates) => {
+  const values = candidates.map(({ expectedAmount }) => expectedAmount)
+  if (values.some(({ value, min, max }) => !Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max))) return null
+  return {
+    matching: {
+      amountEnvelope: {
+        min: values.reduce((total, { min }) => total + min, 0),
+        max: values.reduce((total, { max }) => total + max, 0),
+      },
+    },
+  }
+}
+
 export function mergeRecurringCandidates({ defined = [], inferred = [] }) {
   const inferredCandidates = Array.isArray(inferred) ? inferred : (inferred?.candidates ?? [])
-  const result = defined.map((candidate) => structuredClone(candidate)).sort((left, right) => left.id.localeCompare(right.id))
-  for (const candidate of [...inferredCandidates].sort((left, right) => right.confidence.score - left.confidence.score || left.id.localeCompare(right.id))) {
+  const result = canonicalDefinedCandidates(defined)
+  const remainingInferred = new Map(inferredCandidates.map((candidate) => [candidate.id, candidate]))
+  for (const definedCandidate of result) {
+    const groups = new Map()
+    for (const candidate of remainingInferred.values()) {
+      const parentKey = parentEvidenceKey(candidate)
+      if (
+        !parentKey ||
+        !routeCompatible(definedCandidate.identity, candidate.identity) ||
+        !cadencePhaseCompatible(definedCandidate.cadence, candidate.cadence, Math.min(definedCandidate.matching?.dateWindowDays ?? 4, candidate.matching?.dateWindowDays ?? 4))
+      )
+        continue
+      groups.set(parentKey, [...(groups.get(parentKey) ?? []), candidate])
+    }
+    const bundle = [...groups.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, candidates]) => candidates.sort((left, right) => right.expectedAmount.value - left.expectedAmount.value || left.id.localeCompare(right.id)))
+      .find((candidates) => {
+        const aggregate = bundleAmountCandidate(candidates)
+        return candidates.length > 1 && aggregate && amountEnvelopesOverlap(definedCandidate, aggregate)
+      })
+    if (!bundle) continue
+    bundle.forEach((candidate) => {
+      mergeCandidateEvidence(definedCandidate, candidate, { fillIdentity: false })
+      remainingInferred.delete(candidate.id)
+    })
+    definedCandidate.inferenceBundle = { candidateIds: bundle.map(({ id }) => id).sort(), candidates: structuredClone(bundle) }
+  }
+  for (const candidate of [...remainingInferred.values()].sort((left, right) => right.confidence.score - left.confidence.score || left.id.localeCompare(right.id))) {
     const match = result.find(
       (definedCandidate) =>
         definedCandidate.source.authoritative &&
@@ -766,13 +851,7 @@ export function mergeRecurringCandidates({ defined = [], inferred = [] }) {
       result.push(structuredClone(candidate))
       continue
     }
-    match.evidence = {
-      entryIds: unique([...match.evidence.entryIds, ...candidate.evidence.entryIds]).sort(),
-      transactionIds: unique([...match.evidence.transactionIds, ...candidate.evidence.transactionIds]).sort(),
-      dates: unique([...match.evidence.dates, ...candidate.evidence.dates]).sort(),
-    }
-    match.identity = Object.fromEntries(Object.keys(match.identity).map((key) => [key, match.identity[key] ?? candidate.identity[key]]))
-    match.signature = signatureOf(match.identity)
+    mergeCandidateEvidence(match, candidate)
     match.identityVariants = structuredClone(candidate.identityVariants ?? [])
     match.inference = { id: candidate.id, confidence: candidate.confidence }
   }
@@ -828,6 +907,32 @@ const entryMatches = (candidate, entry) => {
   return amount >= envelope.min && amount <= envelope.max
 }
 
+const splitBundleMatch = ({ candidate, actual, expectedDate, usedEntries }) => {
+  const components = candidate?.inferenceBundle?.candidates ?? []
+  if (components.length < 2) return []
+  const groups = new Map()
+  for (const entry of actual) {
+    if (usedEntries.has(entry.id) || !entry.transactionId || Math.abs(daysBetween(expectedDate, entry.date)) > (candidate.matching?.dateWindowDays ?? 4)) continue
+    groups.set(String(entry.transactionId), [...(groups.get(String(entry.transactionId)) ?? []), entry])
+  }
+  for (const [, entries] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const matched = []
+    const used = new Set()
+    for (const component of components) {
+      const match = entries.find((entry) => !used.has(entry.id) && entryMatches(component, entry))
+      if (!match) break
+      used.add(match.id)
+      matched.push(match)
+    }
+    if (matched.length !== components.length) continue
+    const total = matched.reduce((sum, entry) => sum + Math.abs(entry.value), 0)
+    const envelope = candidate.matching?.amountEnvelope
+    if (envelope && (total < envelope.min || total > envelope.max)) continue
+    return matched
+  }
+  return []
+}
+
 export function matchRecurringOccurrences({ candidates = [], actualEntries = [], today }) {
   const todayKey = dateKey(today)
   if (!todayKey) return { candidates: [], fulfilled: [], remaining: [] }
@@ -843,25 +948,29 @@ export function matchRecurringOccurrences({ candidates = [], actualEntries = [],
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((candidate) => {
       const occurrences = currentExpectedDates(candidate, todayKey).map((expectedDate) => {
-        const match = actual
-          .filter((entry) => !usedEntries.has(entry.id) && entryMatches(candidate, entry) && Math.abs(daysBetween(expectedDate, entry.date)) <= (candidate.matching?.dateWindowDays ?? 4))
-          .sort(
-            (left, right) =>
-              Math.abs(daysBetween(expectedDate, left.date)) - Math.abs(daysBetween(expectedDate, right.date)) ||
-              left.date.localeCompare(right.date) ||
-              String(left.id).localeCompare(String(right.id)),
-          )[0]
+        const bundleMatch = splitBundleMatch({ candidate, actual, expectedDate, usedEntries })
+        const match =
+          bundleMatch[0] ??
+          actual
+            .filter((entry) => !usedEntries.has(entry.id) && entryMatches(candidate, entry) && Math.abs(daysBetween(expectedDate, entry.date)) <= (candidate.matching?.dateWindowDays ?? 4))
+            .sort(
+              (left, right) =>
+                Math.abs(daysBetween(expectedDate, left.date)) - Math.abs(daysBetween(expectedDate, right.date)) ||
+                left.date.localeCompare(right.date) ||
+                String(left.id).localeCompare(String(right.id)),
+            )[0]
+        const actualMatches = bundleMatch.length > 0 ? bundleMatch : match ? [match] : []
         const occurrence = {
           expectedId: `expected:${candidate.id}:${expectedDate}`,
           candidateId: candidate.id,
           expectedDate,
-          status: match ? 'fulfilled' : 'remaining',
-          actualEntryIds: match ? [match.id].filter(Boolean) : [],
-          actualTransactionIds: match ? [match.transactionId].filter(Boolean) : [],
+          status: actualMatches.length > 0 ? 'fulfilled' : 'remaining',
+          actualEntryIds: unique(actualMatches.map(({ id }) => id)).sort(),
+          actualTransactionIds: unique(actualMatches.map(({ transactionId }) => transactionId)).sort(),
           source: candidate.source,
         }
-        if (match) {
-          usedEntries.add(match.id)
+        if (actualMatches.length > 0) {
+          actualMatches.forEach(({ id }) => usedEntries.add(id))
           fulfilled.push(occurrence)
         } else remaining.push(occurrence)
         return occurrence

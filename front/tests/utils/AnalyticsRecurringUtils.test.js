@@ -321,6 +321,92 @@ test('merges an overlapping inferred candidate into the authoritative recurring 
   assert.equal(result[0].inference.id, inferred[0].id)
 })
 
+test('deduplicates equivalent authoritative recurrence sources and keeps suppression audit', () => {
+  const [recurringRent] = buildDefinedOccurrences({
+    recurringTransactions: [
+      {
+        id: 'recurring-rent',
+        attributes: {
+          active: true,
+          type: 'withdrawal',
+          title: 'Rent',
+          repetitions: [{ type: 'monthly', moment: '1', occurrences: ['2026-08-01'] }],
+          transactions: [{ amount: '2321', description: 'Rent', source_id: 'checking', destination_id: 'landlord', category_id: 'housing' }],
+        },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+  })
+  const [subscriptionRent] = buildDefinedOccurrences({
+    subscriptions: [
+      {
+        id: 'subscription-rent',
+        attributes: { active: true, name: 'Rent', repeat_freq: 'monthly', amount_min: '2321', amount_max: '2321', amount_avg: '2321', pay_dates: ['2026-08-01'] },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+  })
+
+  const result = mergeRecurringCandidates({ defined: [subscriptionRent, recurringRent], inferred: [] })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].source.type, 'recurringTransaction')
+  assert.deepEqual(result[0].suppressedCandidateIds, [subscriptionRent.id])
+  assert.deepEqual(result[0].expectedDates, ['2026-08-01'])
+})
+
+test('consumes an inferred split bundle into its explicit parent occurrence', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const parentTransactionIds = months.map((month) => `payroll-${month}`)
+  const inferred = [
+    { prefix: 'federal', value: 763, categoryId: 'federal-tax' },
+    { prefix: 'social', value: 568, categoryId: 'social-security' },
+    { prefix: 'medicare', value: 133, categoryId: 'medicare' },
+  ].map(({ prefix, value, categoryId }) => {
+    const [candidate] = detectRecurringCandidates({
+      entries: months.map((month) => entry({ id: `${prefix}-${month}`, date: `${month}-15`, value, destinationId: 'tax-authority', categoryId, description: 'Payroll taxes' })),
+      startDate: '2026-02-01',
+      endDate: '2026-07-31',
+    }).candidates
+    return { ...candidate, evidence: { ...candidate.evidence, transactionIds: parentTransactionIds } }
+  })
+  const [explicitPayroll] = buildDefinedOccurrences({
+    recurringTransactions: [
+      {
+        id: 'recurring-payroll-tax',
+        attributes: {
+          active: true,
+          type: 'withdrawal',
+          title: 'Payroll taxes',
+          repetitions: [{ type: 'monthly', moment: '15', occurrences: ['2026-08-15'] }],
+          transactions: [{ amount: '1464', description: 'Payroll taxes', source_id: 'checking', destination_id: 'tax-authority' }],
+        },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+  })
+
+  const result = mergeRecurringCandidates({ defined: [explicitPayroll], inferred })
+
+  assert.equal(inferred.length, 3)
+  assert.equal(result.length, 1)
+  assert.equal(result[0].id, explicitPayroll.id)
+  assert.deepEqual(result[0].suppressedCandidateIds, inferred.map(({ id }) => id).sort())
+  assert.equal(result[0].identity.categoryId, null)
+  assert.deepEqual(
+    result[0].inferenceBundle.candidates.map(({ identity, expectedAmount }) => ({ categoryId: identity.categoryId, amount: expectedAmount.value })),
+    [
+      { categoryId: 'federal-tax', amount: 763 },
+      { categoryId: 'social-security', amount: 568 },
+      { categoryId: 'medicare', amount: 133 },
+    ],
+  )
+  assert.deepEqual(result[0].evidence.transactionIds, parentTransactionIds)
+})
+
 test('matches and suppresses an already-observed current occurrence without inventing transaction IDs', () => {
   const history = entriesForDates(['2026-01-01', '2026-02-02', '2026-03-02', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01'], {
     value: 2321,

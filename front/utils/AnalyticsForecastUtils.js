@@ -201,7 +201,116 @@ const addAmounts = (target, values, currencyDecimalPlaces, transactionId = null,
 const averageSamples = (samples, currencyDecimalPlaces) =>
   Object.fromEntries(FLOW_KEYS.map((key) => [key, roundAmount(samples[key].reduce((total, value) => total + value, 0) / samples[key].length, currencyDecimalPlaces)]))
 
+const projectionDimensionInputs = ({ entries, currentEntries, months, projectedEntries, historyReady, currencyDecimalPlaces }) => {
+  const dimensions = new Set(projectedEntries.map(projectionDimension).filter(Boolean))
+  const actualByDimension = Object.fromEntries([...dimensions].map((dimension) => [dimension, 0]))
+  const monthlyByDimension = Object.fromEntries([...dimensions].map((dimension) => [dimension, Object.fromEntries(months.map((month) => [month, 0]))]))
+  const classify = (entry) => {
+    const { context } = projectionContext(entry)
+    const flowAmounts = flowAmountsFor(context, amountOf(entry), currencyDecimalPlaces)
+    const dimension = projectionDimension({ categoryId: context.categoryId, flowAmounts })
+    return { dimension, amount: dimension?.startsWith('category:') ? flowAmounts.expenses : flowAmounts[dimension] }
+  }
+  for (const entry of currentEntries.filter(({ value }) => Number.isFinite(value))) {
+    const { dimension, amount } = classify(entry)
+    if (!dimensions.has(dimension) || !Number.isFinite(amount)) continue
+    actualByDimension[dimension] = roundAmount(actualByDimension[dimension] + amount, currencyDecimalPlaces)
+  }
+  for (const entry of entries.filter(({ monthKey, value }) => months.includes(monthKey) && Number.isFinite(value))) {
+    const { dimension, amount } = classify(entry)
+    if (!dimensions.has(dimension) || !Number.isFinite(amount)) continue
+    monthlyByDimension[dimension][entry.monthKey] = roundAmount(monthlyByDimension[dimension][entry.monthKey] + amount, currencyDecimalPlaces)
+  }
+  const historicalByDimension = Object.fromEntries(
+    [...dimensions].map((dimension) => [
+      dimension,
+      historyReady ? roundAmount(months.reduce((total, month) => total + monthlyByDimension[dimension][month], 0) / months.length, currencyDecimalPlaces) : null,
+    ]),
+  )
+  return { actualByDimension, historicalByDimension }
+}
+
 const primaryFlow = (amounts) => ['refunds', 'income', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt'].find((key) => amounts[key] > 0) ?? 'transfer'
+
+const projectionDimension = (entry) => {
+  if (Number(entry?.flowAmounts?.expenses) > 0) return `category:${String(entry.categoryId || ANALYTICS_UNCATEGORIZED_ID)}`
+  const flow = primaryFlow(entry?.flowAmounts ?? {})
+  return flow === 'transfer' ? null : flow
+}
+
+const scaleProjectedEntry = (entry, amount, currencyDecimalPlaces) => {
+  const roundedAmount = roundAmount(amount, currencyDecimalPlaces)
+  const ratio = roundedAmount / entry.amount
+  const flowAmounts = Object.fromEntries(
+    FLOW_KEYS.map((key) => [key, Number.isFinite(entry.flowAmounts?.[key]) ? roundAmount(entry.flowAmounts[key] * ratio, currencyDecimalPlaces) : (entry.flowAmounts?.[key] ?? null)]),
+  )
+  if (FLOW_KEYS.includes(entry.metric)) flowAmounts[entry.metric] = roundedAmount
+  return { ...structuredClone(entry), amount: roundedAmount, flowAmounts }
+}
+
+export function reconcileProjectedActivity({ actualByDimension = {}, historicalByDimension = {}, entries = [], currencyDecimalPlaces }) {
+  const scale = 10 ** currencyDecimalPlaces
+  const sourceOrder = { defined: 0, inferred: 1, variable: 2 }
+  const groups = new Map()
+  const passthrough = []
+  for (const entry of entries) {
+    const dimension = projectionDimension(entry)
+    if (!dimension || !Number.isFinite(entry?.amount) || entry.amount <= 0) {
+      passthrough.push(structuredClone(entry))
+      continue
+    }
+    groups.set(dimension, [...(groups.get(dimension) ?? []), entry])
+  }
+
+  const reconciled = []
+  const targetsByDimension = {}
+  const allocatedByDimension = {}
+  const suppressedProjectionIds = []
+  const cappedProjectionIds = []
+  for (const [dimension, dimensionEntries] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const actual = Number.isFinite(actualByDimension[dimension]) ? roundAmount(actualByDimension[dimension], currencyDecimalPlaces) : 0
+    const historical = Number.isFinite(historicalByDimension[dimension]) ? roundAmount(historicalByDimension[dimension], currencyDecimalPlaces) : actual
+    const explicitDue = roundAmount(
+      dimensionEntries.filter(({ sourceKind }) => sourceKind === 'defined').reduce((total, entry) => total + entry.amount, 0),
+      currencyDecimalPlaces,
+    )
+    const target = roundAmount(Math.max(actual, historical, actual + explicitDue), currencyDecimalPlaces)
+    let capacityUnits = Math.max(0, Math.round((target - actual) * scale))
+    let allocatedUnits = 0
+    for (const entry of [...dimensionEntries].sort(
+      (left, right) =>
+        (sourceOrder[left.sourceKind] ?? 9) - (sourceOrder[right.sourceKind] ?? 9) ||
+        String(left.date ?? '').localeCompare(String(right.date ?? '')) ||
+        String(left.id).localeCompare(String(right.id)),
+    )) {
+      const requestedUnits = Math.max(0, Math.round(entry.amount * scale))
+      const grantedUnits = Math.min(requestedUnits, capacityUnits)
+      if (grantedUnits === 0) {
+        suppressedProjectionIds.push(String(entry.id))
+        continue
+      }
+      if (grantedUnits < requestedUnits) cappedProjectionIds.push(String(entry.id))
+      reconciled.push(scaleProjectedEntry(entry, grantedUnits / scale, currencyDecimalPlaces))
+      capacityUnits -= grantedUnits
+      allocatedUnits += grantedUnits
+    }
+    targetsByDimension[dimension] = target
+    allocatedByDimension[dimension] = allocatedUnits / scale
+  }
+
+  return {
+    entries: [...reconciled, ...passthrough].sort(
+      (left, right) =>
+        String(left.date ?? '').localeCompare(String(right.date ?? '')) ||
+        String(left.sourceKind ?? '').localeCompare(String(right.sourceKind ?? '')) ||
+        String(left.id).localeCompare(String(right.id)),
+    ),
+    targetsByDimension,
+    allocatedByDimension,
+    suppressedProjectionIds: suppressedProjectionIds.sort(),
+    cappedProjectionIds: cappedProjectionIds.sort(),
+  }
+}
 
 const candidateEligible = (candidate) => candidate?.source?.authoritative === true || (candidate?.source?.type === 'inferred' && Number(candidate?.confidence?.score) >= 0.6)
 
@@ -535,6 +644,38 @@ const distributeAmount = ({ total, futureDates, observedDates, currencyDecimalPl
   }
 }
 
+const splitBundleProjectionParts = ({ candidate, amount, accountContexts, currencyDecimalPlaces }) => {
+  const components = [...(candidate?.inferenceBundle?.candidates ?? [])].sort(
+    (left, right) => Number(right.expectedAmount?.value) - Number(left.expectedAmount?.value) || String(left.id).localeCompare(String(right.id)),
+  )
+  if (components.length < 2) return null
+  const weighted = components.map((component) => {
+    const { context, missingAccountIds, missingAccountEndpoints } = projectionContext(component, accountContexts, true)
+    return { component, context, missingAccountIds, missingAccountEndpoints, weight: Number(component.expectedAmount?.value) }
+  })
+  if (
+    weighted.some(
+      ({ context, missingAccountIds, missingAccountEndpoints, weight }) =>
+        !Number.isFinite(weight) || weight <= 0 || missingAccountIds.length > 0 || missingAccountEndpoints.length > 0 || !context.sourceKind || !context.destinationKind,
+    )
+  )
+    return null
+  const scale = 10 ** currencyDecimalPlaces
+  const targetUnits = Math.round(amount * scale)
+  const totalWeight = weighted.reduce((total, { weight }) => total + weight, 0)
+  const shares = weighted.map((item, index) => {
+    const exact = (targetUnits * item.weight) / totalWeight
+    return { ...item, index, units: Math.floor(exact), fraction: exact - Math.floor(exact) }
+  })
+  let residual = targetUnits - shares.reduce((total, { units }) => total + units, 0)
+  for (const share of [...shares].sort((left, right) => right.fraction - left.fraction || left.component.id.localeCompare(right.component.id))) {
+    if (residual === 0) break
+    share.units += 1
+    residual -= 1
+  }
+  return shares.map(({ component, context, units }) => ({ component, context, amount: units / scale }))
+}
+
 const projectedEntry = ({
   id,
   date,
@@ -550,6 +691,8 @@ const projectedEntry = ({
   profile = null,
   conversion = null,
   projectedFlowAmounts = null,
+  evidenceIds = null,
+  bundleCandidateId = null,
 }) => {
   const roundedAmount = roundAmount(amount, currencyDecimalPlaces)
   const flowAmounts = projectedFlowAmounts ?? flowAmountsFor(context, roundedAmount, currencyDecimalPlaces)
@@ -568,11 +711,12 @@ const projectedEntry = ({
     sourceLabel: candidate?.source?.label ?? null,
     candidateId: candidate?.id ?? null,
     expectedId,
-    evidenceIds: candidate ? candidateEvidenceIds(candidate) : [],
+    evidenceIds: evidenceIds ?? (candidate ? candidateEvidenceIds(candidate) : []),
     flowAmounts,
     confidence,
     reasons,
     overdue,
+    ...(bundleCandidateId ? { bundleCandidateId } : {}),
     ...(conversion ? { conversion: structuredClone(conversion) } : {}),
     ...(profile ? { profile } : {}),
   }
@@ -714,6 +858,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
           deduplicatedCandidateIds: [],
           conflictingCandidateIds: [],
         },
+        allocation: { targetsByDimension: {}, allocatedByDimension: {}, suppressedProjectionIds: [], cappedProjectionIds: [] },
         unavailable: { affectedMetricIds: [...FLOW_KEYS], missingCurrencies: [], entryIds: [], candidateIds: [] },
         missingCurrencies: [],
         unavailableEntryIds: [],
@@ -728,10 +873,10 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   const historyReady = Boolean(historyFirst && historyEnd && coverageStart && coverageEnd && coverageStart <= historyFirst && coverageEnd >= historyEnd)
   const canonicalCandidates = canonicalizeCandidates(candidates)
   const eligibleCandidates = canonicalCandidates.candidates.filter(candidateEligible).sort((left, right) => String(left.id).localeCompare(String(right.id)))
-  const suppressedCandidateIds = canonicalCandidates.candidates
-    .filter((candidate) => !candidateEligible(candidate))
-    .map(({ id }) => String(id))
-    .sort()
+  const suppressedCandidateIds = unique([
+    ...canonicalCandidates.candidates.filter((candidate) => !candidateEligible(candidate)).map(({ id }) => String(id)),
+    ...canonicalCandidates.candidates.flatMap((candidate) => candidate.suppressedCandidateIds ?? []).map(String),
+  ]).sort()
   const recurringIds = recurringHistoryIds(eligibleCandidates)
   const evidencedHistoryEntryIds = entries
     .filter((entry) => months.includes(entry.monthKey) && (recurringIds.entryIds.has(String(entry.id)) || recurringIds.transactionIds.has(String(entry.transactionId))))
@@ -810,13 +955,12 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   }
   const historicalBaseline = historyReady ? averageSamples(historySamples, currencyDecimalPlaces) : emptyTotals(null)
 
-  const todayDay = dateParts(todayKey).day
   const variableGroups = new Map()
   if (historyReady) {
     for (const entry of entries.filter(({ monthKey, value }) => months.includes(monthKey) && Number.isFinite(value))) {
       if (removedHistorySet.has(String(entry.id))) continue
       const parts = dateParts(entry.date)
-      if (!parts || parts.day <= Math.min(todayDay, daysInMonth(parts.year, parts.month))) continue
+      if (!parts) continue
       const { context } = projectionContext(entry)
       const key = contextKey(context)
       const group = variableGroups.get(key) ?? { key, context, monthly: Object.fromEntries(months.map((month) => [month, 0])), dates: [], evidenceIds: new Set() }
@@ -828,7 +972,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     }
   }
 
-  const projected = []
+  let projected = []
   for (const occurrence of recurring.remaining.sort((left, right) => left.expectedDate.localeCompare(right.expectedDate) || left.expectedId.localeCompare(right.expectedId))) {
     const candidate = candidateById.get(occurrence.candidateId)
     if (!candidate) continue
@@ -867,23 +1011,47 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     if (!expectedDate || expectedDate <= todayKey || expectedDate > endKey) continue
     const sourceKind = candidate.source.authoritative ? 'defined' : 'inferred'
     candidateConversions.set(String(candidate.id), candidateConversionAudit({ candidateId: candidate.id, conversion: input.conversion, resolution: 'projected' }))
-    projected.push(
-      projectedEntry({
-        id: `projected:${sourceKind}:${occurrence.expectedId}:${expectedDate}`,
-        date: expectedDate,
-        amount: input.amount,
-        context: input.context,
-        sourceKind,
-        currencyDecimalPlaces,
-        candidate,
-        expectedId: occurrence.expectedId,
-        overdue: occurrence.expectedDate <= todayKey,
-        confidence: structuredClone(candidate.confidence),
-        reasons: occurrence.expectedDate <= todayKey ? ['Expected occurrence is overdue and was moved to a future date'] : [...(candidate.confidence?.reasons ?? [])],
-        conversion: input.conversion,
-        projectedFlowAmounts,
-      }),
-    )
+    const bundleParts = sourceKind === 'defined' ? splitBundleProjectionParts({ candidate, amount: input.amount, accountContexts, currencyDecimalPlaces }) : null
+    if (bundleParts) {
+      bundleParts.forEach(({ component, context, amount }, index) => {
+        projected.push(
+          projectedEntry({
+            id: `projected:${sourceKind}:${occurrence.expectedId}:split:${String(index).padStart(2, '0')}:${expectedDate}`,
+            date: expectedDate,
+            amount,
+            context,
+            sourceKind,
+            currencyDecimalPlaces,
+            candidate,
+            expectedId: occurrence.expectedId,
+            overdue: occurrence.expectedDate <= todayKey,
+            confidence: structuredClone(candidate.confidence),
+            reasons: occurrence.expectedDate <= todayKey ? ['Expected occurrence is overdue and was moved to a future date'] : [...(candidate.confidence?.reasons ?? [])],
+            conversion: input.conversion,
+            evidenceIds: unique([...candidateEvidenceIds(candidate), ...candidateEvidenceIds(component)]).sort(),
+            bundleCandidateId: component.id,
+          }),
+        )
+      })
+    } else {
+      projected.push(
+        projectedEntry({
+          id: `projected:${sourceKind}:${occurrence.expectedId}:${expectedDate}`,
+          date: expectedDate,
+          amount: input.amount,
+          context: input.context,
+          sourceKind,
+          currencyDecimalPlaces,
+          candidate,
+          expectedId: occurrence.expectedId,
+          overdue: occurrence.expectedDate <= todayKey,
+          confidence: structuredClone(candidate.confidence),
+          reasons: occurrence.expectedDate <= todayKey ? ['Expected occurrence is overdue and was moved to a future date'] : [...(candidate.confidence?.reasons ?? [])],
+          conversion: input.conversion,
+          projectedFlowAmounts,
+        }),
+      )
+    }
   }
 
   const futureDates = datesAfter(todayKey, endKey)
@@ -907,7 +1075,9 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     }
   }
 
-  projected.sort((left, right) => left.date.localeCompare(right.date) || left.sourceKind.localeCompare(right.sourceKind) || left.id.localeCompare(right.id))
+  const dimensionInputs = projectionDimensionInputs({ entries, currentEntries, months, projectedEntries: projected, historyReady, currencyDecimalPlaces })
+  const allocation = reconcileProjectedActivity({ ...dimensionInputs, entries: projected, currencyDecimalPlaces })
+  projected = allocation.entries
   const remainingFromToday = emptyTotals()
   for (const entry of projected) addAmounts(remainingFromToday, entry.flowAmounts, currencyDecimalPlaces)
   const knownRemainingFromToday = { ...remainingFromToday }
@@ -1003,6 +1173,12 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
         candidateConversions: [...candidateConversions.values()].sort((left, right) => left.candidateId.localeCompare(right.candidateId)),
         deduplicatedCandidateIds: canonicalCandidates.deduplicatedCandidateIds,
         conflictingCandidateIds: canonicalCandidates.conflictingCandidateIds,
+      },
+      allocation: {
+        targetsByDimension: allocation.targetsByDimension,
+        allocatedByDimension: allocation.allocatedByDimension,
+        suppressedProjectionIds: allocation.suppressedProjectionIds,
+        cappedProjectionIds: allocation.cappedProjectionIds,
       },
       unavailable: {
         affectedMetricIds: orderedAffectedMetricIds,

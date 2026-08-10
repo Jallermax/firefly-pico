@@ -896,7 +896,7 @@ test('derives financial trends from the shared ledger and reconstructed balances
     expense('last-month', 30, new Date(today.getFullYear(), today.getMonth() - 1, 20), 'food'),
     expense('current', 10, new Date(today.getFullYear(), today.getMonth(), 1), 'food'),
   ]
-  const expectedForecast = today.getDate() < 20 ? 60 : 10
+  const expectedForecast = 50
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()

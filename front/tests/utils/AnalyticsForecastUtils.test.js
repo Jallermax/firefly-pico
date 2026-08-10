@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { buildRemainingActivityForecast as buildForecastCore, projectMetricForecast as projectMetricForecastCore, summarizeProjectedSources } from '../../utils/AnalyticsForecastUtils.js'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
-import { buildDefinedOccurrences, detectRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
+import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
 
 const endpoint = (id, kind, includeNetWorth = !['revenue', 'expense'].includes(kind)) => ({ id, attributes: { name: id, include_net_worth: includeNetWorth } })
 
@@ -107,6 +107,18 @@ const definedCandidate = ({ id, sourceAccountId, destinationAccountId, direction
   bounds: { start: '2026-08-01', end: null },
   expectedDates: [date],
 })
+
+const inferredSplitCandidate = ({ id, amount, categoryId, transactionIds }) => {
+  const candidate = definedCandidate({ id, sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-15', amount })
+  return {
+    ...candidate,
+    id: `inferred:${id}`,
+    identity: { ...candidate.identity, categoryId, payee: 'payroll taxes' },
+    source: { type: 'inferred', id: `inferred:${id}`, label: 'Payroll taxes', authoritative: false },
+    evidence: { entryIds: [], transactionIds, dates: transactionIds.map((transactionId) => `${transactionId.slice(-7)}-15`) },
+    confidence: { score: 0.9, factors: {}, reasons: ['Recurring split evidence'] },
+  }
+}
 
 const reorderSemanticValue = (value) => {
   if (Array.isArray(value)) return [...value].reverse().map(reorderSemanticValue)
@@ -656,6 +668,171 @@ test('floors cumulative expense at actual and exposes above-average and empty st
     status: 'ready',
   })
   assert.equal(projectMetricForecast({ metric: 'expenses', actual: 0, historicalAverage: 0, remainingActivity: 0 }).progressState, 'noExpectedActivity')
+})
+
+test('caps explicit and historical expense allocation at the completed-month category target', () => {
+  const history = expensesForMonths(['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'], 7500)
+  const actual = entry({ id: 'august-actual', date: '2026-08-05', value: 140 })
+  const rent = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 2321 })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, actual]),
+    candidates: [rent],
+    ...normalizedCandidateInputs([rent]),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.actualToDate.expenses, 140)
+  assert.equal(result.historicalBaseline.expenses, 7500)
+  assert.equal(result.final.expenses, 7500)
+  assert.equal(result.remainingFromToday.expenses, 7360)
+  assert.equal(
+    result.dailyProjectedEntries.reduce((total, item) => Number((total + item.flowAmounts.expenses).toFixed(2)), 0),
+    7360,
+  )
+  assert.deepEqual(result.audit.allocation.targetsByDimension, { 'category:general': 7500 })
+  assert.equal(result.audit.allocation.cappedProjectionIds.length > 0, true)
+})
+
+test('lets unfulfilled explicit activity raise an above-average final without adding historical remainder', () => {
+  const history = expensesForMonths(['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'], 7500)
+  const actual = entry({ id: 'august-actual', date: '2026-08-05', value: 9000 })
+  const rent = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 1000 })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, actual]),
+    candidates: [rent],
+    ...normalizedCandidateInputs([rent]),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.final.expenses, 10000)
+  assert.equal(result.remainingFromToday.expenses, 1000)
+  assert.deepEqual(
+    result.dailyProjectedEntries.map(({ sourceKind, amount }) => ({ sourceKind, amount })),
+    [{ sourceKind: 'defined', amount: 1000 }],
+  )
+  assert.equal(result.audit.allocation.targetsByDimension['category:general'], 10000)
+})
+
+test('expands a cumulative target only for explicit due activity and remains deterministic when shuffled', () => {
+  const history = expensesForMonths(['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'], 7500)
+  const actual = entry({ id: 'august-actual', date: '2026-08-05', value: 140 })
+  const largeBill = definedCandidate({ id: 'large-bill', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 8000 })
+  const options = {
+    candidates: [largeBill],
+    ...normalizedCandidateInputs([largeBill]),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+
+  const ordered = buildRemainingActivityForecast({ ...options, ledger: ledger([...history, actual]) })
+  const shuffled = buildRemainingActivityForecast({ ...options, ledger: ledger([actual, ...history].reverse()) })
+
+  assert.equal(ordered.final.expenses, 8140)
+  assert.equal(ordered.remainingFromToday.expenses, 8000)
+  assert.deepEqual(shuffled, ordered)
+})
+
+test('forecasts an early-month historical category when its usual transaction has not arrived yet', () => {
+  const history = expensesForMonths(['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'], 2321, 2, { categoryId: 'housing', destinationId: 'landlord' })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { endDate: '2026-08-03' }),
+    candidates: [],
+    historyMonths: 6,
+    today: '2026-08-03',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.actualToDate.expenses, 0)
+  assert.equal(result.historicalBaseline.expenses, 2321)
+  assert.equal(result.final.expenses, 2321)
+  assert.equal(result.remainingFromToday.expenses, 2321)
+  assert.equal(
+    result.dailyProjectedEntries.every(({ categoryId, sourceKind }) => categoryId === 'housing' && sourceKind === 'variable'),
+    true,
+  )
+})
+
+test('projects one explicit parent occurrence through its inferred category split bundle', () => {
+  const months = ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const parentTransactionIds = months.map((month) => `payroll-${month}`)
+  const history = months.flatMap((month) => [
+    { ...entry({ id: `federal-${month}`, date: `${month}-15`, value: 763, destinationId: 'tax-authority', categoryId: 'federal-tax' }), transactionId: `payroll-${month}` },
+    { ...entry({ id: `social-${month}`, date: `${month}-15`, value: 568, destinationId: 'tax-authority', categoryId: 'social-security' }), transactionId: `payroll-${month}` },
+    { ...entry({ id: `medicare-${month}`, date: `${month}-15`, value: 133, destinationId: 'tax-authority', categoryId: 'medicare' }), transactionId: `payroll-${month}` },
+  ])
+  const explicit = {
+    ...definedCandidate({ id: 'payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-15', amount: 1464 }),
+    identity: { ...definedCandidate({ id: 'payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority' }).identity, categoryId: null, payee: 'payroll taxes' },
+  }
+  const candidates = mergeRecurringCandidates({
+    defined: [explicit],
+    inferred: [
+      inferredSplitCandidate({ id: 'federal', amount: 763, categoryId: 'federal-tax', transactionIds: parentTransactionIds }),
+      inferredSplitCandidate({ id: 'social', amount: 568, categoryId: 'social-security', transactionIds: parentTransactionIds }),
+      inferredSplitCandidate({ id: 'medicare', amount: 133, categoryId: 'medicare', transactionIds: parentTransactionIds }),
+    ],
+  })
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history),
+    candidates,
+    ...normalizedCandidateInputs(candidates, { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }),
+    historyMonths: 6,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.deepEqual(
+    result.dailyProjectedEntries.map(({ sourceKind, categoryId, amount, bundleCandidateId }) => ({ sourceKind, categoryId, amount, bundleCandidateId })),
+    [
+      { sourceKind: 'defined', categoryId: 'federal-tax', amount: 763, bundleCandidateId: 'inferred:federal' },
+      { sourceKind: 'defined', categoryId: 'social-security', amount: 568, bundleCandidateId: 'inferred:social' },
+      { sourceKind: 'defined', categoryId: 'medicare', amount: 133, bundleCandidateId: 'inferred:medicare' },
+    ],
+  )
+  assert.equal(result.final.expenses, 1464)
+  assert.deepEqual(result.audit.recurring.suppressedCandidateIds, ['inferred:federal', 'inferred:medicare', 'inferred:social'])
+})
+
+test('treats a current transaction split bundle as fulfillment of its explicit parent', () => {
+  const parentTransactionIds = ['payroll-2026-02', 'payroll-2026-03', 'payroll-2026-04', 'payroll-2026-05', 'payroll-2026-06', 'payroll-2026-07']
+  const explicit = {
+    ...definedCandidate({ id: 'payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-15', amount: 1464 }),
+    identity: { ...definedCandidate({ id: 'payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority' }).identity, categoryId: null, payee: 'payroll taxes' },
+  }
+  const candidates = mergeRecurringCandidates({
+    defined: [explicit],
+    inferred: [
+      inferredSplitCandidate({ id: 'federal', amount: 763, categoryId: 'federal-tax', transactionIds: parentTransactionIds }),
+      inferredSplitCandidate({ id: 'social', amount: 568, categoryId: 'social-security', transactionIds: parentTransactionIds }),
+      inferredSplitCandidate({ id: 'medicare', amount: 133, categoryId: 'medicare', transactionIds: parentTransactionIds }),
+    ],
+  })
+  const current = [
+    { ...entry({ id: 'federal-august', date: '2026-08-15', value: 763, destinationId: 'tax-authority', categoryId: 'federal-tax' }), transactionId: 'payroll-2026-08' },
+    { ...entry({ id: 'social-august', date: '2026-08-15', value: 568, destinationId: 'tax-authority', categoryId: 'social-security' }), transactionId: 'payroll-2026-08' },
+    { ...entry({ id: 'medicare-august', date: '2026-08-15', value: 133, destinationId: 'tax-authority', categoryId: 'medicare' }), transactionId: 'payroll-2026-08' },
+  ]
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(current, { startMonth: '2026-08', fetchStartMonth: null, fetchEndDate: null }),
+    candidates,
+    ...normalizedCandidateInputs(candidates, { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }),
+    historyMonths: 6,
+    today: '2026-08-16',
+    endDate: '2026-08-31',
+  })
+
+  assert.deepEqual(result.dailyProjectedEntries, [])
+  assert.deepEqual(result.audit.recurring.fulfilledExpectedIds, [`expected:${explicit.id}:2026-08-15`])
 })
 
 test('shows signed progress only for matching nonzero directions', () => {
