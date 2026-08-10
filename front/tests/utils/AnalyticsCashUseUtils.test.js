@@ -1159,6 +1159,84 @@ test('combination interaction clears stale drags when the point count becomes ze
   }
 })
 
+test('combination interaction accepts legacy chart month and area targets at the selection emission boundary', () => {
+  const chartState = {
+    selectedIndex: -1,
+    mode: null,
+    selectedSeriesId: null,
+    isPinned: false,
+    isKeyboardSelection: false,
+    isDragging: false,
+    pointerStartedOnPinnedIndex: -1,
+    pointerStartedOnPinnedSeriesId: null,
+    effect: null,
+  }
+
+  for (const { target, selection, legacy } of [
+    { target: { mode: 'month', index: 1 }, selection: { mode: 'month', seriesId: null, monthIndex: 1 }, legacy: { selectedIndex: 1, mode: 'month', selectedSeriesId: null } },
+    {
+      target: { mode: 'area', index: 2, seriesId: 'category:housing' },
+      selection: { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 2 },
+      legacy: { selectedIndex: 2, mode: 'area', selectedSeriesId: 'category:housing' },
+    },
+  ]) {
+    for (const pointerType of ['mouse', 'touch']) {
+      let state = interactionFor(chartState, { type: 'pointerMove', target, pointerType, pointCount: 3 })
+      assert.deepEqual(AnalyticsCashUseUtils.displayCombinationSelection(state), selection, `${pointerType}:${target.mode}:preview`)
+      assert.deepEqual({ selectedIndex: state.selectedIndex, mode: state.mode, selectedSeriesId: state.selectedSeriesId }, legacy, `${pointerType}:${target.mode}:legacy preview`)
+      state = interactionFor(state, { type: 'pointerDown', target, pointerType, pointCount: 3 })
+      state = interactionFor(state, { type: 'pointerUp', target, pointerType, pointCount: 3 })
+      assert.equal(state.selectedIndex >= 0 && state.effect?.type === 'select', true, `${pointerType}:${target.mode}:emittable`)
+      assert.deepEqual({ selectedIndex: state.selectedIndex, mode: state.mode, selectedSeriesId: state.selectedSeriesId }, legacy, `${pointerType}:${target.mode}:legacy pin`)
+    }
+  }
+})
+
+test('combination interaction hydrates already-pinned legacy chart state before previews and repairs', () => {
+  const legacyPinned = {
+    selectedIndex: 1,
+    mode: 'area',
+    selectedSeriesId: 'category:housing',
+    isPinned: true,
+    isKeyboardSelection: false,
+    isDragging: false,
+    pointerStartedOnPinnedIndex: -1,
+    pointerStartedOnPinnedSeriesId: null,
+    effect: null,
+  }
+  const pin = { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 1 }
+
+  for (const pointerType of ['mouse', 'touch']) {
+    let state = interactionFor(legacyPinned, { type: 'pointerMove', target: { mode: 'month', index: 2 }, pointerType, pointCount: 3 })
+    assert.deepEqual(state.pinnedSelection, pin, pointerType)
+    assert.deepEqual(AnalyticsCashUseUtils.displayCombinationSelection(state), { mode: 'month', seriesId: null, monthIndex: 2 }, pointerType)
+    assert.deepEqual(
+      { selectedIndex: state.selectedIndex, mode: state.mode, selectedSeriesId: state.selectedSeriesId, isPinned: state.isPinned, effect: state.effect },
+      { selectedIndex: 1, mode: 'area', selectedSeriesId: 'category:housing', isPinned: true, effect: null },
+      pointerType,
+    )
+    state = interactionFor(state, { type: 'pointerLeave', pointerType, pointCount: 3 })
+    assert.deepEqual(AnalyticsCashUseUtils.displayCombinationSelection(state), pin, pointerType)
+    state = interactionFor(state, { type: 'key', key: 'ArrowRight', pointCount: 3 })
+    assert.equal(AnalyticsCashUseUtils.displayCombinationSelection(state).monthIndex, 2, pointerType)
+    assert.equal(interactionFor(state, { type: 'key', key: 'Escape', pointCount: 3 }).effect?.type, 'clear', pointerType)
+  }
+
+  const cleared = interactionFor(legacyPinned, { type: 'pointCountChanged', pointCount: 0 })
+  assert.deepEqual(
+    {
+      previewSelection: cleared.previewSelection,
+      pinnedSelection: cleared.pinnedSelection,
+      isDragging: cleared.isDragging,
+      pointerStart: cleared.pointerStart,
+      selectedIndex: cleared.selectedIndex,
+      mode: cleared.mode,
+      effect: cleared.effect,
+    },
+    { previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, selectedIndex: -1, mode: null, effect: null },
+  )
+})
+
 test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {
   const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
   const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')

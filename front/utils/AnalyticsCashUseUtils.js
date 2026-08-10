@@ -136,16 +136,30 @@ const selectionOrNull = (selection) => {
   return normalized.mode ? normalized : null
 }
 const emptyInteraction = (effect = null) => ({ previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect })
-const interactionState = (state) => ({
-  ...emptyInteraction(),
-  ...state,
-  previewSelection: selectionOrNull(state?.previewSelection),
-  pinnedSelection: selectionOrNull(state?.pinnedSelection),
-  effect: null,
-})
+const selectionFromLegacyState = (state) => {
+  if (!Number.isInteger(state?.selectedIndex) || state.selectedIndex < 0) return null
+  if (state.mode === 'month') return normalizeSelection({ mode: 'month', monthIndex: state.selectedIndex })
+  if (state.mode === 'area' && state.selectedSeriesId) return normalizeSelection({ mode: 'seriesMonth', seriesId: state.selectedSeriesId, monthIndex: state.selectedIndex })
+  return null
+}
+const interactionState = (state) => {
+  const legacySelection = selectionFromLegacyState(state)
+  return {
+    ...emptyInteraction(),
+    ...state,
+    previewSelection: selectionOrNull(state?.previewSelection) ?? (state?.isPinned ? null : legacySelection),
+    pinnedSelection: selectionOrNull(state?.pinnedSelection) ?? (state?.isPinned ? legacySelection : null),
+    effect: null,
+  }
+}
 const clearedInteraction = () => emptyInteraction({ type: 'clear' })
 const sameSelection = (left, right) => left?.mode === right?.mode && left?.seriesId === right?.seriesId && left?.monthIndex === right?.monthIndex
-const selectionForEvent = (event) => selectionOrNull(event?.target ?? (Number.isInteger(event?.index) ? { mode: 'month', monthIndex: event.index } : null))
+const selectionForEvent = (event) => {
+  const target = event?.target
+  if (target?.mode === 'month' && Number.isInteger(target.index)) return normalizeSelection({ mode: 'month', monthIndex: target.index })
+  if (target?.mode === 'area' && Number.isInteger(target.index) && target.seriesId) return normalizeSelection({ mode: 'seriesMonth', seriesId: target.seriesId, monthIndex: target.index })
+  return selectionOrNull(target ?? (Number.isInteger(event?.index) ? { mode: 'month', monthIndex: event.index } : null))
+}
 const repairSelection = (selection, pointCount) => {
   if (!selection || selection.mode === 'series') return selection
   if (pointCount <= 0) return null
