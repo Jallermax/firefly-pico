@@ -1,190 +1,263 @@
 <template>
   <div ref="root" class="analytics-line-chart analytics-combination-chart" @keydown="onRootKeydown">
-    <svg
-      ref="chart"
-      class="analytics-line-chart-svg analytics-combination-chart-svg"
-      :viewBox="layout.viewBox"
-      role="application"
+    <analytics-cash-use-legend
+      v-if="legendItems.length"
+      :items="legendItems"
+      :display-selection="displaySelection"
+      :pinned-selection="pinnedSelection"
       :aria-label="ariaLabel"
-      tabindex="0"
-      @pointermove="onPointerMove"
-      @pointerdown="onPointerDown"
-      @pointerup="onPointerUp"
-      @pointercancel="applyInteraction({ type: 'pointerCancel' })"
-      @pointerleave="onPointerLeave"
-      @keydown="onChartKeydown"
-    >
-      <defs>
-        <pattern :id="paintId('forecast')" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" stroke-width="2" opacity="0.45" />
-        </pattern>
-        <pattern :id="paintId('refund')" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width="2" opacity="0.58" />
-        </pattern>
-        <pattern :id="paintId('accessible-savings')" width="8" height="8" patternUnits="userSpaceOnUse">
-          <circle cx="2" cy="2" r="1.5" fill="currentColor" opacity="0.55" />
-        </pattern>
-        <pattern :id="paintId('restricted-savings')" width="8" height="8" patternUnits="userSpaceOnUse">
-          <path d="M 0 4 H 8 M 4 0 V 8" stroke="currentColor" stroke-width="1.25" opacity="0.5" />
-        </pattern>
-        <pattern :id="paintId('debt')" width="8" height="8" patternUnits="userSpaceOnUse">
-          <path d="M 0 0 L 8 8 M 8 0 L 0 8" stroke="currentColor" stroke-width="1" opacity="0.5" />
-        </pattern>
-        <pattern :id="paintId('gap-positive')" width="8" height="8" patternUnits="userSpaceOnUse">
-          <path d="M 0 8 L 8 0" stroke="var(--income2)" stroke-width="2" opacity="0.5" />
-        </pattern>
-        <pattern :id="paintId('gap-negative')" width="8" height="8" patternUnits="userSpaceOnUse">
-          <path d="M 0 0 L 8 8" stroke="var(--expense2)" stroke-width="2" opacity="0.55" />
-        </pattern>
-      </defs>
-
-      <g aria-hidden="true">
-        <template v-for="line in gridLines" :key="line.y">
-          <line class="analytics-chart-grid" :x1="layout.gridX1" :x2="layout.gridX2" :y1="line.y" :y2="line.y" />
-          <text class="analytics-chart-axis-label" :x="layout.yAxisLabelX" :y="line.y + 4" text-anchor="end" :style="{ fontSize: layout.axisFontSize + 'px' }">{{ line.label }}</text>
-        </template>
-        <text
-          v-for="label in xAxisLabels"
-          :key="label.key"
-          class="analytics-chart-axis-label"
-          :x="label.x"
-          :y="layout.xAxisY"
-          :text-anchor="label.anchor"
-          :style="{ fontSize: layout.axisFontSize + 'px' }"
+      @preview="onLegendPreview"
+      @leave="onLegendLeave"
+      @toggle="onLegendToggle"
+    />
+    <div ref="scroll" class="analytics-combination-scroll">
+      <div class="analytics-combination-canvas" :style="{ width: `${canvasWidth}px` }">
+        <svg
+          ref="chart"
+          class="analytics-line-chart-svg analytics-combination-chart-svg"
+          :viewBox="chartLayout.viewBox"
+          role="application"
+          :aria-label="ariaLabel"
+          tabindex="0"
+          @pointermove="onPointerMove"
+          @pointerdown="onPointerDown"
+          @pointerup="onPointerUp"
+          @pointercancel="applyInteraction({ type: 'pointerCancel' })"
+          @pointerleave="onPointerLeave"
+          @keydown="onChartKeydown"
         >
-          {{ label.label }}
-        </text>
-      </g>
+          <defs>
+            <pattern :id="paintId('forecast')" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" stroke-width="2" opacity="0.45" />
+            </pattern>
+            <pattern :id="paintId('refund')" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width="2" opacity="0.58" />
+            </pattern>
+            <pattern :id="paintId('accessible-savings')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <circle cx="2" cy="2" r="1.5" fill="currentColor" opacity="0.55" />
+            </pattern>
+            <pattern :id="paintId('restricted-savings')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <path d="M 0 4 H 8 M 4 0 V 8" stroke="currentColor" stroke-width="1.25" opacity="0.5" />
+            </pattern>
+            <pattern :id="paintId('debt')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <path d="M 0 0 L 8 8 M 8 0 L 0 8" stroke="currentColor" stroke-width="1" opacity="0.5" />
+            </pattern>
+            <pattern :id="paintId('gap-positive')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <path d="M 0 8 L 8 0" stroke="var(--income2)" stroke-width="2" opacity="0.5" />
+            </pattern>
+            <pattern :id="paintId('gap-negative')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <path d="M 0 0 L 8 8" stroke="var(--expense2)" stroke-width="2" opacity="0.55" />
+            </pattern>
+            <pattern :id="paintId('category-dots')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <circle cx="2" cy="2" r="1.5" fill="currentColor" opacity="0.55" />
+            </pattern>
+            <pattern :id="paintId('category-horizontal')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <path d="M 0 4 H 8" stroke="currentColor" stroke-width="1.5" opacity="0.55" />
+            </pattern>
+            <pattern :id="paintId('category-grid')" width="8" height="8" patternUnits="userSpaceOnUse">
+              <path d="M 0 4 H 8 M 4 0 V 8" stroke="currentColor" stroke-width="1.25" opacity="0.5" />
+            </pattern>
+          </defs>
 
-      <line
-        v-if="todayX !== null"
-        class="analytics-combination-today-marker"
-        :x1="todayX"
-        :x2="todayX"
-        :y1="layout.crosshairY1"
-        :y2="layout.crosshairY2"
-        stroke="var(--transfer2)"
-        stroke-width="1.5"
-        stroke-dasharray="3 3"
-        aria-hidden="true"
-      />
+          <g aria-hidden="true">
+            <template v-for="line in gridLines" :key="line.y">
+              <line class="analytics-chart-grid" :x1="chartLayout.gridX1" :x2="chartLayout.gridX2" :y1="line.y" :y2="line.y" />
+              <text class="analytics-chart-axis-label" :x="chartLayout.yAxisLabelX" :y="line.y + 4" text-anchor="end" :style="{ fontSize: chartLayout.axisFontSize + 'px' }">{{ line.label }}</text>
+            </template>
+            <text
+              v-for="label in xAxisLabels"
+              :key="label.key"
+              class="analytics-chart-axis-label"
+              :x="label.x"
+              :y="chartLayout.xAxisY"
+              :text-anchor="label.anchor"
+              :style="{ fontSize: chartLayout.axisFontSize + 'px' }"
+            >
+              {{ label.label }}
+            </text>
+          </g>
 
-      <g aria-hidden="true">
-        <rect
-          v-for="bar in renderedBars"
-          :key="bar.key"
-          :x="bar.x"
-          :y="bar.y"
-          :width="bar.width"
-          :height="bar.height"
-          :fill="bar.fill"
-          :style="{ color: bar.color }"
-          :opacity="bar.kind === 'actual' ? 0.86 : 0.78"
-          rx="1"
-        />
-        <template v-for="layer in renderedUseLayers" :key="layer.id">
-          <path
-            v-for="(path, index) in layer.paths"
-            :key="`${layer.id}:${index}`"
-            :class="areaClass(layer.id)"
-            :d="path.d"
-            :fill="areaFill(layer, path)"
-            :style="{ color: layer.color }"
-            opacity="0.72"
+          <line
+            v-if="todayX !== null"
+            class="analytics-combination-today-marker"
+            :x1="todayX"
+            :x2="todayX"
+            :y1="chartLayout.crosshairY1"
+            :y2="chartLayout.crosshairY2"
+            stroke="var(--transfer2)"
+            stroke-width="1.5"
+            stroke-dasharray="3 3"
+            aria-hidden="true"
           />
-          <path
-            v-for="(path, index) in layer.refundPaths"
-            :key="`${layer.id}:refund:${index}`"
-            :class="areaClass(layer.refundSeriesId)"
-            :d="path.d"
-            :fill="paintUrl('refund')"
-            :style="{ color: layer.color }"
-            opacity="0.9"
-          />
-        </template>
-        <template v-for="band in renderedSourceBands" :key="band.id">
-          <path v-for="(path, index) in band.paths" :key="`${band.id}:${index}`" :class="areaClass(band.id)" :d="path.d" :fill="areaFill(band, path)" :style="{ color: band.color }" opacity="0.55" />
-        </template>
-        <path v-for="(path, index) in renderedPositiveGap" :key="`positive-gap:${index}`" :class="areaClass('gap-positive')" :d="path.d" :fill="paintUrl('gap-positive')" />
-        <path v-for="(path, index) in renderedNegativeGap" :key="`negative-gap:${index}`" :class="areaClass('gap-negative')" :d="path.d" :fill="paintUrl('gap-negative')" />
-        <path
-          v-for="(path, index) in ordinaryIncomePaths"
-          :key="`income:${index}`"
-          :d="path.d"
-          fill="none"
-          :stroke="ordinaryIncome.color"
-          stroke-width="2.5"
-          :stroke-dasharray="path.forecast ? '8 6' : null"
-        />
-        <path
-          v-for="(path, index) in totalSourcePaths"
-          :key="`sources:${index}`"
-          :d="path.d"
-          fill="none"
-          :stroke="totalSources.color"
-          stroke-width="1.5"
-          :stroke-dasharray="path.forecast ? '5 4' : '2 3'"
-        />
-        <path
-          v-for="(path, index) in availableLinePaths"
-          :key="`available:${index}`"
-          :d="path.d"
-          fill="none"
-          :stroke="availableLine.color"
-          stroke-width="2.5"
-          :stroke-dasharray="path.forecast ? '7 5' : null"
-        />
-      </g>
 
-      <g v-if="selectionMode === 'month' && selectedIndex >= 0" aria-hidden="true">
-        <line class="analytics-chart-crosshair" :x1="selectedX" :x2="selectedX" :y1="layout.crosshairY1" :y2="layout.crosshairY2" />
-        <circle
-          v-for="selectedRow in selectedRows.filter(({ y }) => Number.isFinite(y))"
-          :key="selectedRow.seriesId"
-          :cx="selectedX"
-          :cy="selectedRow.y"
-          r="5"
-          :fill="selectedRow.color"
-          stroke="var(--van-background-2)"
-          stroke-width="2"
+          <g aria-hidden="true">
+            <rect
+              v-if="selectedMonthBand"
+              class="analytics-combination-selected-month-band"
+              :x="selectedMonthBand.x"
+              :y="chartLayout.padding.top"
+              :width="selectedMonthBand.width"
+              :height="innerHeight"
+            />
+            <rect
+              v-for="bar in renderedBars"
+              :key="bar.key"
+              :x="bar.x"
+              :y="bar.y"
+              :width="bar.width"
+              :height="bar.height"
+              :fill="bar.fill"
+              :style="{ color: bar.color }"
+              :opacity="bar.kind === 'actual' ? 0.86 : 0.78"
+              rx="1"
+            />
+            <template v-for="layer in renderedUseLayers" :key="layer.id">
+              <path
+                v-for="(path, index) in layer.paths"
+                :key="`${layer.id}:${index}`"
+                :class="areaClass(layer.id)"
+                :d="path.d"
+                :fill="areaFill(layer, path)"
+                :stroke="areaStroke(layer)"
+                :stroke-dasharray="patternVariantStrokeDasharray(layer.patternVariant)"
+                :data-pattern="layer.pattern"
+                :data-pattern-variant="layer.patternVariant"
+                :data-marker-kind="layer.markerKind"
+                :data-legend-ordinal="layer.legendOrdinal"
+                :style="{ color: layer.color }"
+                opacity="0.72"
+              />
+              <path
+                v-for="(path, index) in layer.refundPaths"
+                :key="`${layer.id}:refund:${index}`"
+                :class="areaClass(layer.refundSeriesId)"
+                :d="path.d"
+                :fill="paintUrl('refund')"
+                data-pattern="refund"
+                data-marker-kind="area"
+                :style="{ color: layer.color }"
+                opacity="0.9"
+              />
+            </template>
+            <template v-for="band in renderedSourceBands" :key="band.id">
+              <path
+                v-for="(path, index) in band.paths"
+                :key="`${band.id}:${index}`"
+                :class="areaClass(band.id)"
+                :d="path.d"
+                :fill="areaFill(band, path)"
+                :stroke="areaStroke(band)"
+                :stroke-dasharray="patternVariantStrokeDasharray(band.patternVariant)"
+                :data-pattern="band.pattern"
+                :data-pattern-variant="band.patternVariant"
+                :data-marker-kind="band.markerKind"
+                :data-legend-ordinal="band.legendOrdinal"
+                :style="{ color: band.color }"
+                opacity="0.55"
+              />
+            </template>
+            <path v-for="(path, index) in renderedPositiveGap" :key="`positive-gap:${index}`" :class="areaClass('gap-positive')" :d="path.d" :fill="paintUrl('gap-positive')" />
+            <path v-for="(path, index) in renderedNegativeGap" :key="`negative-gap:${index}`" :class="areaClass('gap-negative')" :d="path.d" :fill="paintUrl('gap-negative')" />
+            <path
+              v-for="(path, index) in ordinaryIncomePaths"
+              :key="`income:${index}`"
+              :class="lineClass(ordinaryIncome.id)"
+              :d="path.d"
+              fill="none"
+              :stroke="ordinaryIncome.color"
+              stroke-width="2.5"
+              :stroke-dasharray="path.forecast ? '8 6' : null"
+            />
+            <path
+              v-for="(path, index) in totalSourcePaths"
+              :key="`sources:${index}`"
+              :class="lineClass(totalSources.id)"
+              :d="path.d"
+              fill="none"
+              :stroke="totalSources.color"
+              stroke-width="1.5"
+              :stroke-dasharray="path.forecast ? '5 4' : '2 3'"
+            />
+            <path
+              v-for="(path, index) in availableLinePaths"
+              :key="`available:${index}`"
+              :class="lineClass(availableLine.id)"
+              :d="path.d"
+              fill="none"
+              :stroke="availableLine.color"
+              stroke-width="2.5"
+              :stroke-dasharray="path.forecast ? '7 5' : null"
+            />
+          </g>
+
+          <path v-if="selectedSegment" class="analytics-combination-selected-segment" :d="selectedSegment.d" fill="none" />
+
+          <g v-if="selectionMode === 'month' && selectedIndex >= 0" aria-hidden="true">
+            <line class="analytics-chart-crosshair" :x1="selectedX" :x2="selectedX" :y1="chartLayout.crosshairY1" :y2="chartLayout.crosshairY2" />
+            <circle
+              v-for="selectedRow in selectedRows.filter(({ y }) => Number.isFinite(y))"
+              :key="selectedRow.seriesId"
+              :cx="selectedX"
+              :cy="selectedRow.y"
+              r="5"
+              :fill="selectedRow.color"
+              stroke="var(--van-background-2)"
+              stroke-width="2"
+            />
+          </g>
+        </svg>
+
+        <div v-if="selectionMode === 'area' && activeAreaLabel" class="analytics-combination-area-label" :style="areaLabelPosition">
+          {{ $t('analytics.cash_use.area_label', { label: activeAreaLabel }) }}
+        </div>
+
+        <div v-if="selectionMode === 'month' && selectedIndex >= 0" class="analytics-chart-tooltip" :class="{ right: tooltipOnRight, interactive: isPinned || isKeyboardSelection }">
+          <div class="font-weight-600">{{ selectedXLabel }}</div>
+          <button
+            v-for="selectedRow in selectedRows"
+            :key="selectedRow.seriesId"
+            type="button"
+            class="analytics-chart-tooltip-row"
+            :style="{ minHeight: '44px' }"
+            :tabindex="isPinned || isKeyboardSelection ? 0 : -1"
+            @click="emitRow(selectedRow, $event.detail === 0 ? 'keyboard' : 'pointer')"
+          >
+            <span class="analytics-chart-legend-marker" :style="{ backgroundColor: selectedRow.color }" />
+            <span class="flex-1">{{ selectedRow.label }}</span>
+            <span class="analytics-chart-tooltip-amount">{{ selectedRow.point.valueLabel }}</span>
+            <span v-if="selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.forecast') }}</span>
+            <span v-if="Number.isFinite(selectedRow.point.actualValue) && selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">
+              {{ $t('analytics.cash_use.actual_to_date') }}: {{ valueFormatter(selectedRow.point.actualValue) }}
+            </span>
+            <span v-if="Number.isFinite(selectedRow.point.projectedValue) && selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">
+              {{ $t('analytics.cash_use.projected_remaining') }}: {{ valueFormatter(selectedRow.point.projectedValue) }}
+            </span>
+            <span v-if="Number.isFinite(selectedRow.point.progress) && selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">
+              {{ $t('analytics.cash_use.progress') }}: {{ Math.round(selectedRow.point.progress * 100) }}%
+            </span>
+            <span v-if="selectedRow.point.status === 'partial'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.partial') }}</span>
+            <span v-if="selectedRow.point.sourceKind && selectedRow.point.sourceKind !== 'actual'" class="analytics-chart-tooltip-qualifier">{{ selectedRow.label }}</span>
+            <span v-if="(selectedRow.point.refundCoverage?.totalRefunded ?? selectedRow.point.refundCoverage?.refunded) > 0" class="analytics-chart-tooltip-qualifier">
+              {{ $t('analytics.cash_use.refund_coverage') }}: {{ valueFormatter(selectedRow.point.refundCoverage.totalRefunded ?? selectedRow.point.refundCoverage.refunded) }}
+            </span>
+          </button>
+        </div>
+
+        <div v-if="displaySelection.mode === 'seriesMonth'" class="analytics-combination-series-month-callout">
+          {{ selectedSeriesMonthLabel }}
+        </div>
+
+        <analytics-cash-use-month-row
+          v-if="pinnedSelection?.seriesId"
+          :series="pinnedSeries"
+          :month-keys="xValues"
+          :active-month-index="displaySelection.monthIndex"
+          :canvas-width="canvasWidth"
+          :padding="chartLayout.padding"
+          :value-formatter="valueFormatter"
+          @activate="onMonthRowActivate"
         />
-      </g>
-    </svg>
-
-    <div v-if="selectionMode === 'area' && activeAreaLabel" class="analytics-combination-area-label" :style="areaLabelPosition">
-      {{ $t('analytics.cash_use.area_label', { label: activeAreaLabel }) }}
-    </div>
-
-    <div v-if="selectionMode === 'month' && selectedIndex >= 0" class="analytics-chart-tooltip" :class="{ right: tooltipOnRight, interactive: isPinned || isKeyboardSelection }">
-      <div class="font-weight-600">{{ selectedXLabel }}</div>
-      <button
-        v-for="selectedRow in selectedRows"
-        :key="selectedRow.seriesId"
-        type="button"
-        class="analytics-chart-tooltip-row"
-        :style="{ minHeight: '44px' }"
-        :tabindex="isPinned || isKeyboardSelection ? 0 : -1"
-        @click="emitRow(selectedRow, $event.detail === 0 ? 'keyboard' : 'pointer')"
-      >
-        <span class="analytics-chart-legend-marker" :style="{ backgroundColor: selectedRow.color }" />
-        <span class="flex-1">{{ selectedRow.label }}</span>
-        <span class="analytics-chart-tooltip-amount">{{ selectedRow.point.valueLabel }}</span>
-        <span v-if="selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.forecast') }}</span>
-        <span v-if="Number.isFinite(selectedRow.point.actualValue) && selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">
-          {{ $t('analytics.cash_use.actual_to_date') }}: {{ valueFormatter(selectedRow.point.actualValue) }}
-        </span>
-        <span v-if="Number.isFinite(selectedRow.point.projectedValue) && selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">
-          {{ $t('analytics.cash_use.projected_remaining') }}: {{ valueFormatter(selectedRow.point.projectedValue) }}
-        </span>
-        <span v-if="Number.isFinite(selectedRow.point.progress) && selectedRow.point.kind === 'forecast'" class="analytics-chart-tooltip-qualifier">
-          {{ $t('analytics.cash_use.progress') }}: {{ Math.round(selectedRow.point.progress * 100) }}%
-        </span>
-        <span v-if="selectedRow.point.status === 'partial'" class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.partial') }}</span>
-        <span v-if="selectedRow.point.sourceKind && selectedRow.point.sourceKind !== 'actual'" class="analytics-chart-tooltip-qualifier">{{ selectedRow.label }}</span>
-        <span v-if="(selectedRow.point.refundCoverage?.totalRefunded ?? selectedRow.point.refundCoverage?.refunded) > 0" class="analytics-chart-tooltip-qualifier">
-          {{ $t('analytics.cash_use.refund_coverage') }}: {{ valueFormatter(selectedRow.point.refundCoverage.totalRefunded ?? selectedRow.point.refundCoverage.refunded) }}
-        </span>
-      </button>
+      </div>
     </div>
 
     <div class="sr-only" aria-live="polite">{{ liveDescription }}</div>
@@ -193,9 +266,16 @@
 
 <script setup>
 import { onClickOutside, useElementSize } from '@vueuse/core'
-import { useId } from 'vue'
+import { nextTick, useId } from 'vue'
 import { useAppStore } from '~/stores/appStore.js'
-import { buildCombinationAreaGeometry, reduceCombinationChartInteraction, resolveCombinationChartTarget } from '~/utils/AnalyticsCashUseUtils.js'
+import {
+  buildCombinationAreaGeometry,
+  buildCombinationMonthBand,
+  buildCombinationSelectedSegment,
+  displayCombinationSelection,
+  reduceCombinationChartInteraction,
+  resolveCombinationChartTarget,
+} from '~/utils/AnalyticsCashUseUtils.js'
 import { buildLineChartLayout, buildLineChartSelectionPayload, nearestChartPointIndex } from '~/utils/ChartUtils.js'
 
 const GRID_LINE_COUNT = 5
@@ -208,6 +288,7 @@ const props = defineProps({
   ariaLabel: { type: String, required: true },
   valueFormatter: { type: Function, required: true },
   pinned: { type: Boolean, default: false },
+  legendItems: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['select', 'select-point'])
@@ -215,31 +296,46 @@ const appStore = useAppStore()
 const { t } = useI18n()
 const root = ref(null)
 const chart = ref(null)
+const scroll = ref(null)
 const { width: renderedWidth } = useElementSize(root)
-const interaction = ref({
-  selectedIndex: -1,
-  mode: null,
-  selectedSeriesId: null,
-  isPinned: props.pinned,
-  isKeyboardSelection: false,
-  isDragging: false,
-  pointerStartedOnPinnedIndex: -1,
-  pointerStartedOnPinnedSeriesId: null,
-  effect: null,
-})
-const selectedIndex = computed(() => interaction.value.selectedIndex)
-const selectionMode = computed(() => interaction.value.mode)
-const selectedSeriesId = computed(() => interaction.value.selectedSeriesId)
-const isPinned = computed(() => interaction.value.isPinned)
-const isKeyboardSelection = computed(() => interaction.value.isKeyboardSelection)
+const interaction = ref(
+  props.legendItems.length
+    ? { previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect: null }
+    : {
+        selectedIndex: -1,
+        mode: null,
+        selectedSeriesId: null,
+        isPinned: props.pinned,
+        isKeyboardSelection: false,
+        isDragging: false,
+        pointerStartedOnPinnedIndex: -1,
+        pointerStartedOnPinnedSeriesId: null,
+        effect: null,
+      },
+)
+const displaySelection = computed(() => displayCombinationSelection(interaction.value))
+const pinnedSelection = computed(() => interaction.value.pinnedSelection ?? null)
+const selectedIndex = computed(() => (['month', 'seriesMonth'].includes(displaySelection.value.mode) ? displaySelection.value.monthIndex : -1))
+const selectionMode = computed(() => (displaySelection.value.mode === 'seriesMonth' ? 'area' : displaySelection.value.mode))
+const selectedSeriesId = computed(() => displaySelection.value.seriesId)
+const isPinned = computed(
+  () =>
+    pinnedSelection.value &&
+    displaySelection.value.mode === pinnedSelection.value.mode &&
+    displaySelection.value.seriesId === pinnedSelection.value.seriesId &&
+    displaySelection.value.monthIndex === pinnedSelection.value.monthIndex,
+)
+const isKeyboardSelection = computed(() => interaction.value.isKeyboardSelection ?? false)
 const areaLabelPosition = ref({ left: '8px', top: '8px' })
 
 const layout = computed(() => buildLineChartLayout({ isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
 const xValues = computed(() => props.series.dateKeys ?? props.series.monthKeys ?? [])
 const pointCount = computed(() => xValues.value.length)
-const innerWidth = computed(() => layout.value.width - layout.value.padding.left - layout.value.padding.right)
-const innerHeight = computed(() => layout.value.height - layout.value.padding.top - layout.value.padding.bottom)
-const xAt = (index) => layout.value.padding.left + (index / Math.max(1, pointCount.value - 1)) * innerWidth.value
+const canvasWidth = computed(() => (pointCount.value >= 12 ? Math.max(layout.value.width, pointCount.value * 52 + layout.value.padding.left + layout.value.padding.right) : layout.value.width))
+const chartLayout = computed(() => ({ ...layout.value, width: canvasWidth.value, gridX2: canvasWidth.value - layout.value.padding.right, viewBox: `0 0 ${canvasWidth.value} ${layout.value.height}` }))
+const innerWidth = computed(() => chartLayout.value.width - chartLayout.value.padding.left - chartLayout.value.padding.right)
+const innerHeight = computed(() => chartLayout.value.height - chartLayout.value.padding.top - chartLayout.value.padding.bottom)
+const xAt = (index) => chartLayout.value.padding.left + (index / Math.max(1, pointCount.value - 1)) * innerWidth.value
 const yValues = computed(() => {
   const values = [
     ...(props.series.useLayers ?? []).flatMap(({ points }) => points.flatMap(({ top }) => (Number.isFinite(top) ? [top] : []))),
@@ -255,7 +351,7 @@ const yValues = computed(() => {
 const yMax = computed(() => Math.max(1, ...yValues.value))
 const yMin = computed(() => Math.min(0, ...yValues.value))
 const yRange = computed(() => Math.max(1, yMax.value - yMin.value))
-const yAt = (value) => layout.value.padding.top + ((yMax.value - value) / yRange.value) * innerHeight.value
+const yAt = (value) => chartLayout.value.padding.top + ((yMax.value - value) / yRange.value) * innerHeight.value
 const pointAt = (points, key) => points.find((point) => point.x === key)
 const xLabelAt = (key) =>
   pointAt(props.series.ordinaryIncome?.points ?? [], key)?.xLabel ??
@@ -349,12 +445,12 @@ const renderedBars = computed(() =>
 )
 const areaFill = (item, path) => {
   if (path.forecast) return paintUrl('forecast')
-  if (item.pattern === 'refund') return paintUrl('refund')
-  if (item.pattern === 'accessible-savings') return paintUrl('accessible-savings')
-  if (item.pattern === 'restricted-savings') return paintUrl('restricted-savings')
-  if (item.pattern === 'debt') return paintUrl('debt')
+  if (['refund', 'accessible-savings', 'restricted-savings', 'debt', 'category-dots', 'category-horizontal', 'category-grid'].includes(item.pattern)) return paintUrl(item.pattern)
   return item.color
 }
+const patternVariantStrokeDasharray = (patternVariant) =>
+  ({ outline: '1 0', offset: '4 2', inverse: '2 2', dense: '1 1', sparse: '6 3', cross: '3 1 1 1', wave: '5 2 1 2', dash: '7 3' })[patternVariant] ?? null
+const areaStroke = (item) => (item.patternVariant && item.patternVariant !== 'primary' ? item.color : null)
 const hoverAreas = computed(() => [
   ...(props.series.useLayers ?? []).flatMap((layer) => [
     { seriesId: layer.id, label: layer.label ?? layer.id, points: layer.points },
@@ -375,14 +471,58 @@ const hoverAreas = computed(() => [
 const activeAreaLabel = computed(() => hoverAreas.value.find(({ seriesId }) => seriesId === selectedSeriesId.value)?.label ?? '')
 const areaClass = (seriesId) => ({
   'analytics-combination-area': true,
-  'analytics-combination-area-active': selectionMode.value === 'area' && selectedSeriesId.value === seriesId,
-  'analytics-combination-area-dimmed': selectionMode.value === 'area' && selectedSeriesId.value !== seriesId,
+  'analytics-combination-area-active':
+    Boolean(selectedSeriesId.value) && (selectedSeriesId.value === seriesId || (selectedSeriesId.value === 'refund-coverage' && seriesId.startsWith('refund-coverage:'))),
+  'analytics-combination-area-dimmed':
+    Boolean(selectedSeriesId.value) && selectedSeriesId.value !== seriesId && !(selectedSeriesId.value === 'refund-coverage' && seriesId.startsWith('refund-coverage:')),
+})
+const lineClass = (seriesId) => ({
+  'analytics-combination-line': true,
+  'analytics-combination-line-active': Boolean(selectedSeriesId.value) && selectedSeriesId.value === seriesId,
+  'analytics-combination-line-dimmed': Boolean(selectedSeriesId.value) && selectedSeriesId.value !== seriesId,
+})
+const seriesRegistry = computed(() => [
+  ...(props.series.useLayers ?? []),
+  ...(props.series.sourceBands ?? []),
+  ordinaryIncome.value,
+  totalSources.value,
+  availableLine.value,
+  {
+    id: 'gap-positive',
+    label: t('analytics.cash_use.new_excess'),
+    points: (props.series.gap?.points ?? []).filter(({ direction }) => direction === 'positive'),
+    color: 'var(--income2)',
+    pattern: 'gap-positive',
+    markerKind: 'area',
+  },
+  {
+    id: 'gap-negative',
+    label: t('analytics.cash_use.existing_available_funds_required'),
+    points: (props.series.gap?.points ?? []).filter(({ direction }) => direction === 'negative'),
+    color: 'var(--expense2)',
+    pattern: 'gap-negative',
+    markerKind: 'area',
+  },
+])
+const selectedSeries = computed(() => seriesRegistry.value.find(({ id }) => id === selectedSeriesId.value) ?? null)
+const pinnedSeries = computed(() => seriesRegistry.value.find(({ id }) => id === pinnedSelection.value?.seriesId) ?? { points: [], label: '', color: '', pattern: 'solid', markerKind: 'area' })
+const selectedMonthBand = computed(() => {
+  if (!['month', 'seriesMonth'].includes(displaySelection.value.mode)) return null
+  return buildCombinationMonthBand({ monthIndex: displaySelection.value.monthIndex, xAt })
+})
+const selectedSegment = computed(() => {
+  if (displaySelection.value.mode !== 'seriesMonth' || !selectedSeries.value) return null
+  return buildCombinationSelectedSegment({ points: selectedSeries.value.points, xValues: xValues.value, monthIndex: displaySelection.value.monthIndex, xAt, yAt })
 })
 const selectedXValue = computed(() => xValues.value[selectedIndex.value])
 const selectedX = computed(() => (selectedIndex.value < 0 ? 0 : xAt(selectedIndex.value)))
 const selectedXLabel = computed(() => (selectedXValue.value ? xLabelAt(selectedXValue.value) : ''))
 const tooltipOnRight = computed(() => selectedIndex.value < pointCount.value / 2)
 const todayX = computed(() => (Number.isInteger(props.series.todayIndex) && props.series.todayIndex >= 0 ? xAt(props.series.todayIndex) : null))
+const selectedSeriesMonthLabel = computed(() => {
+  const point = selectedSeries.value?.points?.find((item) => item.x === selectedXValue.value)
+  return point ? `${selectedSeries.value.label}: ${props.valueFormatter(point.value)}` : ''
+})
 
 const row = ({ seriesId, label, color, point, value = point?.value, yValue = value }) => ({
   seriesId,
@@ -445,7 +585,7 @@ const selectedRows = computed(() => {
 const gridLines = computed(() =>
   Array.from({ length: GRID_LINE_COUNT }, (_, index) => {
     const ratio = index / (GRID_LINE_COUNT - 1)
-    return { y: layout.value.padding.top + ratio * innerHeight.value, label: props.valueFormatter(yMax.value - yRange.value * ratio) }
+    return { y: chartLayout.value.padding.top + ratio * innerHeight.value, label: props.valueFormatter(yMax.value - yRange.value * ratio) }
   }),
 )
 const xAxisLabels = computed(() => {
@@ -485,6 +625,13 @@ const applyInteraction = (event) => {
   }
 }
 const clearSelection = () => applyInteraction({ type: 'clear' })
+const onLegendPreview = (seriesId) => applyInteraction({ type: 'legendPreview', seriesId })
+const onLegendLeave = () => applyInteraction({ type: 'legendLeave' })
+const onLegendToggle = (seriesId) => applyInteraction({ type: 'legendToggle', seriesId })
+const onMonthRowActivate = ({ point, activation }) => {
+  if (!point?.transactionIds?.length) return
+  emit('select-point', buildLineChartSelectionPayload({ seriesId: pinnedSelection.value?.seriesId, point, activation }))
+}
 const pointerTarget = (event) => {
   const bounds = chart.value?.getBoundingClientRect()
   if (!bounds) return null
@@ -497,8 +644,8 @@ const pointerTarget = (event) => {
       clientX: event.clientX,
       left: bounds.left,
       width: bounds.width,
-      viewBoxWidth: layout.value.width,
-      padding: layout.value.padding,
+      viewBoxWidth: chartLayout.value.width,
+      padding: chartLayout.value.padding,
       pointCount: pointCount.value,
     })
     return index < 0 ? null : { mode: 'month', index }
@@ -506,8 +653,8 @@ const pointerTarget = (event) => {
   return resolveCombinationChartTarget({
     clientPoint: { x: event.clientX, y: event.clientY },
     bounds,
-    viewBox: { width: layout.value.width, height: layout.value.height },
-    padding: layout.value.padding,
+    viewBox: { width: chartLayout.value.width, height: chartLayout.value.height },
+    padding: chartLayout.value.padding,
     xValues: xValues.value,
     areas: hoverAreas.value,
     yAt,
@@ -540,5 +687,13 @@ const onRootKeydown = (event) => {
 const emitRow = (item, activation) => applyInteraction({ type: 'rowSelect', item, activation })
 
 watch(pointCount, () => applyInteraction({ type: 'pointCountChanged' }))
+watch(
+  () => [pinnedSelection.value?.seriesId, displaySelection.value.monthIndex],
+  async ([seriesId, monthIndex]) => {
+    if (!seriesId || monthIndex < 0) return
+    await nextTick()
+    scroll.value?.querySelector('.analytics-cash-use-month-cell.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  },
+)
 onClickOutside(root, clearSelection)
 </script>
