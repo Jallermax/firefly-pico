@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import * as AnalyticsCashUseUtils from '../../utils/AnalyticsCashUseUtils.js'
 import { projectLineChartSelection } from '../../utils/ChartUtils.js'
 
-const { buildCashUseSeries } = AnalyticsCashUseUtils
+const { buildCashUseSeries, buildCashUseVisualStyles } = AnalyticsCashUseUtils
 
 const refundDefaults = {
   isRefund: false,
@@ -86,6 +86,44 @@ const sourceFor = (series, id) => series.sourceBands.find((layer) => layer.id ==
 const geometryFor = (options) => AnalyticsCashUseUtils.buildCombinationAreaGeometry?.(options) ?? []
 const interactionFor = (state, event) => AnalyticsCashUseUtils.reduceCombinationChartInteraction?.(state, event) ?? state
 const reconciliationFor = (options) => AnalyticsCashUseUtils.propagateCashUseReconciliation?.(options) ?? options
+const cashUseStyles = (series) =>
+  buildCashUseVisualStyles({
+    series,
+    categoryColors: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10'],
+    sourceColors: ['s1', 's2', 's3'],
+    semanticColors: { income: 'green', expense: 'pink', transfer: 'blue', neutral: 'grey' },
+  })
+
+test('Cash Use assigns deterministic non-colliding visual tuples', () => {
+  for (const series of [build({ entries: rankedCategoryEntries(12), detailLevel: 5 }), build({ entries: rankedCategoryEntries(12), detailLevel: 10 }), build({ entries: rankedCategoryEntries(20), detailLevel: 'all' })]) {
+    const styles = cashUseStyles(series)
+    const categoryTuples = Object.entries(styles)
+      .filter(([id]) => id.startsWith('category:'))
+      .map(([, style]) => `${style.color}|${style.pattern}|${style.markerKind}`)
+
+    assert.equal(new Set(categoryTuples).size, categoryTuples.length)
+  }
+
+  const styles = cashUseStyles(build({ entries: rankedCategoryEntries(20), detailLevel: 'all' }))
+  assert.deepEqual(styles['gap-positive'], { color: 'green', pattern: 'gap-positive', markerKind: 'area' })
+  assert.deepEqual(styles['ordinary-income'], { color: 'green', pattern: 'line', markerKind: 'line' })
+  assert.deepEqual(styles['total-sources'], { color: 'grey', pattern: 'dotted-line', markerKind: 'line' })
+})
+
+test('Cash Use keeps Other distinct and ignores non-category source order', () => {
+  const entries = [
+    ...rankedCategoryEntries(12),
+    entry({ id: 'income', value: 500, sourceKind: 'revenue', destinationKind: 'available' }),
+    entry({ id: 'savings', value: 100, sourceKind: 'available', destinationKind: 'savingsAccessible' }),
+    entry({ id: 'debt', value: 50, sourceKind: 'liability', destinationKind: 'available' }),
+  ]
+  const ordered = cashUseStyles(build({ entries, mode: 'full', detailLevel: 5 }))
+  const shuffled = cashUseStyles(build({ entries: [...rankedCategoryEntries(12), ...entries.slice(12).reverse()], mode: 'full', detailLevel: 5 }))
+
+  assert.equal(JSON.stringify(shuffled), JSON.stringify(ordered))
+  assert.deepEqual(ordered['category:other'], { color: 'blue', pattern: 'category-dots', markerKind: 'area' })
+  assert.notDeepEqual(ordered['category:other'], ordered['category:category-1'])
+})
 
 test('spending mode reconciles gross category areas, truthful refund cash, coverage, zero months, and exact IDs', () => {
   const result = build({

@@ -4,6 +4,7 @@ const DETAIL_LEVELS = [5, 10, 'all']
 const MONEY_KINDS = new Set(['available', 'savingsAccessible', 'savingsRestricted', 'liability'])
 const SAVINGS_KINDS = new Set(['savingsAccessible', 'savingsRestricted'])
 const UNCATEGORIZED_ID = 'uncategorized'
+const CATEGORY_PATTERNS = ['solid', 'category-dots', 'category-horizontal', 'category-grid']
 
 const unique = (values) => [...new Set(values.filter((value) => value !== null && value !== undefined && value !== '').map(String))].sort()
 const round = (value) => (Number.isFinite(value) ? Number(value.toFixed(8)) : value)
@@ -203,6 +204,43 @@ export function propagateCashUseReconciliation({ totals, gap, reconciliation }) 
   const statuses = reconciliation.map(({ status }) => status)
   const auditStatus = statuses.includes('mismatch') ? 'mismatch' : statuses.includes('unavailable') ? 'unavailable' : statuses.includes('partial') ? 'partial' : 'ok'
   return { totals: nextTotals, gap: nextGap, auditStatus }
+}
+
+export function buildCashUseVisualStyles({ series, categoryColors, sourceColors, semanticColors }) {
+  const styles = {}
+  const expenseLayers = series.useLayers.filter(({ kind }) => ['expenseCategory', 'otherExpense'].includes(kind))
+  expenseLayers.forEach((layer, index) => {
+    const isOther = layer.kind === 'otherExpense'
+    styles[layer.id] = {
+      color: isOther ? semanticColors.transfer : categoryColors[index % categoryColors.length],
+      pattern: isOther ? 'category-dots' : CATEGORY_PATTERNS[Math.floor(index / categoryColors.length) % CATEGORY_PATTERNS.length],
+      markerKind: 'area',
+    }
+  })
+
+  for (const layer of series.useLayers.filter(({ kind }) => !['expenseCategory', 'otherExpense'].includes(kind))) {
+    const savings = layer.kind.toLowerCase().includes('savings')
+    styles[layer.id] = {
+      color: savings ? sourceColors[layer.kind.includes('Restricted') ? 1 : 0] : semanticColors.expense,
+      pattern: savings ? layer.pattern : 'debt',
+      markerKind: 'area',
+    }
+  }
+
+  for (const [index, band] of series.sourceBands.entries()) {
+    styles[band.id] = {
+      color: band.kind === 'refunds' || band.kind === 'newDebt' ? semanticColors.expense : sourceColors[index % sourceColors.length],
+      pattern: band.pattern,
+      markerKind: 'area',
+    }
+  }
+
+  styles['refund-coverage'] = { color: semanticColors.expense, pattern: 'refund', markerKind: 'area' }
+  styles['ordinary-income'] = { color: semanticColors.income, pattern: 'line', markerKind: 'line' }
+  styles['gap-positive'] = { color: semanticColors.income, pattern: 'gap-positive', markerKind: 'area' }
+  styles['gap-negative'] = { color: semanticColors.expense, pattern: 'gap-negative', markerKind: 'area' }
+  styles['total-sources'] = { color: semanticColors.neutral, pattern: 'dotted-line', markerKind: 'line' }
+  return styles
 }
 
 const emptyBucket = () => ({ value: 0, transactionIds: [], unavailableTransactionIds: [] })
