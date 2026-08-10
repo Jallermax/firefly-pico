@@ -523,6 +523,15 @@
     color: var(--van-text-color);
 }
 
+.van-theme-dark .analytics-combination-area-label {
+    background: #2a2a2c;
+    box-shadow: rgba(0, 0, 0, 0.45) 0 3px 10px;
+}
+
+.van-theme-dark .analytics-combination-area-active {
+    filter: drop-shadow(0 1px 3px rgba(255, 255, 255, 0.18));
+}
+
 .van-theme-dark .analytics-daily-forecast-summary-item,
 .van-theme-dark .analytics-daily-forecast-day-summary > div {
     background: #242426;

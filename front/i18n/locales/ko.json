@@ -40,6 +40,8 @@
       "title": "Cash use",
       "subtitle": "How income and existing funds covered spending, savings, and debt",
       "chart_label": "Monthly sources, uses, and excess or shortfall",
+      "legend_label": "현금 사용 차트 범례",
+      "area_label": "영역: {label}",
       "mode_spending": "Spending",
       "mode_full": "Full cash use",
       "definition": "Sources and uses are shown once and retain their transaction evidence.",

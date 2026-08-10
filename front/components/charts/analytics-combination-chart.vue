@@ -1,6 +1,7 @@
 <template>
   <div ref="root" class="analytics-line-chart analytics-combination-chart" @keydown="onRootKeydown">
     <svg
+      ref="chart"
       class="analytics-line-chart-svg analytics-combination-chart-svg"
       :viewBox="layout.viewBox"
       role="application"
@@ -82,14 +83,30 @@
           rx="1"
         />
         <template v-for="layer in renderedUseLayers" :key="layer.id">
-          <path v-for="(path, index) in layer.paths" :key="`${layer.id}:${index}`" :d="path.d" :fill="areaFill(layer, path)" :style="{ color: layer.color }" opacity="0.72" />
-          <path v-for="(path, index) in layer.refundPaths" :key="`${layer.id}:refund:${index}`" :d="path.d" :fill="paintUrl('refund')" :style="{ color: layer.color }" opacity="0.9" />
+          <path
+            v-for="(path, index) in layer.paths"
+            :key="`${layer.id}:${index}`"
+            :class="areaClass(layer.id)"
+            :d="path.d"
+            :fill="areaFill(layer, path)"
+            :style="{ color: layer.color }"
+            opacity="0.72"
+          />
+          <path
+            v-for="(path, index) in layer.refundPaths"
+            :key="`${layer.id}:refund:${index}`"
+            :class="areaClass(layer.refundSeriesId)"
+            :d="path.d"
+            :fill="paintUrl('refund')"
+            :style="{ color: layer.color }"
+            opacity="0.9"
+          />
         </template>
         <template v-for="band in renderedSourceBands" :key="band.id">
-          <path v-for="(path, index) in band.paths" :key="`${band.id}:${index}`" :d="path.d" :fill="areaFill(band, path)" :style="{ color: band.color }" opacity="0.55" />
+          <path v-for="(path, index) in band.paths" :key="`${band.id}:${index}`" :class="areaClass(band.id)" :d="path.d" :fill="areaFill(band, path)" :style="{ color: band.color }" opacity="0.55" />
         </template>
-        <path v-for="(path, index) in renderedPositiveGap" :key="`positive-gap:${index}`" :d="path.d" :fill="paintUrl('gap-positive')" />
-        <path v-for="(path, index) in renderedNegativeGap" :key="`negative-gap:${index}`" :d="path.d" :fill="paintUrl('gap-negative')" />
+        <path v-for="(path, index) in renderedPositiveGap" :key="`positive-gap:${index}`" :class="areaClass('gap-positive')" :d="path.d" :fill="paintUrl('gap-positive')" />
+        <path v-for="(path, index) in renderedNegativeGap" :key="`negative-gap:${index}`" :class="areaClass('gap-negative')" :d="path.d" :fill="paintUrl('gap-negative')" />
         <path
           v-for="(path, index) in ordinaryIncomePaths"
           :key="`income:${index}`"
@@ -119,9 +136,7 @@
         />
       </g>
 
-      <rect v-for="(key, index) in xValues" :key="`hit:${key}`" :x="hitAreaX(index)" :y="layout.padding.top" :width="hitAreaWidth" :height="innerHeight" fill="transparent" pointer-events="all" />
-
-      <g v-if="selectedIndex >= 0" aria-hidden="true">
+      <g v-if="selectionMode === 'month' && selectedIndex >= 0" aria-hidden="true">
         <line class="analytics-chart-crosshair" :x1="selectedX" :x2="selectedX" :y1="layout.crosshairY1" :y2="layout.crosshairY2" />
         <circle
           v-for="selectedRow in selectedRows.filter(({ y }) => Number.isFinite(y))"
@@ -136,7 +151,11 @@
       </g>
     </svg>
 
-    <div v-if="selectedIndex >= 0" class="analytics-chart-tooltip" :class="{ right: tooltipOnRight, interactive: isPinned || isKeyboardSelection }">
+    <div v-if="selectionMode === 'area' && activeAreaLabel" class="analytics-combination-area-label" :style="areaLabelPosition">
+      {{ $t('analytics.cash_use.area_label', { label: activeAreaLabel }) }}
+    </div>
+
+    <div v-if="selectionMode === 'month' && selectedIndex >= 0" class="analytics-chart-tooltip" :class="{ right: tooltipOnRight, interactive: isPinned || isKeyboardSelection }">
       <div class="font-weight-600">{{ selectedXLabel }}</div>
       <button
         v-for="selectedRow in selectedRows"
@@ -176,7 +195,7 @@
 import { onClickOutside, useElementSize } from '@vueuse/core'
 import { useId } from 'vue'
 import { useAppStore } from '~/stores/appStore.js'
-import { buildCombinationAreaGeometry, reduceCombinationChartInteraction } from '~/utils/AnalyticsCashUseUtils.js'
+import { buildCombinationAreaGeometry, reduceCombinationChartInteraction, resolveCombinationChartTarget } from '~/utils/AnalyticsCashUseUtils.js'
 import { buildLineChartLayout, buildLineChartSelectionPayload, nearestChartPointIndex } from '~/utils/ChartUtils.js'
 
 const GRID_LINE_COUNT = 5
@@ -193,12 +212,27 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'select-point'])
 const appStore = useAppStore()
+const { t } = useI18n()
 const root = ref(null)
+const chart = ref(null)
 const { width: renderedWidth } = useElementSize(root)
-const interaction = ref({ selectedIndex: -1, isPinned: props.pinned, isKeyboardSelection: false, isDragging: false, pointerStartedOnPinnedIndex: -1, effect: null })
+const interaction = ref({
+  selectedIndex: -1,
+  mode: null,
+  selectedSeriesId: null,
+  isPinned: props.pinned,
+  isKeyboardSelection: false,
+  isDragging: false,
+  pointerStartedOnPinnedIndex: -1,
+  pointerStartedOnPinnedSeriesId: null,
+  effect: null,
+})
 const selectedIndex = computed(() => interaction.value.selectedIndex)
+const selectionMode = computed(() => interaction.value.mode)
+const selectedSeriesId = computed(() => interaction.value.selectedSeriesId)
 const isPinned = computed(() => interaction.value.isPinned)
 const isKeyboardSelection = computed(() => interaction.value.isKeyboardSelection)
+const areaLabelPosition = ref({ left: '8px', top: '8px' })
 
 const layout = computed(() => buildLineChartLayout({ isDesktop: appStore.isDesktopLayout, renderedWidth: renderedWidth.value }))
 const xValues = computed(() => props.series.dateKeys ?? props.series.monthKeys ?? [])
@@ -254,9 +288,12 @@ const refundCoveragePoints = (points) =>
         ? Math.max(point.bottom, point.top - Math.max(0, point.refundCoverage.totalRefunded ?? point.refundCoverage.refunded))
         : null,
   }))
+const refundHoverPoints = (points) =>
+  refundCoveragePoints(points).map((point) => ((point.refundCoverage?.totalRefunded ?? point.refundCoverage?.refunded) > 0 ? point : { ...point, bottom: null, top: null }))
 const renderedUseLayers = computed(() =>
   (props.series.useLayers ?? []).map((layer) => ({
     ...layer,
+    refundSeriesId: `refund-coverage:${layer.id}`,
     paths: areaPaths(layer.points),
     refundPaths: areaPaths(refundCoveragePoints(layer.points), ({ refundCoverage }) => (refundCoverage?.totalRefunded ?? refundCoverage?.refunded) > 0),
   })),
@@ -318,6 +355,29 @@ const areaFill = (item, path) => {
   if (item.pattern === 'debt') return paintUrl('debt')
   return item.color
 }
+const hoverAreas = computed(() => [
+  ...(props.series.useLayers ?? []).flatMap((layer) => [
+    { seriesId: layer.id, label: layer.label ?? layer.id, points: layer.points },
+    { seriesId: `refund-coverage:${layer.id}`, label: t('analytics.cash_use.refund_coverage'), points: refundHoverPoints(layer.points) },
+  ]),
+  ...(props.series.sourceBands ?? []).map((band) => ({ seriesId: band.id, label: band.label ?? band.id, points: band.points })),
+  {
+    seriesId: 'gap-positive',
+    label: t('analytics.cash_use.new_excess'),
+    points: (props.series.gap?.points ?? []).map((point) => (point.direction === 'positive' ? point : { ...point, bottom: null, top: null })),
+  },
+  {
+    seriesId: 'gap-negative',
+    label: t('analytics.cash_use.existing_available_funds_required'),
+    points: (props.series.gap?.points ?? []).map((point) => (point.direction === 'negative' ? point : { ...point, bottom: null, top: null })),
+  },
+])
+const activeAreaLabel = computed(() => hoverAreas.value.find(({ seriesId }) => seriesId === selectedSeriesId.value)?.label ?? '')
+const areaClass = (seriesId) => ({
+  'analytics-combination-area': true,
+  'analytics-combination-area-active': selectionMode.value === 'area' && selectedSeriesId.value === seriesId,
+  'analytics-combination-area-dimmed': selectionMode.value === 'area' && selectedSeriesId.value !== seriesId,
+})
 const selectedXValue = computed(() => xValues.value[selectedIndex.value])
 const selectedX = computed(() => (selectedIndex.value < 0 ? 0 : xAt(selectedIndex.value)))
 const selectedXLabel = computed(() => (selectedXValue.value ? xLabelAt(selectedXValue.value) : ''))
@@ -397,16 +457,21 @@ const xAxisLabels = computed(() => {
     anchor: index === 0 ? 'start' : index === pointCount.value - 1 ? 'end' : 'middle',
   }))
 })
-const hitAreaWidth = computed(() => Math.max(44, innerWidth.value / Math.max(1, pointCount.value)))
-const hitAreaX = (index) => Math.max(layout.value.padding.left, Math.min(layout.value.width - layout.value.padding.right - hitAreaWidth.value, xAt(index) - hitAreaWidth.value / 2))
-const liveDescription = computed(() => (selectedIndex.value < 0 ? '' : [selectedXLabel.value, ...selectedRows.value.map(({ label, point }) => `${label}: ${point.valueLabel}`)].join('. ')))
-
-const selectionPayload = () => ({
-  index: selectedIndex.value,
-  x: selectedXValue.value,
-  xLabel: selectedXLabel.value,
-  values: selectedRows.value.map(({ seriesId, label, point }) => ({ seriesId, label, point })),
+const liveDescription = computed(() => {
+  if (selectionMode.value === 'area') return activeAreaLabel.value
+  return selectedIndex.value < 0 ? '' : [selectedXLabel.value, ...selectedRows.value.map(({ label, point }) => `${label}: ${point.valueLabel}`)].join('. ')
 })
+
+const selectionPayload = () =>
+  selectionMode.value === 'area'
+    ? { mode: 'area', index: selectedIndex.value, seriesId: selectedSeriesId.value, label: activeAreaLabel.value }
+    : {
+        mode: 'month',
+        index: selectedIndex.value,
+        x: selectedXValue.value,
+        xLabel: selectedXLabel.value,
+        values: selectedRows.value.map(({ seriesId, label, point }) => ({ seriesId, label, point })),
+      }
 const emitSelection = () => {
   if (selectedIndex.value >= 0) emit('select', selectionPayload())
 }
@@ -420,24 +485,46 @@ const applyInteraction = (event) => {
   }
 }
 const clearSelection = () => applyInteraction({ type: 'clear' })
-const pointerIndex = (event) => {
-  const bounds = root.value?.getBoundingClientRect()
-  if (!bounds) return -1
-  return nearestChartPointIndex({ clientX: event.clientX, left: bounds.left, width: bounds.width, viewBoxWidth: layout.value.width, padding: layout.value.padding, pointCount: pointCount.value })
+const pointerTarget = (event) => {
+  const bounds = chart.value?.getBoundingClientRect()
+  if (!bounds) return null
+  areaLabelPosition.value = {
+    left: `${Math.max(6, Math.min(bounds.width - 170, event.clientX - bounds.left + 12))}px`,
+    top: `${Math.max(6, event.clientY - bounds.top - 34)}px`,
+  }
+  if ((props.series.barGroups ?? []).length > 0) {
+    const index = nearestChartPointIndex({
+      clientX: event.clientX,
+      left: bounds.left,
+      width: bounds.width,
+      viewBoxWidth: layout.value.width,
+      padding: layout.value.padding,
+      pointCount: pointCount.value,
+    })
+    return index < 0 ? null : { mode: 'month', index }
+  }
+  return resolveCombinationChartTarget({
+    clientPoint: { x: event.clientX, y: event.clientY },
+    bounds,
+    viewBox: { width: layout.value.width, height: layout.value.height },
+    padding: layout.value.padding,
+    xValues: xValues.value,
+    areas: hoverAreas.value,
+    yAt,
+    pointerType: event.pointerType,
+  })
 }
 const onPointerMove = (event) => {
-  const index = pointerIndex(event)
-  applyInteraction({ type: 'pointerMove', index })
+  applyInteraction({ type: 'pointerMove', target: pointerTarget(event) })
 }
 const onPointerDown = (event) => {
-  const index = pointerIndex(event)
-  if (index < 0) return
-  applyInteraction({ type: 'pointerDown', index })
+  const target = pointerTarget(event)
+  if (!target) return
+  applyInteraction({ type: 'pointerDown', target })
   if (event.pointerType === 'touch') event.currentTarget.setPointerCapture?.(event.pointerId)
 }
 const onPointerUp = (event) => {
-  const index = pointerIndex(event)
-  applyInteraction({ type: 'pointerUp', index })
+  applyInteraction({ type: 'pointerUp', target: pointerTarget(event) })
 }
 const onPointerLeave = () => applyInteraction({ type: 'pointerLeave' })
 const onChartKeydown = (event) => {

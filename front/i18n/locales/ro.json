@@ -40,6 +40,8 @@
       "title": "Cash use",
       "subtitle": "How income and existing funds covered spending, savings, and debt",
       "chart_label": "Monthly sources, uses, and excess or shortfall",
+      "legend_label": "Legenda graficului de utilizare a banilor",
+      "area_label": "Zonă: {label}",
       "mode_spending": "Spending",
       "mode_full": "Full cash use",
       "definition": "Sources and uses are shown once and retain their transaction evidence.",

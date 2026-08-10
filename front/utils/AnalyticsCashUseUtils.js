@@ -64,48 +64,117 @@ export function buildCombinationAreaGeometry({ points = [], xValues = [], xAt, y
   return paths
 }
 
-const clearedInteraction = (effect = null) => ({ selectedIndex: -1, isPinned: false, isKeyboardSelection: false, isDragging: false, pointerStartedOnPinnedIndex: -1, effect })
+export function interpolateCombinationArea({ points = [], xValues = [], position }) {
+  if (!Number.isFinite(position) || xValues.length === 0) return null
+  const pointByX = new Map(points.map((point) => [point.x, point]))
+  const clamped = Math.min(xValues.length - 1, Math.max(0, position))
+  const leftIndex = Math.floor(clamped)
+  const rightIndex = Math.ceil(clamped)
+  const leftPoint = pointByX.get(xValues[leftIndex])
+  const rightPoint = pointByX.get(xValues[rightIndex])
+  const valid = (point) => Number.isFinite(point?.bottom) && Number.isFinite(point?.top)
+  if (!valid(leftPoint) || !valid(rightPoint)) return null
+  if (leftIndex === rightIndex) return { bottom: leftPoint.bottom, top: leftPoint.top, point: leftPoint, leftPoint, rightPoint }
+  const ratio = clamped - leftIndex
+  return {
+    bottom: leftPoint.bottom + (rightPoint.bottom - leftPoint.bottom) * ratio,
+    top: leftPoint.top + (rightPoint.top - leftPoint.top) * ratio,
+    point: null,
+    leftPoint,
+    rightPoint,
+  }
+}
+
+export function resolveCombinationChartTarget({ clientPoint, bounds, viewBox, padding, xValues = [], areas = [], yAt, pointerType = 'mouse' }) {
+  if (!clientPoint || !bounds?.width || !bounds?.height || !viewBox?.width || !viewBox?.height || xValues.length === 0 || typeof yAt !== 'function') return null
+  const svgX = ((clientPoint.x - bounds.left) / bounds.width) * viewBox.width
+  const svgY = ((clientPoint.y - bounds.top) / bounds.height) * viewBox.height
+  const innerWidth = viewBox.width - padding.left - padding.right
+  if (!Number.isFinite(svgX) || !Number.isFinite(svgY) || svgX < padding.left || svgX > viewBox.width - padding.right || svgY < 0 || svgY > viewBox.height) return null
+  const position = xValues.length > 1 ? ((svgX - padding.left) / innerWidth) * (xValues.length - 1) : 0
+  const index = Math.min(xValues.length - 1, Math.max(0, Math.round(position)))
+  const guideSvgX = padding.left + (index / Math.max(1, xValues.length - 1)) * innerWidth
+  const guideClientX = bounds.left + (guideSvgX / viewBox.width) * bounds.width
+  if (Math.abs(clientPoint.x - guideClientX) <= (pointerType === 'touch' ? 22 : 10)) return { mode: 'month', index }
+
+  for (let areaIndex = areas.length - 1; areaIndex >= 0; areaIndex--) {
+    const area = areas[areaIndex]
+    const interpolated = interpolateCombinationArea({ points: area.points, xValues, position })
+    if (!interpolated) continue
+    const y1 = yAt(interpolated.bottom)
+    const y2 = yAt(interpolated.top)
+    if (svgY >= Math.min(y1, y2) && svgY <= Math.max(y1, y2)) return { mode: 'area', index, seriesId: area.seriesId }
+  }
+  return null
+}
+
+const clearedInteraction = (effect = null) => ({
+  selectedIndex: -1,
+  mode: null,
+  selectedSeriesId: null,
+  isPinned: false,
+  isKeyboardSelection: false,
+  isDragging: false,
+  pointerStartedOnPinnedIndex: -1,
+  pointerStartedOnPinnedSeriesId: null,
+  effect,
+})
 const dismissedInteraction = () => clearedInteraction({ type: 'clear' })
 const interactionIndex = (index, pointCount) => (pointCount > 0 ? Math.min(pointCount - 1, Math.max(0, index)) : -1)
+const eventTarget = (event, pointCount) => {
+  if (event?.target?.mode === 'area' && Number.isInteger(event.target.index) && event.target.seriesId)
+    return { mode: 'area', index: interactionIndex(event.target.index, pointCount), seriesId: String(event.target.seriesId) }
+  if (event?.target?.mode === 'month' && Number.isInteger(event.target.index)) return { mode: 'month', index: interactionIndex(event.target.index, pointCount), seriesId: null }
+  const rawIndex = Number(event?.index)
+  return Number.isInteger(rawIndex) && rawIndex >= 0 ? { mode: 'month', index: interactionIndex(rawIndex, pointCount), seriesId: null } : null
+}
+const withTarget = (state, target) => ({ ...state, selectedIndex: target.index, mode: target.mode, selectedSeriesId: target.seriesId, isKeyboardSelection: false })
 
 export function reduceCombinationChartInteraction(state, event) {
   const current = { ...clearedInteraction(), ...state, effect: null }
   const pointCount = Number(event?.pointCount) || 0
-  const rawIndex = Number(event?.index)
-  const index = Number.isInteger(rawIndex) && rawIndex >= 0 ? interactionIndex(rawIndex, pointCount) : -1
+  const target = eventTarget(event, pointCount)
   if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return dismissedInteraction()
   if (event?.type === 'pointCountChanged') {
     if (pointCount === 0) return clearedInteraction()
     return current.selectedIndex >= pointCount ? { ...current, selectedIndex: pointCount - 1 } : current
   }
   if (event?.type === 'pointerMove') {
-    if (index < 0 || (current.isPinned && !current.isDragging)) return current
-    return { ...current, selectedIndex: index, isKeyboardSelection: false }
+    if (current.isPinned && !current.isDragging) return current
+    return target ? withTarget(current, target) : clearedInteraction()
   }
   if (event?.type === 'pointerLeave') return !current.isPinned && !current.isDragging ? clearedInteraction() : current
   if (event?.type === 'pointerDown') {
-    if (index < 0) return current
+    if (!target) return current
+    const samePinnedTarget = current.isPinned && current.selectedIndex === target.index && current.mode === target.mode && current.selectedSeriesId === target.seriesId
     return {
-      ...current,
-      selectedIndex: index,
+      ...withTarget(current, target),
       isPinned: false,
-      isKeyboardSelection: false,
       isDragging: true,
-      pointerStartedOnPinnedIndex: current.isPinned && current.selectedIndex === index ? index : -1,
+      pointerStartedOnPinnedIndex: samePinnedTarget ? target.index : -1,
+      pointerStartedOnPinnedSeriesId: samePinnedTarget ? target.seriesId : null,
     }
   }
   if (event?.type === 'pointerUp') {
     if (!current.isDragging) return current
-    const selectedIndex = index < 0 ? current.selectedIndex : index
-    if (current.pointerStartedOnPinnedIndex === selectedIndex) return dismissedInteraction()
-    return { ...current, selectedIndex, isPinned: selectedIndex >= 0, isDragging: false, pointerStartedOnPinnedIndex: -1, effect: selectedIndex >= 0 ? { type: 'select' } : null }
+    const selectedTarget = target ?? (current.selectedIndex >= 0 ? { mode: current.mode, index: current.selectedIndex, seriesId: current.selectedSeriesId } : null)
+    if (!selectedTarget) return clearedInteraction()
+    if (current.pointerStartedOnPinnedIndex === selectedTarget.index && current.pointerStartedOnPinnedSeriesId === selectedTarget.seriesId) return dismissedInteraction()
+    return {
+      ...withTarget(current, selectedTarget),
+      isPinned: true,
+      isDragging: false,
+      pointerStartedOnPinnedIndex: -1,
+      pointerStartedOnPinnedSeriesId: null,
+      effect: { type: 'select' },
+    }
   }
   if (event?.type === 'key') {
     if (event.key === 'Escape') return dismissedInteraction()
     if (pointCount === 0) return current
     if (event.key === 'Enter') {
       const selectedIndex = current.selectedIndex < 0 ? 0 : current.selectedIndex
-      return { ...current, selectedIndex, isPinned: true, isKeyboardSelection: true, effect: { type: 'select' } }
+      return { ...current, selectedIndex, mode: 'month', selectedSeriesId: null, isPinned: true, isKeyboardSelection: true, effect: { type: 'select' } }
     }
     let selectedIndex = current.selectedIndex
     if (event.key === 'ArrowLeft') selectedIndex--
@@ -114,7 +183,7 @@ export function reduceCombinationChartInteraction(state, event) {
     else if (event.key === 'End') selectedIndex = pointCount - 1
     else return current
     if (current.selectedIndex < 0 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) selectedIndex = 0
-    return { ...current, selectedIndex: interactionIndex(selectedIndex, pointCount), isKeyboardSelection: true, effect: { type: 'select' } }
+    return { ...current, selectedIndex: interactionIndex(selectedIndex, pointCount), mode: 'month', selectedSeriesId: null, isKeyboardSelection: true, effect: { type: 'select' } }
   }
   if (event?.type === 'rowSelect') return { ...current, effect: { type: 'selectRow', item: event.item, activation: event.activation } }
   return current

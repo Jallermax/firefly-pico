@@ -59,6 +59,13 @@
         </details>
       </div>
 
+      <div class="analytics-cash-use-legend" role="list" :aria-label="$t('analytics.cash_use.legend_label')">
+        <span v-for="item in legendItems" :key="item.id" class="analytics-cash-use-legend-item" role="listitem">
+          <span class="analytics-cash-use-legend-marker" :class="`analytics-cash-use-legend-marker-${item.pattern}`" :style="{ color: item.color, backgroundColor: item.color }" />
+          <span>{{ item.label }}</span>
+        </span>
+      </div>
+
       <analytics-combination-chart :series="chartSeries" :value-formatter="formatCurrency" :aria-label="$t('analytics.cash_use.chart_label')" @select-point="onSelectPoint" />
 
       <details class="analytics-calculation-details">
@@ -143,6 +150,22 @@ const chartSeries = computed(() => ({
   totalUsesLabel: t('analytics.cash_use.total_uses'),
   gap: { ...cashUse.value.gap, points: cashUse.value.gap.points.map((point) => ({ ...pointLabel(point), label: t(point.labelKey) })) },
 }))
+const hasArea = (points) => points.some((point) => Number.isFinite(point?.top) && Number.isFinite(point?.bottom) && point.top !== point.bottom)
+const hasLine = (points) => points.some((point) => Number.isFinite(point?.value) && point.value !== 0)
+const legendItems = computed(() => {
+  const series = chartSeries.value
+  const items = series.useLayers.filter(({ points }) => hasArea(points)).map((layer) => ({ id: layer.id, label: layer.label, color: layer.color, pattern: layer.pattern ?? 'solid' }))
+  if (series.useLayers.some(({ points }) => points.some((point) => (point.refundCoverage?.totalRefunded ?? point.refundCoverage?.refunded) > 0)))
+    items.push({ id: 'refund-coverage', label: t('analytics.cash_use.refund_coverage'), color: 'var(--expense2)', pattern: 'refund' })
+  if (hasLine(series.ordinaryIncome.points)) items.push({ id: series.ordinaryIncome.id, label: series.ordinaryIncome.label, color: series.ordinaryIncome.color, pattern: 'line' })
+  items.push(...series.sourceBands.filter(({ points }) => hasArea(points)).map((band) => ({ id: band.id, label: band.label, color: band.color, pattern: band.pattern ?? 'solid' })))
+  if (series.gap.points.some(({ direction, top, bottom }) => direction === 'positive' && Number.isFinite(top) && Number.isFinite(bottom) && top !== bottom))
+    items.push({ id: 'gap-positive', label: t('analytics.cash_use.new_excess'), color: 'var(--income2)', pattern: 'gap-positive' })
+  if (series.gap.points.some(({ direction, top, bottom }) => direction === 'negative' && Number.isFinite(top) && Number.isFinite(bottom) && top !== bottom))
+    items.push({ id: 'gap-negative', label: t('analytics.cash_use.existing_available_funds_required'), color: 'var(--expense2)', pattern: 'gap-negative' })
+  if (hasLine(series.totalSources.points)) items.push({ id: series.totalSources.id, label: series.totalSources.label, color: series.totalSources.color, pattern: 'dotted-line' })
+  return items
+})
 const hasActivity = computed(() =>
   [...cashUse.value.useLayers, cashUse.value.ordinaryIncome, ...cashUse.value.sourceBands].some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)),
 )
