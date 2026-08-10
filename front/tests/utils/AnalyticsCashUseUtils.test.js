@@ -237,7 +237,12 @@ test('full mode uses liability-only debt and splits accessible and restricted ne
 test('full mode places debt before savings without changing Cash Use evidence or reconciliation', () => {
   const series = build({
     entries: [
-      entry({ id: 'food', value: 80, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' }),
+      entry({ id: 'category-1', value: 60, sourceKind: 'available', destinationKind: 'expense', categoryId: 'category-1' }),
+      entry({ id: 'category-2', value: 50, sourceKind: 'available', destinationKind: 'expense', categoryId: 'category-2' }),
+      entry({ id: 'category-3', value: 40, sourceKind: 'available', destinationKind: 'expense', categoryId: 'category-3' }),
+      entry({ id: 'category-4', value: 30, sourceKind: 'available', destinationKind: 'expense', categoryId: 'category-4' }),
+      entry({ id: 'category-5', value: 20, sourceKind: 'available', destinationKind: 'expense', categoryId: 'category-5' }),
+      entry({ id: 'category-6', value: 10, sourceKind: 'available', destinationKind: 'expense', categoryId: 'category-6' }),
       entry({ id: 'accessible-in', value: 70, sourceKind: 'available', destinationKind: 'savingsAccessible' }),
       entry({ id: 'accessible-out', value: 20, sourceKind: 'savingsAccessible', destinationKind: 'available' }),
       entry({ id: 'restricted-in', value: 30, sourceKind: 'available', destinationKind: 'savingsRestricted' }),
@@ -248,7 +253,8 @@ test('full mode places debt before savings without changing Cash Use evidence or
     detailLevel: 5,
     remainingActivity: {
       dailyProjectedEntries: [
-        projected({ id: 'future-food', categoryId: 'food', flowAmounts: { expenses: 40 } }),
+        projected({ id: 'future-category-1', categoryId: 'category-1', flowAmounts: { expenses: 11 } }),
+        projected({ id: 'future-category-6', categoryId: 'category-6', flowAmounts: { expenses: 9 } }),
         projected({ id: 'future-debt', flowAmounts: { debtRepayments: 15 } }),
         projected({ id: 'future-accessible', destinationKind: 'savingsAccessible', flowAmounts: { savingsDeposits: 20 } }),
         projected({ id: 'future-restricted', destinationKind: 'savingsRestricted', flowAmounts: { savingsDeposits: 10 } }),
@@ -256,25 +262,54 @@ test('full mode places debt before savings without changing Cash Use evidence or
     },
   })
 
-  assert.deepEqual(series.useLayers.map(({ kind }) => kind), ['expenseCategory', 'debtRepaid', 'savingsAccessibleDeposit', 'savingsRestrictedDeposit'])
+  assert.deepEqual(series.useLayers.map(({ kind }) => kind), [
+    'expenseCategory',
+    'expenseCategory',
+    'expenseCategory',
+    'expenseCategory',
+    'expenseCategory',
+    'otherExpense',
+    'debtRepaid',
+    'savingsAccessibleDeposit',
+    'savingsRestrictedDeposit',
+  ])
   assert.deepEqual(
     { value: pointFor(series.totalUses, '2026-06').value, transactionIds: pointFor(series.totalUses, '2026-06').transactionIds },
-    { value: 185, transactionIds: ['accessible-in', 'accessible-out', 'food', 'loan-payment', 'restricted-in'] },
+    { value: 315, transactionIds: ['accessible-in', 'accessible-out', 'category-1', 'category-2', 'category-3', 'category-4', 'category-5', 'category-6', 'loan-payment', 'restricted-in'] },
   )
-  assert.deepEqual(pointFor(series.totalUses, '2026-08:forecast').projectedSources.map(({ id }) => id), ['future-food', 'future-debt', 'future-accessible', 'future-restricted'])
+  assert.deepEqual(
+    { value: pointFor(series.totalUses, '2026-08:forecast').value, projectedSources: pointFor(series.totalUses, '2026-08:forecast').projectedSources.map(({ id }) => id) },
+    { value: 65, projectedSources: ['future-category-1', 'future-category-6', 'future-debt', 'future-accessible', 'future-restricted'] },
+  )
   assert.deepEqual(series.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-06'), {
     monthKey: '2026-06',
     status: 'ok',
-    grossExpense: 80,
-    categoryTotal: 80,
+    grossExpense: 210,
+    categoryTotal: 210,
     categoryDelta: 0,
-    totalUses: 185,
-    useLayerTotal: 185,
+    totalUses: 315,
+    useLayerTotal: 315,
     useDelta: 0,
     totalSources: 0,
     sourceComponentTotal: 0,
     sourceDelta: 0,
-    gap: -185,
+    gap: -315,
+    gapDelta: 0,
+    delta: 0,
+  })
+  assert.deepEqual(series.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-08:forecast'), {
+    monthKey: '2026-08:forecast',
+    status: 'ok',
+    grossExpense: 20,
+    categoryTotal: 20,
+    categoryDelta: 0,
+    totalUses: 65,
+    useLayerTotal: 65,
+    useDelta: 0,
+    totalSources: 0,
+    sourceComponentTotal: 0,
+    sourceDelta: 0,
+    gap: -65,
     gapDelta: 0,
     delta: 0,
   })
