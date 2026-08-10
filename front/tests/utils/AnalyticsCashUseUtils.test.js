@@ -95,7 +95,11 @@ const cashUseStyles = (series) =>
   })
 
 test('Cash Use assigns deterministic non-colliding visual tuples', () => {
-  for (const series of [build({ entries: rankedCategoryEntries(12), detailLevel: 5 }), build({ entries: rankedCategoryEntries(12), detailLevel: 10 }), build({ entries: rankedCategoryEntries(20), detailLevel: 'all' })]) {
+  for (const series of [
+    build({ entries: rankedCategoryEntries(12), detailLevel: 5 }),
+    build({ entries: rankedCategoryEntries(12), detailLevel: 10 }),
+    build({ entries: rankedCategoryEntries(20), detailLevel: 'all' }),
+  ]) {
     const styles = cashUseStyles(series)
     const categoryTuples = Object.entries(styles)
       .filter(([id]) => id.startsWith('category:'))
@@ -119,10 +123,19 @@ test('Cash Use keeps Other distinct and ignores non-category source order', () =
   ]
   const ordered = cashUseStyles(build({ entries, mode: 'full', detailLevel: 5 }))
   const shuffled = cashUseStyles(build({ entries: [...rankedCategoryEntries(12), ...entries.slice(12).reverse()], mode: 'full', detailLevel: 5 }))
+  const fullSplit = cashUseStyles(build({ entries, mode: 'full', savingsView: 'split', detailLevel: 5 }))
 
   assert.equal(JSON.stringify(shuffled), JSON.stringify(ordered))
   assert.deepEqual(ordered['category:other'], { color: 'blue', pattern: 'category-dots', markerKind: 'area' })
   assert.notDeepEqual(ordered['category:other'], ordered['category:category-1'])
+  assert.deepEqual(fullSplit['refund-coverage'], { color: 'pink', pattern: 'refund', markerKind: 'area' })
+  assert.deepEqual(fullSplit['debt:repaid'], { color: 'pink', pattern: 'debt', markerKind: 'area' })
+  assert.deepEqual(fullSplit['savings:accessible'], { color: 's1', pattern: 'accessible-savings', markerKind: 'area' })
+  assert.deepEqual(fullSplit['savings:restricted'], { color: 's2', pattern: 'restricted-savings', markerKind: 'area' })
+  assert.deepEqual(fullSplit['savings-withdrawn:accessible'], { color: 's2', pattern: 'accessible-savings', markerKind: 'area' })
+  assert.deepEqual(fullSplit['savings-withdrawn:restricted'], { color: 's3', pattern: 'restricted-savings', markerKind: 'area' })
+  assert.deepEqual(fullSplit['new-debt'], { color: 'pink', pattern: 'debt', markerKind: 'area' })
+  assert.deepEqual(fullSplit['gap-negative'], { color: 'pink', pattern: 'gap-negative', markerKind: 'area' })
 })
 
 test('spending mode reconciles gross category areas, truthful refund cash, coverage, zero months, and exact IDs', () => {
@@ -300,17 +313,10 @@ test('full mode places debt before savings without changing Cash Use evidence or
     },
   })
 
-  assert.deepEqual(series.useLayers.map(({ kind }) => kind), [
-    'expenseCategory',
-    'expenseCategory',
-    'expenseCategory',
-    'expenseCategory',
-    'expenseCategory',
-    'otherExpense',
-    'debtRepaid',
-    'savingsAccessibleDeposit',
-    'savingsRestrictedDeposit',
-  ])
+  assert.deepEqual(
+    series.useLayers.map(({ kind }) => kind),
+    ['expenseCategory', 'expenseCategory', 'expenseCategory', 'expenseCategory', 'expenseCategory', 'otherExpense', 'debtRepaid', 'savingsAccessibleDeposit', 'savingsRestrictedDeposit'],
+  )
   assert.deepEqual(
     { value: pointFor(series.totalUses, '2026-06').value, transactionIds: pointFor(series.totalUses, '2026-06').transactionIds },
     { value: 315, transactionIds: ['accessible-in', 'accessible-out', 'category-1', 'category-2', 'category-3', 'category-4', 'category-5', 'category-6', 'loan-payment', 'restricted-in'] },
@@ -319,38 +325,44 @@ test('full mode places debt before savings without changing Cash Use evidence or
     { value: pointFor(series.totalUses, '2026-08:forecast').value, projectedSources: pointFor(series.totalUses, '2026-08:forecast').projectedSources.map(({ id }) => id) },
     { value: 65, projectedSources: ['future-category-1', 'future-category-6', 'future-debt', 'future-accessible', 'future-restricted'] },
   )
-  assert.deepEqual(series.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-06'), {
-    monthKey: '2026-06',
-    status: 'ok',
-    grossExpense: 210,
-    categoryTotal: 210,
-    categoryDelta: 0,
-    totalUses: 315,
-    useLayerTotal: 315,
-    useDelta: 0,
-    totalSources: 0,
-    sourceComponentTotal: 0,
-    sourceDelta: 0,
-    gap: -315,
-    gapDelta: 0,
-    delta: 0,
-  })
-  assert.deepEqual(series.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-08:forecast'), {
-    monthKey: '2026-08:forecast',
-    status: 'ok',
-    grossExpense: 20,
-    categoryTotal: 20,
-    categoryDelta: 0,
-    totalUses: 65,
-    useLayerTotal: 65,
-    useDelta: 0,
-    totalSources: 0,
-    sourceComponentTotal: 0,
-    sourceDelta: 0,
-    gap: -65,
-    gapDelta: 0,
-    delta: 0,
-  })
+  assert.deepEqual(
+    series.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-06'),
+    {
+      monthKey: '2026-06',
+      status: 'ok',
+      grossExpense: 210,
+      categoryTotal: 210,
+      categoryDelta: 0,
+      totalUses: 315,
+      useLayerTotal: 315,
+      useDelta: 0,
+      totalSources: 0,
+      sourceComponentTotal: 0,
+      sourceDelta: 0,
+      gap: -315,
+      gapDelta: 0,
+      delta: 0,
+    },
+  )
+  assert.deepEqual(
+    series.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-08:forecast'),
+    {
+      monthKey: '2026-08:forecast',
+      status: 'ok',
+      grossExpense: 20,
+      categoryTotal: 20,
+      categoryDelta: 0,
+      totalUses: 65,
+      useLayerTotal: 65,
+      useDelta: 0,
+      totalSources: 0,
+      sourceComponentTotal: 0,
+      sourceDelta: 0,
+      gap: -65,
+      gapDelta: 0,
+      delta: 0,
+    },
+  )
 })
 
 test('net Savings deposit clears withdrawal-side and zero Total sources transaction IDs', () => {
@@ -418,16 +430,11 @@ test('Cash Use detail alone owns visible categories and Other', () => {
   const topFive = build({ entries: rankedCategoryEntries(12), categoryIds: ['category-12'], detailLevel: 5 })
 
   assert.deepEqual(topFive.visibleCategoryIds, ['category-1', 'category-2', 'category-3', 'category-4', 'category-5'])
-  assert.deepEqual(topFive.useLayers.filter(({ kind }) => kind === 'expenseCategory').map(({ categoryId }) => categoryId), topFive.visibleCategoryIds)
-  assert.deepEqual(topFive.useLayers.find(({ kind }) => kind === 'otherExpense').categoryIds, [
-    'category-6',
-    'category-7',
-    'category-8',
-    'category-9',
-    'category-10',
-    'category-11',
-    'category-12',
-  ])
+  assert.deepEqual(
+    topFive.useLayers.filter(({ kind }) => kind === 'expenseCategory').map(({ categoryId }) => categoryId),
+    topFive.visibleCategoryIds,
+  )
+  assert.deepEqual(topFive.useLayers.find(({ kind }) => kind === 'otherExpense').categoryIds, ['category-6', 'category-7', 'category-8', 'category-9', 'category-10', 'category-11', 'category-12'])
 })
 
 test('detail ranking is completed-window-only, groups Other last, and includes projected Uncategorized', () => {
