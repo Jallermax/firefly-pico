@@ -53,6 +53,14 @@
         </div>
       </div>
 
+      <div class="analytics-daily-forecast-summary" :aria-label="$t('analytics.daily_forecast.chart_label')">
+        <div v-for="item in summaryItems" :key="item.id" class="analytics-daily-forecast-summary-item">
+          <span>{{ item.label }}</span>
+          <strong>{{ formatCurrency(item.value) }}</strong>
+          <small v-if="Number.isFinite(item.projected) && item.projected !== 0">{{ formatSignedCurrency(item.projected) }} {{ $t('analytics.cash_use.projected_remaining') }}</small>
+        </div>
+      </div>
+
       <div class="analytics-chart-legend analytics-daily-forecast-legend">
         <span v-for="item in legendItems" :key="item.id" class="flex-center-vertical gap-1">
           <span class="analytics-chart-legend-marker" :class="`analytics-daily-forecast-marker-${item.id}`" :style="{ backgroundColor: item.color }" />
@@ -62,21 +70,51 @@
 
       <analytics-combination-chart :series="chartSeries" :value-formatter="formatCurrency" :aria-label="$t('analytics.daily_forecast.chart_label')" @select="onSelect" @select-point="onSelectPoint" />
 
-      <div v-if="selectedProjectedSources.length" class="analytics-calculation-details" aria-live="polite">
-        <div class="font-weight-600">{{ selectedLabel }}</div>
-        <div v-for="source in selectedProjectedSources" :key="source.id" class="analytics-assumption-note">
-          <div class="font-weight-600">
-            {{ $t(`analytics.daily_forecast.source_${source.sourceKind}`) }}<template v-if="source.sourceLabel"> — {{ source.sourceLabel }}</template> · {{ formatCurrency(source.amount) }}
-          </div>
-          <div v-if="source.overdue">{{ $t('analytics.daily_forecast.overdue') }}</div>
-          <div v-if="source.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: source.confidence.level }) }}</div>
-          <div v-for="reason in source.reasons ?? []" :key="reason">{{ reason }}</div>
-          <div v-if="source.sourceId">{{ $t('analytics.daily_forecast.source_id', { id: source.sourceId }) }}</div>
-          <div v-if="source.candidateId">{{ $t('analytics.daily_forecast.candidate_id', { id: source.candidateId }) }}</div>
-          <div v-if="source.evidenceIds?.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: source.evidenceIds.join(', ') }) }}</div>
-          <div v-if="source.evidenceOmittedCount">{{ $t('analytics.common.more_items', { count: source.evidenceOmittedCount }) }}</div>
-          <div v-if="source.conversion?.mode">{{ $t('analytics.daily_forecast.conversion', { mode: source.conversion.mode }) }}</div>
+      <div v-if="selectedPayload" class="analytics-calculation-details analytics-daily-forecast-details" aria-live="polite">
+        <div class="analytics-daily-forecast-details-heading">
+          <strong>{{ $t('analytics.daily_forecast.day_details') }}</strong>
+          <span>{{ selectedLabel }}</span>
         </div>
+        <div class="analytics-daily-forecast-day-summary">
+          <div v-for="item in selectedDayTotals" :key="item.id">
+            <span>{{ item.label }}</span>
+            <strong>{{ formatCurrency(item.value) }}</strong>
+          </div>
+        </div>
+        <template v-if="selectedDayEntries.length">
+          <div class="font-weight-600">{{ $t('analytics.daily_forecast.scheduled_and_estimated') }}</div>
+          <button
+            v-for="entry in selectedDayEntries"
+            :key="entry.id"
+            type="button"
+            class="analytics-daily-forecast-detail-row"
+            style="min-height: 44px"
+            :disabled="entry.sourceKind !== 'actual'"
+            @click="onDetailEntry(entry)"
+          >
+            <span class="analytics-daily-forecast-detail-main">
+              <span class="font-weight-600">{{ entry.sourceLabel || sourceLabel(entry.sourceKind) }}</span>
+              <small>{{ sourceLabel(entry.sourceKind) }}</small>
+            </span>
+            <span :class="entry.direction === 'uses' ? 'analytics-negative-value' : 'analytics-positive-value'">{{ formatSignedCurrency(entry.displayAmount) }}</span>
+          </button>
+          <details v-if="selectedProjectedSources.length" class="analytics-warning-details">
+            <summary>{{ $t('analytics.common.details') }}</summary>
+            <div v-for="source in selectedProjectedSources" :key="source.id" class="analytics-assumption-note">
+              <div class="font-weight-600">
+                {{ sourceLabel(source.sourceKind) }}<template v-if="source.sourceLabel"> — {{ source.sourceLabel }}</template> · {{ formatCurrency(source.amount) }}
+              </div>
+              <div v-if="source.overdue">{{ $t('analytics.daily_forecast.overdue') }}</div>
+              <div v-if="source.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: source.confidence.level }) }}</div>
+              <div v-for="reason in source.reasons ?? []" :key="reason">{{ reason }}</div>
+              <div v-if="source.sourceId">{{ $t('analytics.daily_forecast.source_id', { id: source.sourceId }) }}</div>
+              <div v-if="source.candidateId">{{ $t('analytics.daily_forecast.candidate_id', { id: source.candidateId }) }}</div>
+              <div v-if="source.evidenceIds?.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: source.evidenceIds.join(', ') }) }}</div>
+              <div v-if="source.evidenceOmittedCount">{{ $t('analytics.common.more_items', { count: source.evidenceOmittedCount }) }}</div>
+              <div v-if="source.conversion?.mode">{{ $t('analytics.daily_forecast.conversion', { mode: source.conversion.mode }) }}</div>
+            </div>
+          </details>
+        </template>
       </div>
 
       <div v-if="!hasActivity" class="analytics-card-state">{{ $t('analytics.daily_forecast.empty') }}</div>
@@ -103,6 +141,7 @@ const dailyState = computed(() => analyticsStore.dailyForecastState)
 const periodItems = computed(() => [3, 6, 12].map((value) => ({ label: t('analytics.period.months_short', { count: value }), value })))
 const monthTitle = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(parseISO(`${daily.value.monthKey}-01`)))
 const formatCurrency = (value) => (Number.isFinite(value) ? `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
+const formatSignedCurrency = (value) => (Number.isFinite(value) ? `${value > 0 ? '+' : ''}${formatCurrency(value)}` : '—')
 const sourceLabel = (sourceKind) => t(`analytics.daily_forecast.source_${sourceKind}`)
 const chartSeries = computed(() => ({
   ...daily.value,
@@ -117,16 +156,37 @@ const chartSeries = computed(() => ({
 const hasActivity = computed(() => daily.value.barGroups.some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)))
 const hasRetainedData = computed(() => dailyState.value.isStale && daily.value.dateKeys.length > 0)
 const unavailableEvidenceSummary = computed(() => dailyState.value.unavailableEvidenceSummary ?? { count: 0, previewIds: [], omittedCount: 0 })
-const legendItems = computed(() => [
-  { id: 'sources', label: t('analytics.cash_use.total_sources'), color: 'var(--income2)' },
-  { id: 'uses', label: t('analytics.cash_use.total_uses'), color: 'var(--expense2)' },
-  { id: 'available', label: t('analytics.daily_forecast.available_change'), color: 'var(--transfer2)' },
-  { id: 'actual', label: sourceLabel('actual'), color: 'var(--van-text-color-2)' },
-  { id: 'defined', label: sourceLabel('defined'), color: 'var(--van-text-color-2)' },
-  { id: 'inferred', label: sourceLabel('inferred'), color: 'var(--van-text-color-2)' },
-  { id: 'variable', label: sourceLabel('variable'), color: 'var(--van-text-color-2)' },
+const summaryItems = computed(() => [
+  { id: 'inflow', label: t('analytics.daily_forecast.expected_inflow'), value: daily.value.summary.inflow.final, projected: daily.value.summary.inflow.projected },
+  { id: 'outflow', label: t('analytics.daily_forecast.expected_outflow'), value: daily.value.summary.outflow.final, projected: daily.value.summary.outflow.projected },
+  { id: 'available', label: t('analytics.daily_forecast.available_change'), value: daily.value.summary.availableChange.final, projected: daily.value.summary.availableChange.projected },
 ])
-const selectedProjectedSources = computed(() => summarizeProjectedSources((selectedPayload.value?.values ?? []).flatMap(({ point }) => point.projectedSources ?? [])))
+const legendItems = computed(() => [
+  { id: 'inflow', label: t('analytics.daily_forecast.inflow'), color: 'var(--income2)' },
+  { id: 'outflow', label: t('analytics.daily_forecast.outflow'), color: 'var(--expense2)' },
+  { id: 'available', label: t('analytics.daily_forecast.available_change'), color: 'var(--transfer2)' },
+])
+const directionKeys = {
+  sources: ['income', 'refunds', 'savingsWithdrawals', 'newDebt'],
+  uses: ['expenses', 'savingsDeposits', 'debtRepayments'],
+}
+const entryValue = (entry, direction) => directionKeys[direction].reduce((total, key) => total + (entry.flowAmounts?.[key] ?? 0), 0) * (direction === 'uses' ? -1 : 1)
+const selectedDayEntries = computed(() => {
+  const entries = new Map()
+  for (const { seriesId, point } of selectedPayload.value?.values ?? []) {
+    if (!['inflow', 'outflow'].includes(seriesId)) continue
+    for (const entry of point.entries ?? []) entries.set(entry.id, { ...entry, direction: point.direction, displayAmount: entryValue(entry, point.direction) })
+  }
+  return [...entries.values()].sort((left, right) => Math.abs(right.displayAmount) - Math.abs(left.displayAmount) || String(left.id).localeCompare(String(right.id)))
+})
+const selectedProjectedSources = computed(() =>
+  summarizeProjectedSources(selectedDayEntries.value.filter(({ sourceKind }) => sourceKind !== 'actual').map((entry) => ({ ...entry, amount: Math.abs(entry.displayAmount) }))),
+)
+const selectedDayTotals = computed(() =>
+  (selectedPayload.value?.values ?? [])
+    .filter(({ seriesId }) => ['inflow', 'outflow', 'availableCashChange'].includes(seriesId))
+    .map(({ seriesId, label, point }) => ({ id: seriesId, label, value: point.value })),
+)
 const selectedLabel = computed(() => selectedPayload.value?.xLabel ?? '')
 
 const onSelect = (payload) => {
@@ -145,5 +205,17 @@ const onSelectPoint = async ({ activation, point, transactionIds }) => {
     return
   }
   await navigateTo(selection.route)
+}
+const onDetailEntry = async (entry) => {
+  if (entry.sourceKind === 'actual') {
+    const selection = projectLineChartSelection({
+      activation: 'pointer',
+      transactionIds: entry.transactionIds,
+      kind: 'actual',
+      route: RouteConstants.ROUTE_TRANSACTION_LIST,
+      toUrl: TransactionFilterUtils.filters.id.toUrl,
+    })
+    if (selection.route) await navigateTo(selection.route)
+  }
 }
 </script>

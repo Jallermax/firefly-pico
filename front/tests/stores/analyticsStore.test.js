@@ -1877,14 +1877,36 @@ test('uses the seven authoritative flows for precise daily source, use, and cumu
   assert.equal(store.dailyForecast?.reconciliation.availableCashDelta, 0)
   assert.equal(store.dailyForecast?.monthlyTotals.sources, 161)
   assert.equal(store.dailyForecast?.monthlyTotals.uses, 60.6)
+  assert.deepEqual(store.dailyForecast?.summary, {
+    inflow: { actual: 161, projected: 0, final: 161, status: 'ready' },
+    outflow: { actual: 60.6, projected: 0, final: 60.6, status: 'ready' },
+    availableChange: { actual: 100.4, projected: 0, final: 100.4, status: 'ready' },
+  })
+  assert.deepEqual(
+    store.dailyForecast?.barGroups.map(({ id }) => id),
+    ['inflow', 'outflow'],
+  )
+  assert.equal(store.dailyForecast?.barGroups[0].points.length, 31)
+  assert.equal(store.dailyForecast?.barGroups[1].points.length, 31)
 
-  const actualSources = store.dailyForecast?.barGroups.find(({ id }) => id === 'actual:sources').points.find(({ x }) => x === '2026-08-05')
-  const actualUses = store.dailyForecast?.barGroups.find(({ id }) => id === 'actual:uses').points.find(({ x }) => x === '2026-08-05')
+  const actualSources = store.dailyForecast?.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-05')
+  const actualUses = store.dailyForecast?.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-05')
   assert.deepEqual(actualSources.transactionIds, ['income', 'new-debt', 'refund', 'savings-withdrawal'])
   assert.deepEqual(actualUses.transactionIds, ['debt-repayment', 'expense', 'savings-deposit'])
+  assert.deepEqual(
+    actualSources.entries.map(({ transactionId }) => transactionId),
+    ['income', 'new-debt', 'savings-withdrawal', 'refund'],
+  )
+  assert.deepEqual(
+    actualUses.entries.map(({ transactionId }) => transactionId),
+    ['expense', 'savings-deposit', 'debt-repayment'],
+  )
+  assert.equal(actualSources.value, 161)
+  assert.equal(actualUses.value, -60.6)
+  assert.equal(actualSources.kind, 'actual')
   assert.equal(actualSources.showInTooltip, true)
   assert.equal(actualUses.showInTooltip, true)
-  assert.equal(store.dailyForecast?.barGroups.find(({ id }) => id === 'actual:sources').points.find(({ x }) => x === '2026-08-06').showInTooltip, false)
+  assert.equal(store.dailyForecast?.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-06').showInTooltip, false)
 })
 
 test('keeps projected source and use evidence direction-specific on a mixed defined day', async () => {
@@ -1922,10 +1944,12 @@ test('keeps projected source and use evidence direction-specific on a mixed defi
 
   await store.init()
 
-  const sourcePoint = store.dailyForecast?.barGroups.find(({ id }) => id === 'defined:sources').points.find(({ x }) => x === '2026-08-20')
-  const usePoint = store.dailyForecast?.barGroups.find(({ id }) => id === 'defined:uses').points.find(({ x }) => x === '2026-08-20')
+  const sourcePoint = store.dailyForecast?.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-20')
+  const usePoint = store.dailyForecast?.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-20')
   assert.equal(sourcePoint.value, 100)
   assert.equal(usePoint.value, -60)
+  assert.equal(sourcePoint.kind, 'forecast')
+  assert.equal(usePoint.kind, 'forecast')
   assert.deepEqual(
     sourcePoint.projectedSources.map(({ sourceId }) => sourceId),
     ['defined-income'],
@@ -2001,7 +2025,7 @@ test('keeps actual rows through today and deterministic defined, inferred, and v
   assert.equal(defined?.statusByMetric.expenses, store.financialTrend.forecast.statusByMetric.expenses)
   assert.deepEqual(
     store.dailyForecast?.barGroups.map(({ id }) => id),
-    ['actual:sources', 'actual:uses', 'defined:sources', 'defined:uses', 'inferred:sources', 'inferred:uses', 'variable:sources', 'variable:uses'],
+    ['inflow', 'outflow'],
   )
   assert.equal(store.dailyForecast?.reconciliation.status, 'ok')
   assert.equal(store.dailyForecast?.audit.fulfilledExpectedIds.length, store.financialTrend.forecast.audit.recurring.fulfilledExpectedIds.length)
@@ -2249,14 +2273,13 @@ test('applies per-metric unavailability to future daily components without blank
   assert.equal(Number.isFinite(afterUnavailableDay.projected.uses), true)
   assert.equal(Number.isFinite(afterUnavailableDay.availableCashChange), true)
   assert.equal(afterUnavailableDay.cumulativeAvailableCashChange, null)
-  const incomePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'defined:sources').points.find(({ x }) => x === '2026-08-20')
+  const incomePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-20')
   assert.equal(incomePoint.value, 100)
   assert.deepEqual(incomePoint.transactionIds, [])
   assert.equal(incomePoint.evidenceIds.includes('defined-income'), true)
   assert.equal(incomePoint.evidenceIds.includes('foreign-expense'), false)
-  assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'defined:uses').points.find(({ x }) => x === '2026-08-20').value, null)
-  assert.equal(Math.abs(store.dailyForecast.barGroups.find(({ id }) => id === 'defined:uses').points.find(({ x }) => x === '2026-08-21').value), 0)
-  const variableUse = store.dailyForecast.barGroups.find(({ id }) => id === 'variable:uses').points.find(({ x }) => x === '2026-08-21').value
+  assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-20').value, null)
+  const variableUse = store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-21').value
   assert.equal(Number.isFinite(variableUse), true)
   assert.equal(variableUse < 0, true)
   assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
@@ -2391,7 +2414,7 @@ test('keeps selected-history missing-FX Firefly transaction IDs separate from en
   assert.deepEqual(store.dailyForecast.audit.unavailableCandidateIds, [])
   assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
   assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
-  const incomePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'actual:sources').points.find(({ x }) => x === '2026-08-05')
+  const incomePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-05')
   assert.deepEqual(incomePoint.transactionIds, ['usable-current-income'])
   assert.equal(incomePoint.evidenceIds.includes('history-missing-fx'), false)
 })
@@ -2410,9 +2433,9 @@ test('keeps explanatory source and use rows for a genuine net-zero day while sup
 
   await store.init()
 
-  const sourcePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'actual:sources').points.find(({ x }) => x === '2026-08-05')
-  const usePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'actual:uses').points.find(({ x }) => x === '2026-08-05')
-  const emptyPoint = store.dailyForecast.barGroups.find(({ id }) => id === 'actual:sources').points.find(({ x }) => x === '2026-08-06')
+  const sourcePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-05')
+  const usePoint = store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-05')
+  const emptyPoint = store.dailyForecast.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-06')
   assert.equal(store.dailyForecast.days.find(({ date }) => date === '2026-08-05').availableCashChange, 0)
   assert.equal(sourcePoint.value, 10)
   assert.equal(sourcePoint.showInTooltip, true)
@@ -2438,7 +2461,7 @@ test('shows insufficient future history as unknown instead of a zero daily proje
   assert.equal(tomorrow?.projected.uses, null)
   assert.equal(tomorrow?.availableCashChange, null)
   assert.equal(tomorrow?.cumulativeAvailableCashChange, null)
-  assert.equal(store.dailyForecast?.barGroups.find(({ id }) => id === 'variable:sources').points.find(({ x }) => x === '2026-08-11').value, null)
+  assert.equal(store.dailyForecast?.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-11').value, null)
   assert.equal(store.dailyForecastState?.isPartial, true)
   assert.equal(store.dailyForecastState?.isUnavailable, false)
 })
@@ -2457,13 +2480,17 @@ test('keeps the daily card and combination-chart selection contract exact withou
   assert.match(dailySource, /selectedPayload\.value = \{ xLabel: point\.xLabel \?\? point\.x, values: \[\{ point \}\] \}/)
   assert.match(dailySource, /summarizeProjectedSources/)
   assert.match(dailySource, /evidenceOmittedCount/)
-  assert.match(dailySource, /id: 'sources',[^\n]+analytics\.cash_use\.total_sources[^\n]+var\(--income2\)/)
-  assert.match(dailySource, /id: 'uses',[^\n]+analytics\.cash_use\.total_uses[^\n]+var\(--expense2\)/)
+  assert.match(dailySource, /analytics-daily-forecast-summary/)
+  assert.match(dailySource, /analytics\.daily_forecast\.expected_inflow/)
+  assert.match(dailySource, /analytics\.daily_forecast\.expected_outflow/)
+  assert.match(dailySource, /analytics\.daily_forecast\.scheduled_and_estimated/)
+  assert.match(dailySource, /selectedDayEntries/)
+  assert.match(dailySource, /min-height:\s*44px/)
+  assert.match(dailySource, /id: 'inflow',[^\n]+analytics\.daily_forecast\.inflow[^\n]+var\(--income2\)/)
+  assert.match(dailySource, /id: 'outflow',[^\n]+analytics\.daily_forecast\.outflow[^\n]+var\(--expense2\)/)
   assert.match(dailySource, /id: 'available',[^\n]+analytics\.daily_forecast\.available_change[^\n]+var\(--transfer2\)/)
-  assert.match(dailySource, /id: 'actual',[^\n]+sourceLabel\('actual'\)[^\n]+var\(--van-text-color-2\)/)
-  assert.match(dailySource, /id: 'defined',[^\n]+sourceLabel\('defined'\)[^\n]+var\(--van-text-color-2\)/)
-  assert.match(dailySource, /id: 'inferred',[^\n]+sourceLabel\('inferred'\)[^\n]+var\(--van-text-color-2\)/)
-  assert.match(dailySource, /id: 'variable',[^\n]+sourceLabel\('variable'\)[^\n]+var\(--van-text-color-2\)/)
+  assert.match(dailySource, /entry\.sourceKind === 'actual'/)
+  assert.match(dailySource, /projectLineChartSelection/)
   assert.match(dailySource, /v-else-if="dailyState\.isBlockingUnavailable"/)
   assert.match(dailySource, /v-if="dailyState\.isPartiallyUnavailable"/)
   assert.match(dailySource, /v-if="dailyState\.sourceErrors\.length"[\s\S]*?<van-button[^>]+@click="analyticsStore\.retryDailyForecast"/)
@@ -2476,4 +2503,9 @@ test('keeps the daily card and combination-chart selection contract exact withou
   assert.match(chartSource, /<div[^>]+ref="root"[^>]+@keydown="onRootKeydown"/)
   assert.match(chartSource, /<svg[\s\S]+@keydown="onChartKeydown"/)
   assert.match(chartSource, /analytics-combination-today-marker[\s\S]+stroke="var\(--transfer2\)"[\s\S]+stroke-width="1\.5"/)
+
+  for (const locale of localeNames) {
+    const dailyForecast = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.daily_forecast
+    for (const key of ['inflow', 'outflow', 'expected_inflow', 'expected_outflow', 'day_details', 'scheduled_and_estimated']) assert.equal(typeof dailyForecast[key], 'string', `${locale}:${key}`)
+  }
 })

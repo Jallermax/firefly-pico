@@ -3244,19 +3244,80 @@ body {
     min-height: 24px;
 }
 
-.analytics-daily-forecast-marker-defined {
-    border-radius: 1px;
-    background-image: repeating-linear-gradient(45deg, transparent 0 2px, currentColor 2px 3px);
+.analytics-daily-forecast-summary,
+.analytics-daily-forecast-day-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0 16px 10px;
 }
 
-.analytics-daily-forecast-marker-inferred {
-    border: 1px dotted currentColor;
-    background-clip: padding-box;
+.analytics-daily-forecast-summary-item,
+.analytics-daily-forecast-day-summary > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px;
+    border-radius: 8px;
+    background: var(--van-background-2-5);
+    font-size: 11px;
 }
 
-.analytics-daily-forecast-marker-variable {
-    height: 4px;
-    border-radius: 1px;
+.analytics-daily-forecast-summary-item strong,
+.analytics-daily-forecast-day-summary strong {
+    font-size: 13px;
+}
+
+.analytics-daily-forecast-summary-item small,
+.analytics-daily-forecast-detail-main small {
+    color: var(--van-text-color-3);
+    font-size: 10px;
+}
+
+.analytics-daily-forecast-details-heading,
+.analytics-daily-forecast-detail-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.analytics-daily-forecast-details-heading {
+    padding-bottom: 8px;
+}
+
+.analytics-daily-forecast-day-summary {
+    padding: 0 0 10px;
+}
+
+.analytics-daily-forecast-detail-row {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid var(--van-border-color);
+    background: transparent;
+    color: var(--van-text-color);
+    font: inherit;
+    text-align: left;
+}
+
+.analytics-daily-forecast-detail-row:disabled {
+    opacity: 1;
+}
+
+.analytics-positive-value {
+    color: var(--income1);
+}
+
+.analytics-negative-value {
+    color: var(--expense1);
+}
+
+.analytics-daily-forecast-detail-main {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .analytics-daily-forecast-marker-available {
@@ -3304,6 +3365,16 @@ body {
 
     .analytics-chart-legend {
         gap: 4px 10px;
+    }
+
+    .analytics-daily-forecast-summary,
+    .analytics-daily-forecast-day-summary {
+        gap: 5px;
+    }
+
+    .analytics-daily-forecast-summary-item,
+    .analytics-daily-forecast-day-summary > div {
+        padding: 7px;
     }
 
     .analytics-combination-chart,

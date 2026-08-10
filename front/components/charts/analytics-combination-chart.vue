@@ -35,15 +35,6 @@
         <pattern :id="paintId('gap-negative')" width="8" height="8" patternUnits="userSpaceOnUse">
           <path d="M 0 0 L 8 8" stroke="var(--expense2)" stroke-width="2" opacity="0.55" />
         </pattern>
-        <pattern :id="paintId('defined')" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="7" stroke="currentColor" stroke-width="2" opacity="0.7" />
-        </pattern>
-        <pattern :id="paintId('inferred')" width="7" height="7" patternUnits="userSpaceOnUse">
-          <circle cx="2" cy="2" r="1.4" fill="currentColor" opacity="0.7" />
-        </pattern>
-        <pattern :id="paintId('variable')" width="8" height="8" patternUnits="userSpaceOnUse">
-          <path d="M 0 4 H 8" stroke="currentColor" stroke-width="1.5" opacity="0.65" />
-        </pattern>
       </defs>
 
       <g aria-hidden="true">
@@ -87,7 +78,7 @@
           :height="bar.height"
           :fill="bar.fill"
           :style="{ color: bar.color }"
-          :opacity="bar.sourceKind === 'actual' ? 0.86 : 0.78"
+          :opacity="bar.kind === 'actual' ? 0.86 : 0.78"
           rx="1"
         />
         <template v-for="layer in renderedUseLayers" :key="layer.id">
@@ -289,18 +280,16 @@ const availableLinePaths = computed(() => {
   const openingX = Math.max(4, xAt(firstIndex) - Math.min(20, step * 0.65))
   return [{ d: `M ${openingX} ${yAt(availableLine.value.openingValue)} L ${xAt(firstIndex)} ${yAt(firstPoint.value)}`, forecast: firstPoint.kind === 'forecast' }, ...paths]
 })
-const barSourceKinds = computed(() => [...new Set((props.series.barGroups ?? []).map(({ sourceKind }) => sourceKind))])
+const barSourceKinds = computed(() => [...new Set((props.series.barGroups ?? []).map(({ id }) => id))])
 const barSpacing = computed(() => (pointCount.value > 1 ? innerWidth.value / (pointCount.value - 1) : innerWidth.value))
 const barWidth = computed(() => Math.max(2, Math.min(10, (barSpacing.value * 0.78) / Math.max(1, barSourceKinds.value.length))))
-const barFill = (group) => {
-  if (group.sourceKind === 'defined') return paintUrl('defined')
-  if (group.sourceKind === 'inferred') return paintUrl('inferred')
-  if (group.sourceKind === 'variable') return paintUrl('variable')
+const barFill = (group, point) => {
+  if (point.kind === 'forecast') return paintUrl('forecast')
   return group.color
 }
 const renderedBars = computed(() =>
   (props.series.barGroups ?? []).flatMap((group) => {
-    const sourceIndex = barSourceKinds.value.indexOf(group.sourceKind)
+    const sourceIndex = barSourceKinds.value.indexOf(group.id)
     const groupWidth = barWidth.value * barSourceKinds.value.length
     return group.points.flatMap((point, index) => {
       if (!Number.isFinite(point.value) || point.value === 0) return []
@@ -309,12 +298,12 @@ const renderedBars = computed(() =>
       return [
         {
           key: `${group.id}:${point.x}`,
-          sourceKind: group.sourceKind,
+          kind: point.kind,
           x: xAt(index) - groupWidth / 2 + sourceIndex * barWidth.value,
           y: Math.min(valueY, zeroY),
           width: barWidth.value,
           height: Math.max(1, Math.abs(zeroY - valueY)),
-          fill: barFill(group),
+          fill: barFill(group, point),
           color: group.color,
         },
       ]

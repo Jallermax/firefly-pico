@@ -938,5 +938,5 @@ test('combination chart scopes every SVG paint server to its component instance'
   assert.doesNotMatch(chart, /id="analytics-combination-/)
   assert.doesNotMatch(chart, /url\(#analytics-combination-/)
   assert.deepEqual([...new Set(references)].sort(), [...new Set(definitions)].sort())
-  assert.equal(new Set(definitions).size, 10)
+  assert.equal(new Set(definitions).size, 7)
 })

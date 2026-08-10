@@ -523,9 +523,13 @@
     color: var(--van-text-color);
 }
 
-.van-theme-dark .analytics-daily-forecast-marker-defined,
-.van-theme-dark .analytics-daily-forecast-marker-inferred {
-    color: #f5f5f5;
+.van-theme-dark .analytics-daily-forecast-summary-item,
+.van-theme-dark .analytics-daily-forecast-day-summary > div {
+    background: #242426;
+}
+
+.van-theme-dark .analytics-daily-forecast-detail-row {
+    border-color: #444;
 }
 
 .van-theme-dark .analytics-page-switch {
