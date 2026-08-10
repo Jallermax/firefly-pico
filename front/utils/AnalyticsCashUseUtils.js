@@ -151,8 +151,23 @@ const repairSelection = (selection, pointCount) => {
   if (pointCount <= 0) return null
   return { ...selection, monthIndex: Math.min(pointCount - 1, Math.max(0, selection.monthIndex)) }
 }
+const hasLegacyInteractionFields = (state) => ['selectedIndex', 'mode', 'selectedSeriesId', 'isPinned', 'isKeyboardSelection'].some((key) => Object.hasOwn(state ?? {}, key))
 
 export const displayCombinationSelection = (state) => state?.previewSelection ?? state?.pinnedSelection ?? normalizeSelection()
+
+const withLegacyInteractionFields = (state, legacy, isKeyboardSelection = state.isKeyboardSelection ?? false) => {
+  if (!legacy) return state
+  const selection = displayCombinationSelection(state)
+  const selected = ['month', 'seriesMonth'].includes(selection.mode)
+  return {
+    ...state,
+    selectedIndex: selected ? selection.monthIndex : -1,
+    mode: selection.mode === 'seriesMonth' ? 'area' : selection.mode === 'month' ? 'month' : null,
+    selectedSeriesId: selection.mode === 'seriesMonth' || selection.mode === 'series' ? selection.seriesId : null,
+    isPinned: Boolean(state.pinnedSelection && sameSelection(selection, state.pinnedSelection)),
+    isKeyboardSelection,
+  }
+}
 
 export function buildCombinationSelectedSegment({ points = [], xValues = [], monthIndex, xAt, yAt }) {
   if (!Number.isInteger(monthIndex) || monthIndex <= 0 || typeof xAt !== 'function' || typeof yAt !== 'function') return null
@@ -179,49 +194,53 @@ export const buildCombinationMonthBand = ({ monthIndex, xAt }) =>
 
 export function reduceCombinationChartInteraction(state, event) {
   const current = interactionState(state)
+  const legacy = hasLegacyInteractionFields(state)
+  const finish = (next, isKeyboardSelection = next.isKeyboardSelection ?? false) => withLegacyInteractionFields(next, legacy, isKeyboardSelection)
   const pointCount = Number(event?.pointCount) || 0
   const target = selectionForEvent(event)
-  if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return clearedInteraction()
+  if (event?.type === 'clear' || event?.type === 'outside' || event?.type === 'pointerCancel') return finish(clearedInteraction(), false)
   if (event?.type === 'pointCountChanged') {
-    return { ...current, previewSelection: repairSelection(current.previewSelection, pointCount), pinnedSelection: repairSelection(current.pinnedSelection, pointCount) }
+    return finish({ ...current, previewSelection: repairSelection(current.previewSelection, pointCount), pinnedSelection: repairSelection(current.pinnedSelection, pointCount) })
   }
-  if (event?.type === 'legendPreview' && event.seriesId) return { ...current, previewSelection: normalizeSelection({ mode: 'series', seriesId: event.seriesId }) }
-  if (event?.type === 'legendLeave') return { ...current, previewSelection: null }
+  if (event?.type === 'legendPreview' && event.seriesId) return finish({ ...current, previewSelection: normalizeSelection({ mode: 'series', seriesId: event.seriesId }) }, false)
+  if (event?.type === 'legendLeave') return finish({ ...current, previewSelection: null }, false)
   if (event?.type === 'legendToggle' && event.seriesId) {
     const selection = normalizeSelection({ mode: 'series', seriesId: event.seriesId })
-    return sameSelection(current.pinnedSelection, selection) ? clearedInteraction() : { ...current, previewSelection: null, pinnedSelection: selection, effect: { type: 'select' } }
+    return finish(sameSelection(current.pinnedSelection, selection) ? clearedInteraction() : { ...current, previewSelection: null, pinnedSelection: selection, effect: { type: 'select' } }, false)
   }
-  if (event?.type === 'pointerMove') return { ...current, previewSelection: target }
-  if (event?.type === 'pointerLeave') return current.isDragging ? current : { ...current, previewSelection: null }
+  if (event?.type === 'pointerMove') return finish({ ...current, previewSelection: target }, false)
+  if (event?.type === 'pointerLeave') return finish(current.isDragging ? current : { ...current, previewSelection: null }, current.isDragging ? current.isKeyboardSelection : false)
   if (event?.type === 'pointerDown') {
-    if (!target) return current
-    return { ...current, previewSelection: target, isDragging: true, pointerStart: target }
+    if (!target) return finish(current, false)
+    return finish({ ...current, previewSelection: target, isDragging: true, pointerStart: target }, false)
   }
   if (event?.type === 'pointerUp') {
-    if (!current.isDragging) return current
+    if (!current.isDragging) return finish(current, false)
     const selection = target ?? current.previewSelection ?? current.pointerStart
-    if (!selection) return { ...current, isDragging: false, pointerStart: null }
-    if (sameSelection(current.pinnedSelection, selection) && sameSelection(current.pointerStart, selection)) return clearedInteraction()
-    return { ...current, previewSelection: null, pinnedSelection: selection, isDragging: false, pointerStart: null, effect: { type: 'select' } }
+    if (!selection) return finish({ ...current, isDragging: false, pointerStart: null }, false)
+    if (sameSelection(current.pinnedSelection, selection) && sameSelection(current.pointerStart, selection)) return finish(clearedInteraction(), false)
+    return finish({ ...current, previewSelection: null, pinnedSelection: selection, isDragging: false, pointerStart: null, effect: { type: 'select' } }, false)
   }
   if (event?.type === 'key') {
-    if (event.key === 'Escape') return clearedInteraction()
-    if (pointCount === 0) return current
+    if (event.key === 'Escape') return finish(clearedInteraction(), false)
+    if (pointCount === 0) return finish(current)
     if (event.key === 'Enter') {
       const selection = selectionOrNull(displayCombinationSelection(current)) ?? normalizeSelection({ mode: 'month', monthIndex: 0 })
-      return { ...current, previewSelection: null, pinnedSelection: repairSelection(selection, pointCount), effect: { type: 'select' } }
+      return finish({ ...current, previewSelection: null, pinnedSelection: repairSelection(selection, pointCount), effect: { type: 'select' } }, true)
     }
     const currentSelection = selectionOrNull(displayCombinationSelection(current))
-    let monthIndex = currentSelection?.mode === 'seriesMonth' || currentSelection?.mode === 'month' ? currentSelection.monthIndex : 0
+    const hasMonthSelection = currentSelection?.mode === 'seriesMonth' || currentSelection?.mode === 'month'
+    let monthIndex = hasMonthSelection ? currentSelection.monthIndex : 0
     if (event.key === 'ArrowLeft') monthIndex--
     else if (event.key === 'ArrowRight') monthIndex++
     else if (event.key === 'Home') monthIndex = 0
     else if (event.key === 'End') monthIndex = pointCount - 1
-    else return current
-    return { ...current, previewSelection: normalizeSelection({ mode: 'month', monthIndex: Math.min(pointCount - 1, Math.max(0, monthIndex)) }), effect: { type: 'select' } }
+    else return finish(current)
+    if (!hasMonthSelection && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) monthIndex = 0
+    return finish({ ...current, previewSelection: normalizeSelection({ mode: 'month', monthIndex: Math.min(pointCount - 1, Math.max(0, monthIndex)) }), effect: { type: 'select' } }, true)
   }
-  if (event?.type === 'rowSelect') return { ...current, effect: { type: 'selectRow', item: event.item, activation: event.activation } }
-  return current
+  if (event?.type === 'rowSelect') return finish({ ...current, effect: { type: 'selectRow', item: event.item, activation: event.activation } })
+  return finish(current)
 }
 
 export function propagateCashUseReconciliation({ totals, gap, reconciliation }) {

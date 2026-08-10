@@ -1030,6 +1030,53 @@ test('combination interaction supports touch pins, month navigation, repair, dis
   assert.deepEqual(interactionFor(state, { type: 'key', key: 'Escape' }), { ...initial, effect: { type: 'clear' } })
 })
 
+test('combination interaction keeps the current chart selection reads synchronized with v2 state', () => {
+  const chartState = {
+    selectedIndex: -1,
+    mode: null,
+    selectedSeriesId: null,
+    isPinned: false,
+    isKeyboardSelection: false,
+    isDragging: false,
+    pointerStartedOnPinnedIndex: -1,
+    pointerStartedOnPinnedSeriesId: null,
+    effect: null,
+  }
+  const target = { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 1 }
+  let state = interactionFor(chartState, { type: 'pointerMove', target, pointCount: 3 })
+  assert.deepEqual(
+    { selectedIndex: state.selectedIndex, mode: state.mode, selectedSeriesId: state.selectedSeriesId, isPinned: state.isPinned, isKeyboardSelection: state.isKeyboardSelection },
+    { selectedIndex: 1, mode: 'area', selectedSeriesId: 'category:housing', isPinned: false, isKeyboardSelection: false },
+  )
+
+  state = interactionFor(state, { type: 'pointerDown', target, pointCount: 3 })
+  state = interactionFor(state, { type: 'pointerUp', target, pointCount: 3 })
+  assert.deepEqual(
+    { selectedIndex: state.selectedIndex, mode: state.mode, selectedSeriesId: state.selectedSeriesId, isPinned: state.isPinned, effect: state.effect },
+    { selectedIndex: 1, mode: 'area', selectedSeriesId: 'category:housing', isPinned: true, effect: { type: 'select' } },
+  )
+
+  state = interactionFor(state, { type: 'pointerDown', target, pointCount: 3 })
+  state = interactionFor(state, { type: 'pointerUp', target, pointCount: 3 })
+  assert.deepEqual(
+    { selectedIndex: state.selectedIndex, mode: state.mode, selectedSeriesId: state.selectedSeriesId, isPinned: state.isPinned, effect: state.effect },
+    { selectedIndex: -1, mode: null, selectedSeriesId: null, isPinned: false, effect: { type: 'clear' } },
+  )
+
+  state = interactionFor(chartState, { type: 'pointerMove', target, pointCount: 3 })
+  assert.equal(interactionFor(state, { type: 'pointerLeave', pointCount: 3 }).selectedIndex, -1)
+  assert.equal(interactionFor(state, { type: 'outside', pointCount: 3 }).mode, null)
+  assert.equal(interactionFor(state, { type: 'key', key: 'Escape', pointCount: 3 }).selectedSeriesId, null)
+
+  state = interactionFor(chartState, { type: 'key', key: 'ArrowRight', pointCount: 3 })
+  assert.deepEqual(
+    { selectedIndex: state.selectedIndex, mode: state.mode, selectedSeriesId: state.selectedSeriesId, isPinned: state.isPinned, isKeyboardSelection: state.isKeyboardSelection },
+    { selectedIndex: 0, mode: 'month', selectedSeriesId: null, isPinned: false, isKeyboardSelection: true },
+  )
+  state = interactionFor(state, { type: 'key', key: 'Enter', pointCount: 3 })
+  assert.equal(state.isPinned, true)
+})
+
 test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {
   const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
   const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
