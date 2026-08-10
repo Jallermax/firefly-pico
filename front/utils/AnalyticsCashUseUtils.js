@@ -212,10 +212,10 @@ export function buildCashUseVisualStyles({ series, categoryColors, sourceColors,
   expenseLayers.forEach((layer, index) => {
     const isOther = layer.kind === 'otherExpense'
     const patternIndex = Math.floor(index / categoryColors.length)
-    const overflowCycle = Math.floor(index / (categoryColors.length * CATEGORY_PATTERNS.length))
+    const overflowIndex = index - categoryColors.length * CATEGORY_PATTERNS.length
     const color = categoryColors[index % categoryColors.length]
     styles[layer.id] = {
-      color: isOther ? semanticColors.transfer : overflowCycle ? `color-mix(in srgb, ${color} ${100 / (overflowCycle + 1)}%, transparent)` : color,
+      color: isOther ? semanticColors.transfer : overflowIndex >= 0 ? `oklch(0.68 0.14 ${((overflowIndex * 137.50776405003785) % 360).toFixed(6)})` : color,
       pattern: isOther ? 'category-dots' : CATEGORY_PATTERNS[patternIndex % CATEGORY_PATTERNS.length],
       markerKind: 'area',
     }

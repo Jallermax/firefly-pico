@@ -116,6 +116,20 @@ test('Cash Use assigns deterministic non-colliding visual tuples', () => {
   assert.deepEqual(styles['total-sources'], { color: 'grey', pattern: 'dotted-line', markerKind: 'line' })
 })
 
+test('Cash Use keeps overflow category styles opaque and readable at high detail', () => {
+  const styles = cashUseStyles({
+    useLayers: Array.from({ length: 10000 }, (_, index) => ({ id: `category:${index + 1}`, kind: 'expenseCategory' })),
+    sourceBands: [],
+  })
+  const categoryStyles = Object.entries(styles).filter(([id]) => id.startsWith('category:'))
+  const categoryTuples = categoryStyles.map(([, style]) => `${style.color}|${style.pattern}|${style.markerKind}`)
+  const overflowColors = categoryStyles.slice(40).map(([, style]) => style.color)
+
+  assert.equal(new Set(categoryTuples).size, 10000)
+  assert.equal(new Set(overflowColors).size, overflowColors.length)
+  assert.ok(overflowColors.every((color) => /^oklch\(0\.68 0\.14 \d+\.\d{6}\)$/.test(color)))
+})
+
 test('Cash Use keeps Other distinct and ignores non-category source order', () => {
   const entries = [
     ...rankedCategoryEntries(12),
