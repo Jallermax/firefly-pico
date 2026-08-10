@@ -36,8 +36,14 @@
           {{ $t('analytics.common.unavailable_amounts', { ids: cell.point.unavailableTransactionIds?.join(', ') }) }}
         </span>
         <span v-else class="analytics-chart-tooltip-qualifier">{{ $t('analytics.common.exact_values') }}</span>
-        <span v-if="projectedEvidenceIds(cell.point).length" class="analytics-chart-tooltip-qualifier">{{
-          $t('analytics.daily_forecast.evidence_ids', { ids: projectedEvidenceIds(cell.point).join(', ') })
+        <span v-if="cell.projectedQualifiers.sourceIds.length" class="analytics-chart-tooltip-qualifier">{{
+          $t('analytics.daily_forecast.source_id', { id: cell.projectedQualifiers.sourceIds.join(', ') })
+        }}</span>
+        <span v-if="cell.projectedQualifiers.candidateIds.length" class="analytics-chart-tooltip-qualifier">{{
+          $t('analytics.daily_forecast.candidate_id', { id: cell.projectedQualifiers.candidateIds.join(', ') })
+        }}</span>
+        <span v-if="cell.projectedQualifiers.evidenceIds.length" class="analytics-chart-tooltip-qualifier">{{
+          $t('analytics.daily_forecast.evidence_ids', { ids: cell.projectedQualifiers.evidenceIds.join(', ') })
         }}</span>
       </template>
     </button>
@@ -45,6 +51,8 @@
 </template>
 
 <script setup>
+import { projectCashUseProjectedQualifiers } from '../../utils/AnalyticsCashUseUtils.js'
+
 const props = defineProps({
   series: { type: Object, required: true },
   monthKeys: { type: Array, default: () => [] },
@@ -57,9 +65,6 @@ const props = defineProps({
 defineEmits(['activate'])
 
 const canNavigate = (point) => !['unavailable', 'insufficientHistory'].includes(point?.status) && Array.isArray(point?.transactionIds) && point.transactionIds.length > 0
-const projectedEvidenceIds = (point) => [
-  ...new Set((point?.projectedSources ?? []).map((source) => (typeof source === 'string' ? source : (source?.id ?? source?.candidateId ?? source?.sourceId ?? source?.evidenceId))).filter(Boolean)),
-]
 const cells = computed(() => {
   const innerWidth = props.canvasWidth - props.padding.left - props.padding.right
   return props.monthKeys.map((monthKey, index) => {
@@ -71,6 +76,7 @@ const cells = computed(() => {
       monthLabel: point?.xLabel ?? monthKey,
       x: props.padding.left + (index / Math.max(1, props.monthKeys.length - 1)) * innerWidth,
       canNavigate: canNavigate(point),
+      projectedQualifiers: projectCashUseProjectedQualifiers(point),
     }
   })
 })

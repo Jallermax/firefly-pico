@@ -540,7 +540,7 @@ const tooltipOnRight = computed(() => selectedIndex.value < pointCount.value / 2
 const todayX = computed(() => (Number.isInteger(props.series.todayIndex) && props.series.todayIndex >= 0 ? xAt(props.series.todayIndex) : null))
 const selectedSeriesMonthLabel = computed(() => {
   const description = buildCombinationSelectionDescription({ selection: displaySelection.value, series: selectedSeries.value, valueFormatter: props.valueFormatter })
-  return description ? `${description.label}: ${description.valueLabel}` : ''
+  return description ? `${description.label} · ${description.monthLabel}: ${description.valueLabel}` : ''
 })
 
 const row = ({ seriesId, label, color, point, value = point?.value, yValue = value }) => ({

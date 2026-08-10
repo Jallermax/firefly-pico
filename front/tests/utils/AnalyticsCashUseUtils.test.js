@@ -1240,6 +1240,52 @@ test('Cash Use selection descriptions expose month, value, status, and navigatio
   )
 })
 
+test('Cash Use projected qualifiers retain structured evidence without becoming navigation IDs', () => {
+  const point = {
+    kind: 'forecast',
+    transactionIds: ['actual-purchase', 'actual-refund'],
+    projectedSources: [
+      {
+        id: 'expected-refund-occurrence',
+        sourceId: 'refund-source',
+        candidateId: 'refund-candidate',
+        evidenceIds: ['refund-evidence-1', 'refund-evidence-2'],
+      },
+      {
+        id: 'expected-refund-occurrence-duplicate',
+        sourceId: 'refund-source',
+        candidateId: 'refund-candidate-2',
+        evidenceIds: ['refund-evidence-2', 'refund-evidence-3'],
+      },
+    ],
+  }
+
+  assert.deepEqual(AnalyticsCashUseUtils.projectCashUseProjectedQualifiers(point), {
+    sourceIds: ['refund-source'],
+    candidateIds: ['refund-candidate', 'refund-candidate-2'],
+    evidenceIds: ['refund-evidence-1', 'refund-evidence-2', 'refund-evidence-3'],
+  })
+  assert.deepEqual(
+    projectLineChartSelection({
+      activation: 'pointer',
+      transactionIds: point.transactionIds,
+      kind: point.kind,
+      route: '/transactions/list',
+      toUrl: (ids) => `id=${ids.join(',')}`,
+    }),
+    { activation: 'pointer', transactionIds: ['actual-purchase', 'actual-refund'], route: '/transactions/list?id=actual-purchase,actual-refund', forecastOnly: false },
+  )
+
+  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const monthRow = readFileSync(new URL('../../components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
+  assert.match(chart, /\$\{description\.label\} · \$\{description\.monthLabel\}: \$\{description\.valueLabel\}/)
+  assert.match(monthRow, /projectCashUseProjectedQualifiers/)
+  assert.match(monthRow, /analytics\.daily_forecast\.source_id/)
+  assert.match(monthRow, /analytics\.daily_forecast\.candidate_id/)
+  assert.match(monthRow, /analytics\.daily_forecast\.evidence_ids/)
+  assert.doesNotMatch(monthRow, /source\?\.id \?\? source\?\.candidateId \?\? source\?\.sourceId \?\? source\?\.evidenceId/)
+})
+
 test('combination interaction supports touch pins, month navigation, repair, dismissal, and row activation', () => {
   const initial = { previewSelection: null, pinnedSelection: null, isDragging: false, pointerStart: null, effect: null }
   const target = { mode: 'seriesMonth', seriesId: 'category:housing', monthIndex: 2 }
@@ -1660,6 +1706,8 @@ test('Cash Use chart source wires exact v2 legend, selected segment, and pinned 
   assert.match(monthRow, /cell\.point\?\.kind === 'forecast'/)
   assert.match(monthRow, /analytics\.cash_use\.actual_to_date/)
   assert.match(monthRow, /analytics\.cash_use\.projected_remaining/)
+  assert.match(monthRow, /analytics\.daily_forecast\.source_id/)
+  assert.match(monthRow, /analytics\.daily_forecast\.candidate_id/)
   assert.match(monthRow, /analytics\.daily_forecast\.evidence_ids/)
-  assert.match(monthRow, /const projectedEvidenceIds = \(point\)/)
+  assert.match(monthRow, /projectCashUseProjectedQualifiers/)
 })

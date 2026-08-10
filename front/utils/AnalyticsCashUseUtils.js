@@ -582,6 +582,16 @@ const uniqueProjectedSources = (sources) => {
   })
 }
 
+export function projectCashUseProjectedQualifiers(point) {
+  const projectedSources = point?.projectedSources ?? []
+  const idsFor = (selector) => unique(projectedSources.flatMap((source) => (typeof source === 'string' ? [] : selector(source))))
+  return {
+    sourceIds: idsFor((source) => [source?.sourceId]),
+    candidateIds: idsFor((source) => [source?.candidateId]),
+    evidenceIds: idsFor((source) => [...(source?.evidenceIds ?? []), source?.evidenceId]),
+  }
+}
+
 const refundCoverageValue = (point) => {
   const coverage = point?.refundCoverage
   return Object.hasOwn(coverage ?? {}, 'totalRefunded') ? coverage.totalRefunded : (coverage?.refunded ?? 0)
