@@ -346,11 +346,7 @@ const categoryRankingItems = ({ months, completedMonthKeys, currentMonthKey, pro
     .sort((left, right) => Number.isFinite(right.amount) - Number.isFinite(left.amount) || (Number.isFinite(left.amount) ? right.amount - left.amount : 0) || left.id.localeCompare(right.id))
 }
 
-const selectedCategories = ({ ranking, categoryIds, detailLevel }) => {
-  if (detailLevel === 'all') return ranking
-  const explicit = new Set((Array.isArray(categoryIds) ? categoryIds : []).map(String))
-  return ranking.filter((id, index) => index < detailLevel || explicit.has(id))
-}
+const categoriesForDetail = ({ ranking, detailLevel }) => (detailLevel === 'all' ? ranking : ranking.slice(0, detailLevel))
 
 const aggregateCategories = (month, ids) => {
   const buckets = ids.map((id) => month?.categories.get(id)).filter(Boolean)
@@ -503,7 +499,7 @@ const aggregateSummaryPoint = ({ x, kind, components }) => {
   }
 }
 
-export function buildCashUseSeries({ ledger, remainingActivity = {}, months = [], mode, savingsView, categoryIds = [], detailLevel = 5 }) {
+export function buildCashUseSeries({ ledger, remainingActivity = {}, months = [], mode, savingsView, detailLevel = 5 }) {
   const selectedMode = normalizedMode(mode)
   const selectedSavingsView = normalizedSavingsView(savingsView)
   const selectedDetailLevel = normalizedDetailLevel(detailLevel)
@@ -531,7 +527,7 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
   const projectedWithStatus = (projection, metricIds, progressMetric = metricIds[0]) => forecastProjection({ projection, remainingActivity: authoritativeRemainingActivity, metricIds, progressMetric })
   const rankingItems = categoryRankingItems({ months: actual, completedMonthKeys, currentMonthKey, projected: future })
   const ranking = rankingItems.map(({ id }) => id)
-  const visibleCategoryIds = selectedCategories({ ranking, categoryIds, detailLevel: selectedDetailLevel })
+  const visibleCategoryIds = categoriesForDetail({ ranking, detailLevel: selectedDetailLevel })
   const hiddenCategoryIds = ranking.filter((id) => !visibleCategoryIds.includes(id))
 
   const categoryGroups = visibleCategoryIds.map((id) => ({ id: `category:${id}`, kind: 'expenseCategory', categoryIds: [id], categoryId: id, pattern: 'solid' }))
@@ -571,26 +567,6 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
 
   const savingsGroups = selectedSavingsView === 'split' ? ['accessible', 'restricted'] : ['combined']
   if (selectedMode === 'full') {
-    for (const id of savingsGroups) {
-      const savingsProjection = projectedSavingsFor(future, id)
-      const projection = projectedWithStatus(savingsProjection, ['savingsDeposits', 'savingsWithdrawals'], savingsProjection.value < 0 ? 'savingsWithdrawals' : 'savingsDeposits')
-      useLayers.push({
-        id: `savings:${id}`,
-        kind: id === 'combined' ? 'savingsDeposit' : id === 'accessible' ? 'savingsAccessibleDeposit' : 'savingsRestrictedDeposit',
-        labelKey: `analytics.cash_use.savings_${id}`,
-        pattern: id === 'restricted' ? 'restricted-savings' : 'accessible-savings',
-        points: monthKeys.map((x) => {
-          const isForecast = x === forecastX
-          const key = isForecast ? currentMonthKey : x
-          return buildLayerPoint({
-            x,
-            kind: isForecast ? 'forecast' : 'actual',
-            actual: bucketForSavingsUse(actual.get(key)?.savings[id] ?? emptyBucket()),
-            projected: isForecast ? projectedSavingsUse(projection) : undefined,
-          })
-        }),
-      })
-    }
     useLayers.push({
       id: 'debt:repaid',
       kind: 'debtRepaid',
@@ -612,6 +588,26 @@ export function buildCashUseSeries({ ledger, remainingActivity = {}, months = []
         })
       }),
     })
+    for (const id of savingsGroups) {
+      const savingsProjection = projectedSavingsFor(future, id)
+      const projection = projectedWithStatus(savingsProjection, ['savingsDeposits', 'savingsWithdrawals'], savingsProjection.value < 0 ? 'savingsWithdrawals' : 'savingsDeposits')
+      useLayers.push({
+        id: `savings:${id}`,
+        kind: id === 'combined' ? 'savingsDeposit' : id === 'accessible' ? 'savingsAccessibleDeposit' : 'savingsRestrictedDeposit',
+        labelKey: `analytics.cash_use.savings_${id}`,
+        pattern: id === 'restricted' ? 'restricted-savings' : 'accessible-savings',
+        points: monthKeys.map((x) => {
+          const isForecast = x === forecastX
+          const key = isForecast ? currentMonthKey : x
+          return buildLayerPoint({
+            x,
+            kind: isForecast ? 'forecast' : 'actual',
+            actual: bucketForSavingsUse(actual.get(key)?.savings[id] ?? emptyBucket()),
+            projected: isForecast ? projectedSavingsUse(projection) : undefined,
+          })
+        }),
+      })
+    }
   }
 
   const ordinaryIncome = {

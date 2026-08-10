@@ -930,7 +930,6 @@ export function createAnalyticsStore(id, useDependencies) {
         months: cashUseCompletedMonthKeys.value,
         mode: cashUseMode.value,
         savingsView: savingsView.value,
-        categoryIds: persistedSelectedCategoryIds.value,
         detailLevel: cashUseDetail.value,
       })
     })

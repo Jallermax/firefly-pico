@@ -1522,6 +1522,42 @@ test('projects the shared ledger and monthly forecast into persisted cash-use co
   )
 })
 
+test('Cash Use detail is independent from Spending by Category selections', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsCashUseDetail', 5)
+  const checking = activeAsset()
+  const expense = activeExpense()
+  transactionResult = Array.from({ length: 12 }, (_, index) =>
+    dailyTransaction({ id: `cash-use-${index + 1}`, date: '2026-07-15', amount: 120 - index, source: checking, destination: expense, categoryId: `category-${index + 1}` }),
+  )
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(store.cashUseSeries.visibleCategoryIds, ['category-1', 'category-2', 'category-3', 'category-4', 'category-5'])
+
+  store.selectedCategoryIds = ['category-12']
+  await nextTick()
+
+  assert.deepEqual(store.cashUseSeries.visibleCategoryIds, ['category-1', 'category-2', 'category-3', 'category-4', 'category-5'])
+
+  store.cashUseDetail = 10
+  await nextTick()
+
+  assert.deepEqual(store.cashUseSeries.visibleCategoryIds, [
+    'category-1',
+    'category-2',
+    'category-3',
+    'category-4',
+    'category-5',
+    'category-6',
+    'category-7',
+    'category-8',
+    'category-9',
+    'category-10',
+  ])
+})
+
 test('ranks cash-use facet categories from balancePeriod instead of categoryAverageMonths', async () => {
   now = new Date('2026-08-10T12:00:00')
   storageOverrides.set('analyticsBalancePeriod', 6)

@@ -69,6 +69,17 @@ const build = ({ entries, mode = 'spending', savingsView = 'combined', categoryI
     detailLevel,
   })
 
+const rankedCategoryEntries = (count) =>
+  Array.from({ length: count }, (_, index) =>
+    entry({
+      id: `ranked-${index + 1}`,
+      value: count - index,
+      sourceKind: 'available',
+      destinationKind: 'expense',
+      categoryId: `category-${index + 1}`,
+    }),
+  )
+
 const pointFor = (series, x) => series.points.find((point) => point.x === x)
 const layerFor = (series, id) => series.useLayers.find((layer) => layer.id === id)
 const sourceFor = (series, id) => series.sourceBands.find((layer) => layer.id === id)
@@ -195,7 +206,7 @@ test('full mode uses liability-only debt and splits accessible and restricted ne
   const split = build({ entries, mode: 'full', savingsView: 'split' })
   assert.deepEqual(
     split.useLayers.map(({ id }) => id),
-    ['category:food', 'savings:accessible', 'savings:restricted', 'debt:repaid'],
+    ['category:food', 'debt:repaid', 'savings:accessible', 'savings:restricted'],
   )
   assert.equal(pointFor(layerFor(split, 'savings:accessible'), '2026-06').value, 50)
   assert.deepEqual(pointFor(layerFor(split, 'savings:accessible'), '2026-06').transactionIds, ['accessible-in', 'accessible-out'])
@@ -221,6 +232,52 @@ test('full mode uses liability-only debt and splits accessible and restricted ne
     spending.sourceBands.map(({ id }) => id),
     ['refunds'],
   )
+})
+
+test('full mode places debt before savings without changing Cash Use evidence or reconciliation', () => {
+  const series = build({
+    entries: [
+      entry({ id: 'food', value: 80, sourceKind: 'available', destinationKind: 'expense', categoryId: 'food' }),
+      entry({ id: 'accessible-in', value: 70, sourceKind: 'available', destinationKind: 'savingsAccessible' }),
+      entry({ id: 'accessible-out', value: 20, sourceKind: 'savingsAccessible', destinationKind: 'available' }),
+      entry({ id: 'restricted-in', value: 30, sourceKind: 'available', destinationKind: 'savingsRestricted' }),
+      entry({ id: 'loan-payment', value: 25, sourceKind: 'available', destinationKind: 'liability' }),
+    ],
+    mode: 'full',
+    savingsView: 'split',
+    detailLevel: 5,
+    remainingActivity: {
+      dailyProjectedEntries: [
+        projected({ id: 'future-food', categoryId: 'food', flowAmounts: { expenses: 40 } }),
+        projected({ id: 'future-debt', flowAmounts: { debtRepayments: 15 } }),
+        projected({ id: 'future-accessible', destinationKind: 'savingsAccessible', flowAmounts: { savingsDeposits: 20 } }),
+        projected({ id: 'future-restricted', destinationKind: 'savingsRestricted', flowAmounts: { savingsDeposits: 10 } }),
+      ],
+    },
+  })
+
+  assert.deepEqual(series.useLayers.map(({ kind }) => kind), ['expenseCategory', 'debtRepaid', 'savingsAccessibleDeposit', 'savingsRestrictedDeposit'])
+  assert.deepEqual(
+    { value: pointFor(series.totalUses, '2026-06').value, transactionIds: pointFor(series.totalUses, '2026-06').transactionIds },
+    { value: 185, transactionIds: ['accessible-in', 'accessible-out', 'food', 'loan-payment', 'restricted-in'] },
+  )
+  assert.deepEqual(pointFor(series.totalUses, '2026-08:forecast').projectedSources.map(({ id }) => id), ['future-food', 'future-debt', 'future-accessible', 'future-restricted'])
+  assert.deepEqual(series.audit.reconciliation.find(({ monthKey }) => monthKey === '2026-06'), {
+    monthKey: '2026-06',
+    status: 'ok',
+    grossExpense: 80,
+    categoryTotal: 80,
+    categoryDelta: 0,
+    totalUses: 185,
+    useLayerTotal: 185,
+    useDelta: 0,
+    totalSources: 0,
+    sourceComponentTotal: 0,
+    sourceDelta: 0,
+    gap: -185,
+    gapDelta: 0,
+    delta: 0,
+  })
 })
 
 test('net Savings deposit clears withdrawal-side and zero Total sources transaction IDs', () => {
@@ -284,7 +341,23 @@ test('full mode keeps a negative shortfall and uses mode-specific gap labels', (
   assert.equal(pointFor(spending.gap, '2026-06').labelKey, 'analytics.cash_use.after_spending')
 })
 
-test('detail ranking is completed-window-only, keeps explicit selections, groups Other last, and includes projected Uncategorized', () => {
+test('Cash Use detail alone owns visible categories and Other', () => {
+  const topFive = build({ entries: rankedCategoryEntries(12), categoryIds: ['category-12'], detailLevel: 5 })
+
+  assert.deepEqual(topFive.visibleCategoryIds, ['category-1', 'category-2', 'category-3', 'category-4', 'category-5'])
+  assert.deepEqual(topFive.useLayers.filter(({ kind }) => kind === 'expenseCategory').map(({ categoryId }) => categoryId), topFive.visibleCategoryIds)
+  assert.deepEqual(topFive.useLayers.find(({ kind }) => kind === 'otherExpense').categoryIds, [
+    'category-6',
+    'category-7',
+    'category-8',
+    'category-9',
+    'category-10',
+    'category-11',
+    'category-12',
+  ])
+})
+
+test('detail ranking is completed-window-only, groups Other last, and includes projected Uncategorized', () => {
   const result = build({
     entries: [
       entry({ id: 'a-june', value: 50, sourceKind: 'available', destinationKind: 'expense', categoryId: 'a' }),
@@ -305,10 +378,10 @@ test('detail ranking is completed-window-only, keeps explicit selections, groups
 
   assert.deepEqual(
     result.useLayers.map(({ id }) => id),
-    ['category:a', 'category:b', 'category:c', 'category:d', 'category:e', 'category:f', 'category:other'],
+    ['category:a', 'category:b', 'category:c', 'category:d', 'category:e', 'category:other'],
   )
-  assert.equal(pointFor(layerFor(result, 'category:other'), '2026-06').value, 1)
-  assert.deepEqual(pointFor(layerFor(result, 'category:other'), '2026-06').transactionIds, ['g-june'])
+  assert.equal(pointFor(layerFor(result, 'category:other'), '2026-06').value, 6)
+  assert.deepEqual(pointFor(layerFor(result, 'category:other'), '2026-06').transactionIds, ['f-june', 'g-june'])
   assert.equal(pointFor(layerFor(result, 'category:other'), '2026-08:forecast').value, 25)
   assert.deepEqual(pointFor(layerFor(result, 'category:other'), '2026-08:forecast').transactionIds, [])
   assert.deepEqual(
