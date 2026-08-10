@@ -211,9 +211,12 @@ export function buildCashUseVisualStyles({ series, categoryColors, sourceColors,
   const expenseLayers = series.useLayers.filter(({ kind }) => ['expenseCategory', 'otherExpense'].includes(kind))
   expenseLayers.forEach((layer, index) => {
     const isOther = layer.kind === 'otherExpense'
+    const patternIndex = Math.floor(index / categoryColors.length)
+    const overflowCycle = Math.floor(index / (categoryColors.length * CATEGORY_PATTERNS.length))
+    const color = categoryColors[index % categoryColors.length]
     styles[layer.id] = {
-      color: isOther ? semanticColors.transfer : categoryColors[index % categoryColors.length],
-      pattern: isOther ? 'category-dots' : CATEGORY_PATTERNS[Math.floor(index / categoryColors.length) % CATEGORY_PATTERNS.length],
+      color: isOther ? semanticColors.transfer : overflowCycle ? `color-mix(in srgb, ${color} ${100 / (overflowCycle + 1)}%, transparent)` : color,
+      pattern: isOther ? 'category-dots' : CATEGORY_PATTERNS[patternIndex % CATEGORY_PATTERNS.length],
       markerKind: 'area',
     }
   })

@@ -99,6 +99,8 @@ test('Cash Use assigns deterministic non-colliding visual tuples', () => {
     build({ entries: rankedCategoryEntries(12), detailLevel: 5 }),
     build({ entries: rankedCategoryEntries(12), detailLevel: 10 }),
     build({ entries: rankedCategoryEntries(20), detailLevel: 'all' }),
+    build({ entries: rankedCategoryEntries(41), detailLevel: 'all' }),
+    build({ entries: rankedCategoryEntries(101), detailLevel: 'all' }),
   ]) {
     const styles = cashUseStyles(series)
     const categoryTuples = Object.entries(styles)
@@ -123,11 +125,15 @@ test('Cash Use keeps Other distinct and ignores non-category source order', () =
   ]
   const ordered = cashUseStyles(build({ entries, mode: 'full', detailLevel: 5 }))
   const shuffled = cashUseStyles(build({ entries: [...rankedCategoryEntries(12), ...entries.slice(12).reverse()], mode: 'full', detailLevel: 5 }))
+  const fullCombined = cashUseStyles(build({ entries, mode: 'full', savingsView: 'combined', detailLevel: 5 }))
   const fullSplit = cashUseStyles(build({ entries, mode: 'full', savingsView: 'split', detailLevel: 5 }))
 
   assert.equal(JSON.stringify(shuffled), JSON.stringify(ordered))
   assert.deepEqual(ordered['category:other'], { color: 'blue', pattern: 'category-dots', markerKind: 'area' })
   assert.notDeepEqual(ordered['category:other'], ordered['category:category-1'])
+  assert.deepEqual(fullCombined.refunds, { color: 'pink', pattern: 'refund', markerKind: 'area' })
+  assert.deepEqual(fullCombined['savings:combined'], { color: 's1', pattern: 'accessible-savings', markerKind: 'area' })
+  assert.deepEqual(fullCombined['savings-withdrawn:combined'], { color: 's2', pattern: 'accessible-savings', markerKind: 'area' })
   assert.deepEqual(fullSplit['refund-coverage'], { color: 'pink', pattern: 'refund', markerKind: 'area' })
   assert.deepEqual(fullSplit['debt:repaid'], { color: 'pink', pattern: 'debt', markerKind: 'area' })
   assert.deepEqual(fullSplit['savings:accessible'], { color: 's1', pattern: 'accessible-savings', markerKind: 'area' })
