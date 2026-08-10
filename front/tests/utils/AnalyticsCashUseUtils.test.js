@@ -1545,13 +1545,13 @@ test('combination chart and card wire accessible interaction targets and exact e
   assert.match(chart, /refundCoverage\?\.totalRefunded \?\?[^\n]+> 0/)
   assert.match(chart, /v-if="\(selectedRow\.point\.refundCoverage\?\.totalRefunded \?\? selectedRow\.point\.refundCoverage\?\.refunded\) > 0"/)
   assert.match(chart, /valueFormatter\(selectedRow\.point\.refundCoverage\.totalRefunded \?\? selectedRow\.point\.refundCoverage\.refunded\)/)
-  assert.match(card, /analyticsStore\.cashUseCategoryRankingItems/)
+  assert.doesNotMatch(card, /analyticsStore\.cashUseCategoryRankingItems/)
   assert.match(card, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
   assert.match(card, /TransactionFilterUtils\.filters\.id\.toUrl/)
   assert.match(card, /projectLineChartSelection/)
   assert.match(card, /projectedUnavailableSummary/)
-  assert.match(card, /analytics-cash-use-legend/)
-  assert.match(card, /analytics\.cash_use\.legend_label/)
+  assert.match(card, /:legend-items="legendItems"/)
+  assert.match(card, /analytics\.cash_use\.chart_label/)
   assert.match(card, /refund-coverage/)
   assert.match(card, /gap-positive/)
   assert.match(card, /gap-negative/)
@@ -1710,4 +1710,61 @@ test('Cash Use chart source wires exact v2 legend, selected segment, and pinned 
   assert.match(monthRow, /analytics\.daily_forecast\.candidate_id/)
   assert.match(monthRow, /analytics\.daily_forecast\.evidence_ids/)
   assert.match(monthRow, /projectCashUseProjectedQualifiers/)
+})
+
+test('Cash Use card uses one ordered Top 5, Top 10, or All projection across chart and interactive legend', () => {
+  const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+  const detailSeries = [
+    { detailLevel: 5, expected: ['category:category-1', 'category:category-2', 'category:category-3', 'category:category-4', 'category:category-5', 'category:other'] },
+    {
+      detailLevel: 10,
+      expected: [
+        'category:category-1',
+        'category:category-2',
+        'category:category-3',
+        'category:category-4',
+        'category:category-5',
+        'category:category-6',
+        'category:category-7',
+        'category:category-8',
+        'category:category-9',
+        'category:category-10',
+        'category:other',
+      ],
+    },
+    {
+      detailLevel: 'all',
+      expected: [
+        'category:category-1',
+        'category:category-2',
+        'category:category-3',
+        'category:category-4',
+        'category:category-5',
+        'category:category-6',
+        'category:category-7',
+        'category:category-8',
+        'category:category-9',
+        'category:category-10',
+        'category:category-11',
+        'category:category-12',
+      ],
+    },
+  ]
+
+  for (const { detailLevel, expected } of detailSeries) {
+    const series = build({ entries: rankedCategoryEntries(12), detailLevel })
+    assert.deepEqual(
+      series.useLayers.map(({ id }) => id),
+      expected,
+      String(detailLevel),
+    )
+  }
+
+  assert.doesNotMatch(card, /analytics-category-facet/)
+  assert.doesNotMatch(card, /selectedCategoryIds/)
+  assert.doesNotMatch(card, /facetItems/)
+  assert.match(card, /buildCashUseVisualStyles/)
+  assert.match(card, /:legend-items="legendItems"/)
+  assert.match(card, /return \{ \.\.\.style, ariaLabel:/)
+  assert.match(card, /\.\.\.visualStyle\(layer\.id, layer\.label\)/)
 })

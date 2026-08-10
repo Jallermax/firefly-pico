@@ -7,7 +7,6 @@
         </div>
         <div class="analytics-card-subtitle">{{ $t('analytics.cash_use.subtitle') }}</div>
       </div>
-      <analytics-category-facet v-model="analyticsStore.selectedCategoryIds" :items="facetItems" :max="6" />
     </div>
 
     <div class="analytics-category-periods">
@@ -59,14 +58,13 @@
         </details>
       </div>
 
-      <div class="analytics-cash-use-legend" role="list" :aria-label="$t('analytics.cash_use.legend_label')">
-        <span v-for="item in legendItems" :key="item.id" class="analytics-cash-use-legend-item" role="listitem">
-          <span class="analytics-cash-use-legend-marker" :class="`analytics-cash-use-legend-marker-${item.pattern}`" :style="{ color: item.color, backgroundColor: item.color }" />
-          <span>{{ item.label }}</span>
-        </span>
-      </div>
-
-      <analytics-combination-chart :series="chartSeries" :value-formatter="formatCurrency" :aria-label="$t('analytics.cash_use.chart_label')" @select-point="onSelectPoint" />
+      <analytics-combination-chart
+        :series="chartSeries"
+        :legend-items="legendItems"
+        :value-formatter="formatCurrency"
+        :aria-label="$t('analytics.cash_use.chart_label')"
+        @select-point="onSelectPoint"
+      />
 
       <details class="analytics-calculation-details">
         <summary>{{ $t('analytics.common.how_calculated') }}</summary>
@@ -85,17 +83,22 @@ import { useAnalyticsStore } from '~/stores/analyticsStore.js'
 import { useCategoryStore } from '~/stores/categoryStore.js'
 import { useProfileStore } from '~/stores/profileStore.js'
 import { ANALYTICS_UNCATEGORIZED_ID } from '~/utils/AnalyticsUtils.js'
+import { buildCashUseVisualStyles } from '~/utils/AnalyticsCashUseUtils.js'
 import { projectLineChartSelection } from '~/utils/ChartUtils.js'
 import { formatNumberForDashboard } from '~/utils/NumberUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
 
-const USE_COLORS = [
+const CATEGORY_COLORS = [
   'var(--analytics-category-1)',
   'var(--analytics-category-2)',
   'var(--analytics-category-3)',
   'var(--analytics-category-4)',
   'var(--analytics-category-5)',
   'var(--analytics-category-6)',
+  'var(--analytics-category-7)',
+  'var(--analytics-category-8)',
+  'var(--analytics-category-9)',
+  'var(--analytics-category-10)',
 ]
 const SOURCE_COLORS = ['var(--income2)', 'var(--transfer2)', 'var(--analytics-category-6)', 'var(--van-text-color-2)']
 
@@ -105,7 +108,6 @@ const profileStore = useProfileStore()
 const { t } = useI18n()
 const cashUseState = computed(() => analyticsStore.cashUseState)
 const cashUse = computed(() => analyticsStore.cashUseSeries)
-const selectedCategoryIds = computed(() => (Array.isArray(analyticsStore.selectedCategoryIds) ? analyticsStore.selectedCategoryIds : []))
 const modeItems = computed(() => [
   { label: t('analytics.cash_use.mode_spending'), value: 'spending' },
   { label: t('analytics.cash_use.mode_full'), value: 'full' },
@@ -125,26 +127,33 @@ const layerLabel = (layer) => {
   if (layer.kind === 'otherExpense') return t('analytics.flow.other')
   return layer.labelKey ? t(layer.labelKey) : layer.id
 }
-const facetItems = computed(() => {
-  const items = analyticsStore.cashUseCategoryRankingItems
-  const ids = new Set(items.map(({ id }) => id))
-  return [...items, ...selectedCategoryIds.value.filter((id) => !ids.has(id)).map((id) => ({ id, amount: 0 }))]
-})
+const visualStyles = computed(() =>
+  buildCashUseVisualStyles({
+    series: cashUse.value,
+    categoryColors: CATEGORY_COLORS,
+    sourceColors: SOURCE_COLORS,
+    semanticColors: { income: 'var(--income2)', expense: 'var(--expense2)', transfer: 'var(--transfer2)', neutral: 'var(--van-text-color-2)' },
+  }),
+)
+const visualStyle = (id, label) => {
+  const style = visualStyles.value[id] ?? {}
+  return { ...style, ariaLabel: style.legendOrdinal ? `${label} ${style.legendOrdinal}` : label }
+}
 const chartSeries = computed(() => ({
   ...cashUse.value,
-  useLayers: cashUse.value.useLayers.map((layer, index) => ({ ...layer, label: layerLabel(layer), color: USE_COLORS[index % USE_COLORS.length], points: layer.points.map(pointLabel) })),
+  useLayers: cashUse.value.useLayers.map((layer) => ({ ...layer, ...visualStyle(layer.id, layerLabel(layer)), label: layerLabel(layer), points: layer.points.map(pointLabel) })),
   totalUses: { ...cashUse.value.totalUses, points: cashUse.value.totalUses.points.map(pointLabel) },
   ordinaryIncome: {
     ...cashUse.value.ordinaryIncome,
     label: t(cashUse.value.ordinaryIncome.labelKey),
-    color: 'var(--income2)',
+    ...visualStyle(cashUse.value.ordinaryIncome.id, t(cashUse.value.ordinaryIncome.labelKey)),
     points: cashUse.value.ordinaryIncome.points.map(pointLabel),
   },
-  sourceBands: cashUse.value.sourceBands.map((band, index) => ({ ...band, label: t(band.labelKey), color: SOURCE_COLORS[index % SOURCE_COLORS.length], points: band.points.map(pointLabel) })),
+  sourceBands: cashUse.value.sourceBands.map((band) => ({ ...band, ...visualStyle(band.id, t(band.labelKey)), label: t(band.labelKey), points: band.points.map(pointLabel) })),
   totalSources: {
     ...cashUse.value.totalSources,
     label: t(cashUse.value.totalSources.labelKey),
-    color: 'var(--van-text-color-2)',
+    ...visualStyle(cashUse.value.totalSources.id, t(cashUse.value.totalSources.labelKey)),
     points: cashUse.value.totalSources.points.map(pointLabel),
   },
   totalUsesLabel: t('analytics.cash_use.total_uses'),
@@ -154,16 +163,16 @@ const hasArea = (points) => points.some((point) => Number.isFinite(point?.top) &
 const hasLine = (points) => points.some((point) => Number.isFinite(point?.value) && point.value !== 0)
 const legendItems = computed(() => {
   const series = chartSeries.value
-  const items = series.useLayers.filter(({ points }) => hasArea(points)).map((layer) => ({ id: layer.id, label: layer.label, color: layer.color, pattern: layer.pattern ?? 'solid' }))
+  const items = series.useLayers.filter(({ points }) => hasArea(points)).map((layer) => ({ id: layer.id, label: layer.label, ...visualStyle(layer.id, layer.label) }))
   if (series.useLayers.some(({ points }) => points.some((point) => (point.refundCoverage?.totalRefunded ?? point.refundCoverage?.refunded) > 0)))
-    items.push({ id: 'refund-coverage', label: t('analytics.cash_use.refund_coverage'), color: 'var(--expense2)', pattern: 'refund' })
-  if (hasLine(series.ordinaryIncome.points)) items.push({ id: series.ordinaryIncome.id, label: series.ordinaryIncome.label, color: series.ordinaryIncome.color, pattern: 'line' })
-  items.push(...series.sourceBands.filter(({ points }) => hasArea(points)).map((band) => ({ id: band.id, label: band.label, color: band.color, pattern: band.pattern ?? 'solid' })))
+    items.push({ id: 'refund-coverage', label: t('analytics.cash_use.refund_coverage'), ...visualStyle('refund-coverage', t('analytics.cash_use.refund_coverage')) })
+  if (hasLine(series.ordinaryIncome.points)) items.push({ id: series.ordinaryIncome.id, label: series.ordinaryIncome.label, ...visualStyle(series.ordinaryIncome.id, series.ordinaryIncome.label) })
+  items.push(...series.sourceBands.filter(({ points }) => hasArea(points)).map((band) => ({ id: band.id, label: band.label, ...visualStyle(band.id, band.label) })))
   if (series.gap.points.some(({ direction, top, bottom }) => direction === 'positive' && Number.isFinite(top) && Number.isFinite(bottom) && top !== bottom))
-    items.push({ id: 'gap-positive', label: t('analytics.cash_use.new_excess'), color: 'var(--income2)', pattern: 'gap-positive' })
+    items.push({ id: 'gap-positive', label: t('analytics.cash_use.new_excess'), ...visualStyle('gap-positive', t('analytics.cash_use.new_excess')) })
   if (series.gap.points.some(({ direction, top, bottom }) => direction === 'negative' && Number.isFinite(top) && Number.isFinite(bottom) && top !== bottom))
-    items.push({ id: 'gap-negative', label: t('analytics.cash_use.existing_available_funds_required'), color: 'var(--expense2)', pattern: 'gap-negative' })
-  if (hasLine(series.totalSources.points)) items.push({ id: series.totalSources.id, label: series.totalSources.label, color: series.totalSources.color, pattern: 'dotted-line' })
+    items.push({ id: 'gap-negative', label: t('analytics.cash_use.existing_available_funds_required'), ...visualStyle('gap-negative', t('analytics.cash_use.existing_available_funds_required')) })
+  if (hasLine(series.totalSources.points)) items.push({ id: series.totalSources.id, label: series.totalSources.label, ...visualStyle(series.totalSources.id, series.totalSources.label) })
   return items
 })
 const hasActivity = computed(() =>

@@ -332,6 +332,27 @@ test('provides the unavailable-amount calculation warning in every supported loc
   }
 })
 
+test('provides Cash Use selected-series interaction labels in every supported locale', () => {
+  const keys = ['selected_series_values', 'series_month_value', 'drilldown_available', 'drilldown_unavailable', 'selected_area', 'selected_month_band']
+  const english = JSON.parse(readFileSync(new URL('../../i18n/locales/en.json', import.meta.url), 'utf8')).analytics.cash_use
+
+  assert.deepEqual(Object.fromEntries(keys.map((key) => [key, english[key]])), {
+    selected_series_values: 'Monthly values for {series}',
+    series_month_value: '{series}, {month}: {value}',
+    drilldown_available: 'Open contributing transactions',
+    drilldown_unavailable: 'No completed transactions to open',
+    selected_area: 'Selected area',
+    selected_month_band: 'Selected month',
+  })
+  for (const locale of localeNames) {
+    const cashUse = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.cash_use
+    for (const key of keys) {
+      assert.equal(typeof cashUse[key], 'string', `${locale}: analytics.cash_use.${key}`)
+      assert.notEqual(cashUse[key].trim(), '', `${locale}: analytics.cash_use.${key}`)
+    }
+  }
+})
+
 test('builds one coherent ledger and feeds the same entries to every balance projection', async () => {
   now = new Date('2026-08-10T12:00:00')
   const linkTypes = [{ id: 'refund', attributes: { outward: 'refund' } }]

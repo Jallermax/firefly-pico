@@ -515,6 +515,27 @@
     box-shadow: rgba(0, 0, 0, 0.55) 0 3px 8px;
 }
 
+.van-theme-dark .analytics-cash-use-card {
+    --analytics-selection-band: rgba(79, 195, 247, 0.2);
+    --analytics-selection-outline: #4fc3f7;
+}
+
+.van-theme-dark .analytics-cash-use-legend-item:hover,
+.van-theme-dark .analytics-cash-use-legend-item.active,
+.van-theme-dark .analytics-cash-use-legend-item.pinned,
+.van-theme-dark .analytics-cash-use-month-cell.active {
+    background: #303033;
+}
+
+.van-theme-dark .analytics-cash-use-month-row-label {
+    color: #ddd;
+    background: #1c1c1e;
+}
+
+.van-theme-dark .analytics-cash-use-month-cell strong {
+    color: #f5f5f5;
+}
+
 .van-theme-dark .analytics-card {
     box-shadow: var(--analytics-card-shadow), var(--analytics-card-ring);
 }
