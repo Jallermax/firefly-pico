@@ -287,12 +287,14 @@ const renderAnalyticsCard = async (path, context) => {
     app.component(name, slotStub)
   app.component('app-tabs', {
     props: ['items'],
-    setup: (props) => () =>
-      h(
-        'div',
-        { class: 'app-tabs-test' },
-        (props.items ?? []).map((item) => h('button', { 'data-value': String(item.value) }, item.label)),
-      ),
+    setup:
+      (props, { attrs }) =>
+      () =>
+        h(
+          'div',
+          { ...attrs, class: 'app-tabs-test', role: 'tablist' },
+          (props.items ?? []).map((item) => h('button', { 'data-value': String(item.value) }, item.label)),
+        ),
   })
   app.component('app-select', {
     props: ['label', 'list', 'modelValue', 'search', 'getDisplayValue', 'isMultiSelect', 'hasSearch'],
@@ -322,7 +324,7 @@ const renderAnalyticsCard = async (path, context) => {
     setup: (props) => () => h('div', { class: 'layered-money-flow-chart-test', 'data-node-labels': (props.graph?.nodes ?? []).map(({ label }) => label).join('|') }),
   })
   app.config.warnHandler = () => {}
-  app.config.globalProperties.$t = (key, params) => (params ? `${key}:${Object.values(params).join('|')}` : key)
+  app.config.globalProperties.$t = (key, params) => (key === 'analytics.flow.order' ? 'Order' : params ? `${key}:${Object.values(params).join('|')}` : key)
   return renderToString(app)
 }
 
@@ -1796,6 +1798,7 @@ const moneyFlowControlContext = (overrides = {}) => {
       details: { nodes: [], links: [] },
       audit: { pools: {}, passThrough: {}, passThroughReallocations: [] },
       unclassified: { value: 0, transactionIds: [] },
+      unsupportedPassThrough: { value: 0, transactionIds: [] },
       isBalanced: true,
     },
     chartGraph: { nodes: [{ label: 'Income' }, { label: 'Refunds' }, { label: 'Existing funds' }, { label: 'New debt' }], links: [] },
@@ -1839,6 +1842,7 @@ test('renders all Money flow controls, the threshold currency field, named searc
   assert.doesNotMatch(html, /payroll-internal-id/)
   assert.match(html, /data-node-labels="Income\|Refunds\|Existing funds\|New debt"/)
   assert.match(html, /Type, then amount · Minimum amount 25 USD · Pass-through: Payroll clearing/)
+  assert.match(html, /<div(?=[^>]*role="tablist")(?=[^>]*aria-label="Order")[^>]*>/)
 })
 
 test('filters the real Money flow account selector from its bound search model', async () => {
@@ -1874,7 +1878,7 @@ test('shows the minimum-amount field only in threshold mode and disables treatme
   assert.match(topFiveHtml, /app-boolean-test" disabled/)
 })
 
-test('renders the unsupported pass-through blocker with exact-ID drilldown and original-view recovery', async () => {
+test('renders generic unclassified evidence without a pass-through warning or recovery action', async () => {
   const html = await renderAnalyticsCard(
     '../../components/analytics/analytics-money-flow.vue',
     moneyFlowControlContext({
@@ -1882,24 +1886,90 @@ test('renders the unsupported pass-through blocker with exact-ID drilldown and o
       stateLabel: 'Unclassified activity',
       stateDescription: 'Generic unclassified description',
       hasUnclassified: true,
-      hasUnsupportedPassThrough: true,
-      unsupportedTransactionSelection: { transactionIds: ['actual-blocked-1'], route: '/transactions/list?id=actual-blocked-1' },
+      hasUnsupportedPassThrough: false,
+      unsupportedTransactionSelection: { transactionIds: [], route: null },
       flow: {
         nodes: [],
         links: [],
         details: { nodes: [], links: [] },
-        audit: { pools: {}, passThrough: { 'payroll-internal-id': { incoming: 100, outgoing: 40, net: 60 } }, passThroughReallocations: [] },
-        unclassified: { value: 12, transactionIds: ['actual-blocked-1'] },
+        audit: {
+          pools: {},
+          passThrough: {
+            'payroll-internal-id': { incoming: 0, outgoing: 0, net: 0, incomingTransactionIds: [], outgoingTransactionIds: [] },
+            'benefits-internal-id': { incoming: 0, outgoing: 0, net: 0, incomingTransactionIds: [], outgoingTransactionIds: [] },
+          },
+          passThroughReallocations: [{ sourceId: 'payroll-internal-id', targetId: 'benefits-internal-id', value: 35, transactionIds: ['move'] }],
+        },
+        unclassified: { value: 9, transactionIds: ['ordinary-unknown'] },
+        unsupportedPassThrough: { value: 0, transactionIds: [] },
         isBalanced: false,
       },
     }),
   )
 
-  assert.match(html, /analytics\.flow\.pass_through_unsupported/)
-  assert.match(html, /actual-blocked-1/)
-  assert.match(html, /analytics\.flow\.view_transactions/)
-  assert.match(html, /analytics\.flow\.disable_pass_through/)
-  assert.match(html, /analytics\.common\.retry/)
+  assert.match(html, /Generic unclassified description/)
+  assert.match(html, />9</)
+  assert.match(html, /ordinary-unknown/)
+  assert.doesNotMatch(html, /analytics\.flow\.pass_through_unsupported/)
+  assert.doesNotMatch(html, /analytics\.flow\.disable_pass_through/)
+  assert.doesNotMatch(html, /analytics\.flow\.view_transactions/)
+})
+
+test('renders exact unsupported evidence separately while retaining the ordinary unclassified blocker after treatment is disabled', async () => {
+  const enabledHtml = await renderAnalyticsCard(
+    '../../components/analytics/analytics-money-flow.vue',
+    moneyFlowControlContext({
+      presentation: { showAudit: true, reason: 'unclassified', showEmpty: false, showGraph: false },
+      stateLabel: 'Unclassified activity',
+      stateDescription: 'Generic unclassified description',
+      hasUnclassified: true,
+      hasUnsupportedPassThrough: true,
+      unsupportedTransactionSelection: { transactionIds: ['unsupported-available', 'unsupported-savings'], route: '/transactions/list?id=unsupported-available%2Cunsupported-savings' },
+      flow: {
+        nodes: [],
+        links: [],
+        details: { nodes: [], links: [] },
+        audit: { pools: {}, passThrough: { 'payroll-internal-id': { incoming: 100, outgoing: 40, net: 60 } }, passThroughReallocations: [] },
+        unclassified: { value: 5, transactionIds: ['ordinary-unknown'] },
+        unsupportedPassThrough: { value: 18, transactionIds: ['unsupported-available', 'unsupported-savings'] },
+        isBalanced: false,
+      },
+    }),
+  )
+  const disabledHtml = await renderAnalyticsCard(
+    '../../components/analytics/analytics-money-flow.vue',
+    moneyFlowControlContext({
+      analyticsStore: { moneyFlowPassThroughEnabled: false },
+      presentation: { showAudit: true, reason: 'unclassified', showEmpty: false, showGraph: false },
+      stateLabel: 'Unclassified activity',
+      stateDescription: 'Generic unclassified description',
+      hasUnclassified: true,
+      hasUnsupportedPassThrough: false,
+      unsupportedTransactionSelection: { transactionIds: [], route: null },
+      flow: {
+        nodes: [],
+        links: [],
+        details: { nodes: [], links: [] },
+        audit: { pools: {}, passThrough: {}, passThroughReallocations: [] },
+        unclassified: { value: 5, transactionIds: ['ordinary-unknown'] },
+        unsupportedPassThrough: { value: 0, transactionIds: [] },
+        isBalanced: false,
+      },
+    }),
+  )
+
+  assert.match(enabledHtml, /analytics\.flow\.pass_through_unsupported/)
+  assert.match(enabledHtml, /unsupported-available, unsupported-savings/)
+  assert.match(enabledHtml, /ordinary-unknown/)
+  assert.match(enabledHtml, /analytics\.flow\.view_transactions/)
+  assert.match(enabledHtml, /analytics\.flow\.disable_pass_through/)
+  assert.match(enabledHtml, /analytics\.common\.retry/)
+  assert.match(disabledHtml, /Generic unclassified description/)
+  assert.match(disabledHtml, /ordinary-unknown/)
+  assert.doesNotMatch(disabledHtml, /unsupported-available|unsupported-savings/)
+  assert.doesNotMatch(disabledHtml, /analytics\.flow\.pass_through_unsupported/)
+  assert.doesNotMatch(disabledHtml, /analytics\.flow\.disable_pass_through/)
+  assert.doesNotMatch(disabledHtml, /analytics\.flow\.view_transactions/)
 })
 
 test('keeps pass-through account audit, reallocation, exact rows, and actual transaction evidence visible', async () => {

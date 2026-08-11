@@ -21,7 +21,7 @@
     <div class="analytics-flow-controls">
       <div class="analytics-flow-order-control">
         <span>{{ $t('analytics.flow.order') }}</span>
-        <app-tabs v-model="analyticsStore.moneyFlowOrder" :items="orderItems" />
+        <app-tabs v-model="analyticsStore.moneyFlowOrder" :items="orderItems" :aria-label="$t('analytics.flow.order')" />
       </div>
       <div class="analytics-flow-detail-control">
         <span>{{ $t('analytics.flow.graph_detail') }}</span>
@@ -84,6 +84,9 @@
         </div>
         <div v-if="flow.unclassified?.transactionIds?.length" class="analytics-flow-transaction-ids">
           {{ $t('analytics.flow.transaction_ids', { ids: flow.unclassified.transactionIds.join(', ') }) }}
+        </div>
+        <div v-if="hasUnsupportedPassThrough && flow.unsupportedPassThrough.transactionIds.length" class="analytics-flow-transaction-ids">
+          {{ $t('analytics.flow.transaction_ids', { ids: flow.unsupportedPassThrough.transactionIds.join(', ') }) }}
         </div>
         <div class="analytics-flow-blocking-actions">
           <van-button v-if="hasUnsupportedPassThrough && unsupportedTransactionSelection.route" size="small" @click="openUnsupportedTransactions">
@@ -230,6 +233,7 @@ const emptyFlow = {
   details: { nodes: [], links: [] },
   audit: { pools: { available: { incoming: 0, outgoing: 0, net: 0 }, savings: { incoming: 0, outgoing: 0, net: 0 } }, liabilityReallocations: [] },
   unclassified: { value: 0, transactionIds: [] },
+  unsupportedPassThrough: { value: 0, transactionIds: [] },
   missingCurrencies: [],
   isBalanced: true,
 }
@@ -451,12 +455,10 @@ const selectedTransactionSelection = computed(() =>
 )
 const selectedRefundCoverage = computed(() => selectedTransactionSelection.value.refundCoverage)
 const selectedTransactionIds = computed(() => selectedTransactionSelection.value.transactionIds)
-const hasUnsupportedPassThrough = computed(
-  () => flow.value.meta?.passThroughEnabled === true && hasUnclassified.value && Object.keys(flow.value.audit?.passThrough ?? {}).length > 0 && flow.value.nodes.length === 0,
-)
+const hasUnsupportedPassThrough = computed(() => Number.isFinite(flow.value.unsupportedPassThrough?.value) && flow.value.unsupportedPassThrough.value > 0)
 const unsupportedTransactionSelection = computed(() =>
   projectMoneyFlowTransactionSelection({
-    item: { transactionIds: flow.value.unclassified?.transactionIds ?? [] },
+    item: { transactionIds: flow.value.unsupportedPassThrough?.transactionIds ?? [] },
     toUrl: TransactionFilterUtils.filters.id.toUrl,
     route: RouteConstants.ROUTE_TRANSACTION_LIST,
   }),

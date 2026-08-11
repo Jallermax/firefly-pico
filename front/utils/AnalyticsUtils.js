@@ -150,7 +150,7 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
   const availableSavingsDeposits = []
   const savingsAvailableWithdrawals = []
   const unclassified = { value: 0, transactionIds: new Set() }
-  let hasUnsupportedPassThrough = false
+  const unsupportedPassThrough = { value: 0, transactionIds: new Set() }
   const liabilityReallocations = new Map()
   const passThroughPools = new Map()
   const passThroughReallocations = new Map()
@@ -233,6 +233,11 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
     if (!Number.isFinite(value)) unclassified.value = null
     else if (Number.isFinite(unclassified.value)) unclassified.value += value
     if (transactionId) unclassified.transactionIds.add(transactionId)
+  }
+  const addUnsupportedPassThrough = (value, transactionId) => {
+    if (!Number.isFinite(value) || value <= 0) return
+    unsupportedPassThrough.value += value
+    if (transactionId) unsupportedPassThrough.transactionIds.add(transactionId)
   }
   const addSourceToPool = ({ id, options, pool, value, transactionId }) => {
     addNode(id, { layer: stages.source, ...options }, value, transactionId)
@@ -435,8 +440,7 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
         addPassThroughDebt(entry, amount)
         continue
       }
-      hasUnsupportedPassThrough ||= amount > 0
-      addUnclassified(amount, entry.transactionId)
+      addUnsupportedPassThrough(amount, entry.transactionId)
       continue
     }
     if (sourceIsPassThrough) {
@@ -444,8 +448,7 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
         addPassThroughOutgoing(entry, amount)
         continue
       }
-      hasUnsupportedPassThrough ||= amount > 0
-      addUnclassified(amount, entry.transactionId)
+      addUnsupportedPassThrough(amount, entry.transactionId)
       continue
     }
     if (entry.refund?.isRefund && sourceKind === 'expense' && ['available', 'savingsAccessible', 'savingsRestricted', 'liability'].includes(destinationKind)) {
@@ -625,10 +628,16 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
   }
   audit.equationDifference = audit.totalSources - audit.totalDestinations
   const tolerance = 0.5 * 10 ** -currencyDecimalPlaces
+  const hasUnsupportedPassThrough = unsupportedPassThrough.value > tolerance
   const poolsBalanced = Object.values(pools).every(({ incoming, outgoing }) => Math.abs(incoming - outgoing) <= tolerance)
   const missingCurrencies = unique(entries.filter(({ monthKey: entryMonthKey }) => entryMonthKey === monthKey).map(({ conversion }) => conversion?.missingCurrency))
   const isBalanced =
-    poolsBalanced && Math.abs(audit.equationDifference) <= tolerance && Number.isFinite(unclassified.value) && Math.abs(unclassified.value) <= tolerance && missingCurrencies.length === 0
+    poolsBalanced &&
+    Math.abs(audit.equationDifference) <= tolerance &&
+    Number.isFinite(unclassified.value) &&
+    Math.abs(unclassified.value) <= tolerance &&
+    unsupportedPassThrough.value <= tolerance &&
+    missingCurrencies.length === 0
 
   const orderedGraph = orderMoneyFlowGraph({
     graph: {
@@ -646,6 +655,7 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
     isEstimated: entries.some(({ monthKey: entryMonthKey, isEstimated }) => entryMonthKey === monthKey && isEstimated),
     missingCurrencies,
     unclassified: { value: unclassified.value, transactionIds: sortedIds(unclassified.transactionIds) },
+    unsupportedPassThrough: { value: unsupportedPassThrough.value, transactionIds: sortedIds(unsupportedPassThrough.transactionIds) },
     isBalanced,
   }
 }

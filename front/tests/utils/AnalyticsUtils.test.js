@@ -2135,7 +2135,8 @@ test('blocks unsupported selected-account inbound transitions and audits interna
     passThroughEnabled: true,
   })
 
-  assert.deepEqual(unsupported.unclassified, { value: 30, transactionIds: ['available-in', 'savings-in'] })
+  assert.deepEqual(unsupported.unclassified, { value: 0, transactionIds: [] })
+  assert.deepEqual(unsupported.unsupportedPassThrough, { value: 30, transactionIds: ['available-in', 'savings-in'] })
   assert.equal(unsupported.isBalanced, false)
   assert.equal(
     unsupported.links.some(({ sourceId, targetId }) => sourceId === 'available' && targetId === 'passThrough:payroll'),
@@ -2154,6 +2155,59 @@ test('blocks unsupported selected-account inbound transitions and audits interna
   })
   assert.deepEqual(reallocation.audit.passThroughReallocations, [{ sourceId: 'payroll', targetId: 'benefits', value: 35, transactionIds: ['move'] }])
   assert.equal(reallocation.isBalanced, true)
+})
+
+test('keeps ordinary unclassified evidence separate from supported pass-through audit-only evidence', () => {
+  const entries = [
+    ledgerEntry({ id: 'move', value: 35, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'a', destinationAccountId: 'b' }),
+    ledgerEntry({ id: 'ordinary-unknown', value: 9, sourceKind: 'unknown', destinationKind: 'expense', sourceAccountId: 'unknown', categoryId: 'food' }),
+  ]
+  const options = { passThroughAccountIds: ['a', 'b'], passThroughEnabled: true }
+  const before = structuredClone(entries)
+  const graph = buildLedgerFlow(entries, options)
+  const reversed = buildLedgerFlow([...entries].reverse(), options)
+  const off = buildLedgerFlow(entries, { ...options, passThroughEnabled: false })
+
+  assert.deepEqual(graph.unclassified, { value: 9, transactionIds: ['ordinary-unknown'] })
+  assert.deepEqual(graph.unsupportedPassThrough, { value: 0, transactionIds: [] })
+  assert.deepEqual(graph.audit.passThrough, {
+    a: { incoming: 0, outgoing: 0, net: 0, incomingTransactionIds: [], outgoingTransactionIds: [] },
+    b: { incoming: 0, outgoing: 0, net: 0, incomingTransactionIds: [], outgoingTransactionIds: [] },
+  })
+  assert.deepEqual(graph.audit.passThroughReallocations, [{ sourceId: 'a', targetId: 'b', value: 35, transactionIds: ['move'] }])
+  assert.equal(graph.isBalanced, false)
+  assert.deepEqual(reversed, graph)
+  assert.deepEqual(entries, before)
+  assert.deepEqual(off.unclassified, { value: 9, transactionIds: ['ordinary-unknown'] })
+  assert.deepEqual(off.unsupportedPassThrough, { value: 0, transactionIds: [] })
+  assert.equal(off.isBalanced, false)
+})
+
+test('keeps unsupported pass-through evidence exact when ordinary unclassified evidence is also present', () => {
+  const entries = [
+    ledgerEntry({ id: 'salary', value: 100, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'payroll', categoryId: 'salary' }),
+    ledgerEntry({ id: 'unsupported-savings', value: 11, sourceKind: 'savingsAccessible', destinationKind: 'available', sourceAccountId: 'savings', destinationAccountId: 'payroll' }),
+    ledgerEntry({ id: 'unsupported-available', value: 7, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'checking', destinationAccountId: 'payroll' }),
+    ledgerEntry({ id: 'ordinary-unknown', value: 5, sourceKind: 'unknown', destinationKind: 'expense', sourceAccountId: 'unknown', categoryId: 'food' }),
+  ]
+  const graph = buildLedgerFlow(entries, { passThroughAccountIds: ['payroll'], passThroughEnabled: true })
+  const off = buildLedgerFlow(entries, { passThroughAccountIds: ['payroll'], passThroughEnabled: false })
+
+  assert.deepEqual(graph.nodes, [])
+  assert.deepEqual(graph.links, [])
+  assert.deepEqual(graph.unclassified, { value: 5, transactionIds: ['ordinary-unknown'] })
+  assert.deepEqual(graph.unsupportedPassThrough, { value: 18, transactionIds: ['unsupported-available', 'unsupported-savings'] })
+  assert.deepEqual(graph.audit.passThrough.payroll, {
+    incoming: 100,
+    outgoing: 0,
+    net: 100,
+    incomingTransactionIds: ['salary'],
+    outgoingTransactionIds: [],
+  })
+  assert.equal(graph.isBalanced, false)
+  assert.deepEqual(off.unclassified, { value: 5, transactionIds: ['ordinary-unknown'] })
+  assert.deepEqual(off.unsupportedPassThrough, { value: 0, transactionIds: [] })
+  assert.equal(off.isBalanced, false)
 })
 
 test('withholds the complete pass-through graph when one unsupported selected-account inbound is present', () => {
@@ -2198,7 +2252,8 @@ test('withholds the complete pass-through graph when one unsupported selected-ac
 
   assert.deepEqual(graph.nodes, [])
   assert.deepEqual(graph.links, [])
-  assert.deepEqual(graph.unclassified, { value: 7, transactionIds: ['blocked'] })
+  assert.deepEqual(graph.unclassified, { value: 0, transactionIds: [] })
+  assert.deepEqual(graph.unsupportedPassThrough, { value: 7, transactionIds: ['blocked'] })
   assert.deepEqual(graph.audit.passThrough.payroll, {
     incoming: 130,
     outgoing: 70,
