@@ -18,9 +18,41 @@
       </div>
     </div>
 
-    <div class="analytics-flow-detail-control">
-      <span>{{ $t('analytics.flow.graph_detail') }}</span>
-      <app-tabs v-model="analyticsStore.graphDetail" :items="detailItems" />
+    <div class="analytics-flow-controls">
+      <div class="analytics-flow-order-control">
+        <span>{{ $t('analytics.flow.order') }}</span>
+        <app-tabs v-model="analyticsStore.moneyFlowOrder" :items="orderItems" />
+      </div>
+      <div class="analytics-flow-detail-control">
+        <span>{{ $t('analytics.flow.graph_detail') }}</span>
+        <app-tabs v-model="analyticsStore.graphDetail" :items="detailItems" />
+      </div>
+      <div v-if="analyticsStore.graphDetail === 'threshold'" class="analytics-flow-threshold-control">
+        <app-field
+          v-model="analyticsStore.moneyFlowMinimumAmount"
+          :label="`${$t('analytics.flow.minimum_amount')} (${analyticsStore.displayCurrencyCode})`"
+          :icon="TablerIconConstants.cash"
+          type="number"
+          inputmode="decimal"
+          min="0"
+          :step="minimumAmountStep"
+        />
+      </div>
+      <div class="analytics-flow-pass-through-control">
+        <app-select
+          v-model="selectedPassThroughAccounts"
+          v-model:search="passThroughAccountSearch"
+          class="analytics-flow-account-selector"
+          :label="$t('analytics.flow.pass_through_accounts')"
+          :popup-title="$t('analytics.flow.pass_through_accounts')"
+          :list="filteredEligiblePassThroughAccounts"
+          :get-display-value="accountDisplayName"
+          :is-multi-select="true"
+          :has-search="true"
+        />
+        <app-boolean v-model="analyticsStore.moneyFlowPassThroughEnabled" :label="$t('analytics.flow.use_pass_through')" :disabled="passThroughSwitchDisabled" />
+      </div>
+      <div class="analytics-flow-settings-note">{{ flowSettingsNote }}</div>
     </div>
 
     <div v-if="isBlockingLoading" class="analytics-card-state">
@@ -44,7 +76,8 @@
 
       <div v-if="presentation.showAudit" class="analytics-flow-unbalanced" role="alert">
         <strong>{{ stateLabel }}</strong>
-        <span v-if="presentation.reason !== 'missing_rates'">{{ stateDescription }}</span>
+        <span v-if="hasUnsupportedPassThrough">{{ $t('analytics.flow.pass_through_unsupported') }}</span>
+        <span v-else-if="presentation.reason !== 'missing_rates'">{{ stateDescription }}</span>
         <div v-if="hasUnclassified" class="analytics-flow-audit-row">
           <span>{{ $t('analytics.flow.audit.unclassified') }}</span
           ><strong>{{ formatCurrency(flow.unclassified.value) }}</strong>
@@ -52,7 +85,13 @@
         <div v-if="flow.unclassified?.transactionIds?.length" class="analytics-flow-transaction-ids">
           {{ $t('analytics.flow.transaction_ids', { ids: flow.unclassified.transactionIds.join(', ') }) }}
         </div>
-        <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
+        <div class="analytics-flow-blocking-actions">
+          <van-button v-if="hasUnsupportedPassThrough && unsupportedTransactionSelection.route" size="small" @click="openUnsupportedTransactions">
+            {{ $t('analytics.flow.view_transactions', { count: unsupportedTransactionSelection.transactionIds.length }) }}
+          </van-button>
+          <van-button size="small" @click="analyticsStore.retryFlow">{{ $t('analytics.common.retry') }}</van-button>
+          <van-button v-if="hasUnsupportedPassThrough" size="small" @click="disablePassThrough">{{ $t('analytics.flow.disable_pass_through') }}</van-button>
+        </div>
       </div>
       <div v-else-if="presentation.showEmpty" class="analytics-card-state analytics-flow-empty">{{ $t('analytics.flow.empty') }}</div>
       <layered-money-flow-chart
@@ -88,8 +127,11 @@
         <section v-for="section in auditSections" :key="section.id" class="analytics-flow-audit-section">
           <h4>{{ section.label }}</h4>
           <div v-for="row in section.rows" :key="row.id" class="analytics-flow-audit-row">
-            <span>{{ row.label }}</span
-            ><strong>{{ formatCurrency(row.value) }}</strong>
+            <span>
+              {{ row.label }}
+              <small v-if="row.transactionIds?.length" class="analytics-flow-transaction-ids">{{ $t('analytics.flow.transaction_ids', { ids: row.transactionIds.join(', ') }) }}</small>
+            </span>
+            <strong>{{ formatCurrency(row.value) }}</strong>
           </div>
         </section>
         <section v-if="liabilityReallocations.length" class="analytics-flow-audit-section">
@@ -97,6 +139,16 @@
           <button v-for="row in liabilityReallocations" :key="row.id" type="button" class="analytics-flow-reallocation-row" @click="openDetails(row)">
             <span>{{ row.label }}</span
             ><strong>{{ formatCurrency(row.value) }}</strong>
+          </button>
+        </section>
+        <section v-if="passThroughReallocations.length" class="analytics-flow-audit-section">
+          <h4>{{ $t('analytics.flow.audit.pass_through_reallocations') }}</h4>
+          <button v-for="row in passThroughReallocations" :key="row.id" type="button" class="analytics-flow-reallocation-row" @click="openDetails(row)">
+            <span>
+              {{ row.label }}
+              <small v-if="row.transactionIds.length" class="analytics-flow-transaction-ids">{{ $t('analytics.flow.transaction_ids', { ids: row.transactionIds.join(', ') }) }}</small>
+            </span>
+            <strong>{{ formatCurrency(row.value) }}</strong>
           </button>
         </section>
         <p class="analytics-flow-definition">{{ $t('analytics.flow.definition') }}</p>
@@ -160,6 +212,7 @@ import {
   resolveMoneyFlowSemanticColor,
 } from '~/utils/ChartUtils.js'
 import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
+import { orderMoneyFlowGraph } from '~/utils/AnalyticsUtils.js'
 
 const analyticsStore = useAnalyticsStore()
 const accountStore = useAccountStore()
@@ -184,8 +237,30 @@ const detailItems = computed(() => [
   { label: t('analytics.flow.top_5'), value: 5 },
   { label: t('analytics.flow.top_10'), value: 10 },
   { label: t('analytics.flow.all'), value: 'all' },
+  { label: t('analytics.flow.minimum_amount'), value: 'threshold' },
+])
+const orderItems = computed(() => [
+  { label: t('analytics.flow.order_amount'), value: 'amount' },
+  { label: t('analytics.flow.order_type'), value: 'type' },
 ])
 const flow = computed(() => analyticsStore.selectedFlow ?? emptyFlow)
+const passThroughAccountSearch = ref('')
+const eligiblePassThroughAccountDictionary = computed(() => Object.fromEntries(analyticsStore.eligiblePassThroughAccounts.map((account) => [String(account.id), account])))
+const accountDisplayName = (account) => Account.getDisplayName(account)
+const filteredEligiblePassThroughAccounts = computed(() => {
+  const search = passThroughAccountSearch.value.trim().toLocaleLowerCase()
+  if (!search) return analyticsStore.eligiblePassThroughAccounts
+  return analyticsStore.eligiblePassThroughAccounts.filter((account) => accountDisplayName(account).toLocaleLowerCase().includes(search))
+})
+const selectedPassThroughAccounts = computed({
+  get: () => analyticsStore.effectivePassThroughAccountIds.map((id) => eligiblePassThroughAccountDictionary.value[id]).filter(Boolean),
+  set: (accounts) => {
+    analyticsStore.passThroughAccountIds = accounts.map(({ id }) => String(id))
+    if (!accounts.length) analyticsStore.moneyFlowPassThroughEnabled = false
+  },
+})
+const passThroughSwitchDisabled = computed(() => selectedPassThroughAccounts.value.length === 0)
+const minimumAmountStep = computed(() => 10 ** -(analyticsStore.displayCurrencyDecimalPlaces ?? 2))
 const selectedMonth = computed(() => analyticsStore.selectedFlowMonth ?? new Date())
 const canPrevious = computed(() => analyticsStore.canMoveFlowMonth(-1))
 const canNext = computed(() => analyticsStore.canMoveFlowMonth(1))
@@ -220,7 +295,7 @@ const formatCurrency = (value) =>
     : '—'
 const formatPercent = (value) => formatMoneyFlowPercent({ value, language: profileStore.language })
 const categoryLabel = (id) => (['uncategorized', 'uncategorized-income'].includes(id) ? t('analytics.category.uncategorized') : Category.getDisplayName(categoryStore.categoryDictionary[id]) || id)
-const accountLabel = (id) => Account.getDisplayName(accountStore.accountDictionary[id]) || id
+const accountLabel = (id) => Account.getDisplayName(eligiblePassThroughAccountDictionary.value[String(id)] ?? accountStore.accountDictionary[id]) || id
 
 const semanticLabelKeys = {
   available: 'available_pool',
@@ -244,16 +319,42 @@ const categoryKinds = new Set(['expenseCategory', 'refund'])
 const nodeLabel = (node) => {
   if (!node) return ''
   if (String(node.kind).startsWith('other')) return t('analytics.flow.other')
+  if (['passThrough', 'passThroughPool'].includes(node.kind)) return t('analytics.flow.pass_through_pool', { account: accountLabel(node.refId) })
+  if (node.kind === 'existingPassThrough') return t('analytics.flow.existing_pass_through', { account: accountLabel(node.refId) })
+  if (node.kind === 'retainedPassThrough') return t('analytics.flow.retained_pass_through', { account: accountLabel(node.refId) })
   if (node.kind === 'income' && node.refId) return categoryStore.categoryDictionary[node.refId] ? categoryLabel(node.refId) : node.label || node.refId
   if (categoryKinds.has(node.kind) && node.refId) return categoryLabel(node.refId)
   if (accountKinds.has(node.kind) && node.refId) return accountLabel(node.refId)
   return semanticLabelKeys[node.kind] ? t(`analytics.flow.${semanticLabelKeys[node.kind]}`) : node.label || node.refId || node.id
 }
-const chartGraph = computed(() => ({
-  ...flow.value,
-  nodes: flow.value.nodes.map((node) => ({ ...node, label: nodeLabel(node), color: resolveMoneyFlowSemanticColor(node) })),
-  links: flow.value.links.map((link) => ({ ...link, color: resolveMoneyFlowSemanticColor(link) })),
-}))
+const chartGraph = computed(() => {
+  const labelled = {
+    ...flow.value,
+    nodes: flow.value.nodes.map((node) => ({ ...node, label: nodeLabel(node), color: resolveMoneyFlowSemanticColor(node) })),
+    links: flow.value.links.map((link) => ({ ...link, color: resolveMoneyFlowSemanticColor(link) })),
+  }
+  return orderMoneyFlowGraph({ graph: labelled, orderMode: analyticsStore.moneyFlowOrder, labelOf: (node) => node.label })
+})
+
+const selectedPassThroughNames = computed(() => selectedPassThroughAccounts.value.map(accountDisplayName).filter(Boolean))
+const selectedOrderLabel = computed(() => orderItems.value.find(({ value }) => value === analyticsStore.moneyFlowOrder)?.label ?? orderItems.value[0].label)
+const selectedDetailLabel = computed(() => {
+  const label = detailItems.value.find(({ value }) => value === analyticsStore.graphDetail)?.label ?? detailItems.value[0].label
+  return analyticsStore.graphDetail === 'threshold' ? `${label} ${formatCurrency(analyticsStore.moneyFlowMinimumAmount)}` : label
+})
+const passThroughStateLabel = computed(() => {
+  if (!selectedPassThroughNames.value.length) return t('analytics.flow.pass_through_none')
+  const key = flow.value.meta?.passThroughEnabled ? 'pass_through_enabled' : 'pass_through_disabled'
+  return t(`analytics.flow.${key}`, { accounts: selectedPassThroughNames.value.join(', ') })
+})
+const flowSettingsNote = computed(() =>
+  t('analytics.flow.settings_summary', {
+    order: selectedOrderLabel.value,
+    detail: selectedDetailLabel.value,
+    currency: analyticsStore.displayCurrencyCode,
+    passThrough: passThroughStateLabel.value,
+  }),
+)
 
 const auditLabel = (id) => t(`analytics.flow.audit.${id.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`)
 const auditRows = (ids) => ids.map((id) => ({ id, label: auditLabel(id), value: flow.value.audit?.[id] ?? 0 }))
@@ -261,6 +362,15 @@ const poolRows = (pool) => ['incoming', 'outgoing', 'net'].map((id) => ({ id: `$
 const auditSections = computed(() => [
   { id: 'available', label: t('analytics.flow.available_pool'), rows: poolRows('available') },
   { id: 'savings', label: t('analytics.flow.savings_pool'), rows: poolRows('savings') },
+  ...Object.entries(flow.value.audit?.passThrough ?? {}).map(([id, item]) => ({
+    id: `pass-through-${id}`,
+    label: t('analytics.flow.audit.pass_through', { account: accountLabel(id) }),
+    rows: [
+      { id: `${id}-incoming`, label: t('analytics.flow.audit.pass_through_incoming'), value: item.incoming, transactionIds: item.incomingTransactionIds },
+      { id: `${id}-outgoing`, label: t('analytics.flow.audit.pass_through_outgoing'), value: item.outgoing, transactionIds: item.outgoingTransactionIds },
+      { id: `${id}-net`, label: t('analytics.flow.audit.pass_through_net'), value: item.net, transactionIds: [] },
+    ],
+  })),
   { id: 'outer', label: t('analytics.flow.audit.outer'), rows: auditRows(['totalSources', 'totalDestinations', 'equationDifference', 'unclassified']) },
   { id: 'savings-movement', label: t('analytics.flow.audit.savings_movement'), rows: auditRows(['positiveSavingsMovement', 'negativeSavingsMovement', 'netSavings']) },
   { id: 'liabilities', label: t('analytics.flow.audit.liabilities'), rows: auditRows(['liabilityIncrease', 'liabilityReduction', 'netDebtChange']) },
@@ -269,6 +379,13 @@ const liabilityReallocations = computed(() =>
   (flow.value.audit?.liabilityReallocations ?? []).map((item) => ({
     ...item,
     id: `reallocation:${item.sourceId}:${item.targetId}`,
+    label: t('analytics.flow.liability_reallocation', { source: accountLabel(item.sourceId), destination: accountLabel(item.targetId) }),
+  })),
+)
+const passThroughReallocations = computed(() =>
+  (flow.value.audit?.passThroughReallocations ?? []).map((item) => ({
+    ...item,
+    id: `pass-through-reallocation:${item.sourceId}:${item.targetId}`,
     label: t('analytics.flow.liability_reallocation', { source: accountLabel(item.sourceId), destination: accountLabel(item.targetId) }),
   })),
 )
@@ -334,6 +451,16 @@ const selectedTransactionSelection = computed(() =>
 )
 const selectedRefundCoverage = computed(() => selectedTransactionSelection.value.refundCoverage)
 const selectedTransactionIds = computed(() => selectedTransactionSelection.value.transactionIds)
+const hasUnsupportedPassThrough = computed(
+  () => flow.value.meta?.passThroughEnabled === true && hasUnclassified.value && Object.keys(flow.value.audit?.passThrough ?? {}).length > 0 && flow.value.nodes.length === 0,
+)
+const unsupportedTransactionSelection = computed(() =>
+  projectMoneyFlowTransactionSelection({
+    item: { transactionIds: flow.value.unclassified?.transactionIds ?? [] },
+    toUrl: TransactionFilterUtils.filters.id.toUrl,
+    route: RouteConstants.ROUTE_TRANSACTION_LIST,
+  }),
+)
 
 const moveMonth = (amount) => analyticsStore.moveFlowMonth(amount)
 const openDetails = (item, contextNodes = flow.value.nodes) => {
@@ -344,5 +471,11 @@ const openDetails = (item, contextNodes = flow.value.nodes) => {
 const openTransactions = async () => {
   detailsVisible.value = false
   await navigateTo(selectedTransactionSelection.value.route)
+}
+const openUnsupportedTransactions = async () => {
+  if (unsupportedTransactionSelection.value.route) await navigateTo(unsupportedTransactionSelection.value.route)
+}
+const disablePassThrough = () => {
+  analyticsStore.moneyFlowPassThroughEnabled = false
 }
 </script>

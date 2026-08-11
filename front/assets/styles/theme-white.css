@@ -2901,15 +2901,52 @@ body {
     text-align: center;
 }
 
+.analytics-flow-controls {
+    display: grid;
+    min-width: 0;
+    gap: 8px;
+    margin: 0 16px 10px;
+}
+
+.analytics-flow-order-control,
 .analytics-flow-detail-control {
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    flex-wrap: wrap;
     gap: 10px;
-    margin: 0 16px 10px;
     color: var(--van-text-color-2);
     font-size: 11px;
     font-weight: 600;
+}
+
+.analytics-flow-threshold-control,
+.analytics-flow-account-selector {
+    min-width: 0;
+}
+
+.analytics-flow-threshold-control .van-field,
+.analytics-flow-pass-through-control .van-field {
+    min-height: 44px;
+}
+
+.analytics-flow-pass-through-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+    align-items: stretch;
+    min-width: 0;
+    gap: 8px;
+}
+
+.analytics-flow-settings-note {
+    padding: 7px 9px;
+    border: 1px dashed var(--van-border-color);
+    border-radius: 7px;
+    color: var(--van-text-color-2);
+    background: var(--van-background-2-5);
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 .analytics-flow {
@@ -3029,6 +3066,12 @@ body {
     border-radius: 8px;
     color: var(--van-danger-color);
     background: var(--van-background-2-5);
+}
+
+.analytics-flow-blocking-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .analytics-flow-condensed-notice {
@@ -3772,13 +3815,26 @@ body {
         gap: 6px;
     }
 
+    .analytics-flow-order-control {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .analytics-flow-order-control .app-tabs,
     .analytics-flow-detail-control .app-tabs {
         display: flex;
         width: 100%;
+        overflow-x: auto;
     }
 
+    .analytics-flow-order-control .app-tabs-item,
     .analytics-flow-detail-control .app-tabs-item {
-        flex: 1;
+        flex: 1 0 auto;
+    }
+
+    .analytics-flow-pass-through-control {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 

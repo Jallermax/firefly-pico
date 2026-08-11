@@ -73,6 +73,28 @@ const moneyFlowPresentationKeys = [
   ['flow', 'audit', 'unclassified'],
   ['flow', 'audit', 'liability_reallocations'],
 ]
+const moneyFlowControlKeys = [
+  ['flow', 'order'],
+  ['flow', 'order_amount'],
+  ['flow', 'order_type'],
+  ['flow', 'minimum_amount'],
+  ['flow', 'pass_through_accounts'],
+  ['flow', 'use_pass_through'],
+  ['flow', 'pass_through_pool'],
+  ['flow', 'existing_pass_through'],
+  ['flow', 'retained_pass_through'],
+  ['flow', 'pass_through_unsupported'],
+  ['flow', 'disable_pass_through'],
+  ['flow', 'settings_summary'],
+  ['flow', 'pass_through_enabled'],
+  ['flow', 'pass_through_disabled'],
+  ['flow', 'pass_through_none'],
+  ['flow', 'audit', 'pass_through'],
+  ['flow', 'audit', 'pass_through_incoming'],
+  ['flow', 'audit', 'pass_through_outgoing'],
+  ['flow', 'audit', 'pass_through_net'],
+  ['flow', 'audit', 'pass_through_reallocations'],
+]
 
 class AccountRepository {
   async getAllWithMergeResult(options) {
@@ -261,21 +283,46 @@ const renderAnalyticsCard = async (path, context) => {
       () =>
         h('div', slots.default?.()),
   }
-  for (const name of [
-    'van-cell-group',
-    'van-loading',
-    'van-button',
-    'app-tabs',
-    'app-icon',
-    'app-popup',
-    'analytics-category-facet',
-    'multi-series-line-chart',
-    'analytics-combination-chart',
-    'layered-money-flow-chart',
-  ])
+  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-icon', 'app-popup', 'analytics-category-facet', 'multi-series-line-chart', 'analytics-combination-chart'])
     app.component(name, slotStub)
+  app.component('app-tabs', {
+    props: ['items'],
+    setup: (props) => () =>
+      h(
+        'div',
+        { class: 'app-tabs-test' },
+        (props.items ?? []).map((item) => h('button', { 'data-value': String(item.value) }, item.label)),
+      ),
+  })
+  app.component('app-select', {
+    props: ['label', 'list', 'modelValue', 'search', 'getDisplayValue', 'isMultiSelect', 'hasSearch'],
+    setup: (props) => () =>
+      h('div', { class: 'app-select-test', 'data-multi-select': String(props.isMultiSelect), 'data-search': String(props.hasSearch), 'data-search-value': props.search }, [
+        h('span', props.label),
+        ...(props.modelValue ?? []).map((item) => h('span', { class: 'app-select-selected-test' }, props.getDisplayValue?.(item))),
+        ...(props.list ?? []).map((item) => h('span', { class: 'app-select-option-test' }, props.getDisplayValue?.(item))),
+      ]),
+  })
+  app.component('app-boolean', {
+    props: ['label'],
+    setup:
+      (props, { attrs }) =>
+      () =>
+        h('button', { class: 'app-boolean-test', disabled: attrs.disabled }, props.label),
+  })
+  app.component('app-field', {
+    props: ['label', 'modelValue'],
+    setup:
+      (props, { attrs }) =>
+      () =>
+        h('label', { class: 'app-field-test', 'data-inputmode': attrs.inputmode }, [props.label, h('input', { value: props.modelValue })]),
+  })
+  app.component('layered-money-flow-chart', {
+    props: ['graph'],
+    setup: (props) => () => h('div', { class: 'layered-money-flow-chart-test', 'data-node-labels': (props.graph?.nodes ?? []).map(({ label }) => label).join('|') }),
+  })
   app.config.warnHandler = () => {}
-  app.config.globalProperties.$t = (key) => key
+  app.config.globalProperties.$t = (key, params) => (params ? `${key}:${Object.values(params).join('|')}` : key)
   return renderToString(app)
 }
 
@@ -328,6 +375,17 @@ test('provides every layered Money flow label and removes the obsolete card-as-d
   }
   const english = JSON.parse(readFileSync(new URL('../../i18n/locales/en.json', import.meta.url), 'utf8')).analytics.flow
   assert.doesNotMatch(english.definition, /card purchases.*new debt/i)
+})
+
+test('provides every Money flow control and pass-through audit label in all supported locales', () => {
+  for (const locale of localeNames) {
+    const messages = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics
+    for (const key of moneyFlowControlKeys) {
+      const value = key.reduce((parent, segment) => parent?.[segment], messages)
+      assert.equal(typeof value, 'string', `${locale}: analytics.${key.join('.')}`)
+      assert.notEqual(value.trim(), '', `${locale}: analytics.${key.join('.')}`)
+    }
+  }
 })
 
 test('provides the unavailable-amount calculation warning in every supported locale', () => {
@@ -1680,6 +1738,7 @@ test('money flow keeps refund-source retry visible with blocking audit evidence'
     openDetails: () => {},
     auditSections: [],
     liabilityReallocations: [],
+    passThroughReallocations: [],
     detailsVisible: false,
     selectedItem: null,
   })
@@ -1687,6 +1746,195 @@ test('money flow keeps refund-source retry visible with blocking audit evidence'
   assert.match(html, /analytics\.flow\.error/)
   assert.match(html, /analytics\.common\.retry/)
   assert.match(html, /Audit blocked/)
+})
+
+const moneyFlowControlContext = (overrides = {}) => {
+  const { analyticsStore: analyticsStoreOverride = {}, ...contextOverrides } = overrides
+  const payrollAccount = { id: 'payroll-internal-id', attributes: { name: 'Payroll clearing' } }
+  const analyticsStoreContext = {
+    graphDetail: 'threshold',
+    moneyFlowOrder: 'type',
+    moneyFlowMinimumAmount: 25,
+    eligiblePassThroughAccounts: [payrollAccount],
+    passThroughAccountIds: ['payroll-internal-id'],
+    moneyFlowPassThroughEnabled: true,
+    displayCurrencyCode: 'USD',
+    flowState: { status: 'ready', error: null, isStale: false, sourceErrors: [] },
+    retryFlow: () => {},
+    ...analyticsStoreOverride,
+  }
+  return {
+    orderItems: [
+      { label: 'Amount', value: 'amount' },
+      { label: 'Type, then amount', value: 'type' },
+    ],
+    detailItems: [
+      { label: 'Top 5', value: 5 },
+      { label: 'Top 10', value: 10 },
+      { label: 'All', value: 'all' },
+      { label: 'Minimum amount', value: 'threshold' },
+    ],
+    selectedPassThroughAccounts: [payrollAccount],
+    passThroughAccountSearch: '',
+    filteredEligiblePassThroughAccounts: analyticsStoreContext.eligiblePassThroughAccounts,
+    accountDisplayName: (account) => account?.attributes?.name,
+    passThroughSwitchDisabled: false,
+    canPrevious: false,
+    canNext: false,
+    selectedMonthLabel: 'August 2026',
+    moveMonth: () => {},
+    isBlockingLoading: false,
+    isBlockingError: false,
+    presentation: { showAudit: false, reason: null, showEmpty: false, showGraph: true },
+    stateLabel: '',
+    stateDescription: '',
+    hasUnclassified: false,
+    hasUnsupportedPassThrough: false,
+    flow: {
+      nodes: [],
+      links: [],
+      details: { nodes: [], links: [] },
+      audit: { pools: {}, passThrough: {}, passThroughReallocations: [] },
+      unclassified: { value: 0, transactionIds: [] },
+      isBalanced: true,
+    },
+    chartGraph: { nodes: [{ label: 'Income' }, { label: 'Refunds' }, { label: 'Existing funds' }, { label: 'New debt' }], links: [] },
+    chartMode: 'full',
+    fullLinks: [],
+    flowSettingsNote: 'Type, then amount · Minimum amount 25 USD · Pass-through: Payroll clearing',
+    formatCurrency: String,
+    formatPercent: String,
+    itemLabel: (item) => item.label,
+    TablerIconConstants: { leftArrow: 'left', rightArrow: 'right' },
+    openDetails: () => {},
+    openUnsupportedTransactions: () => {},
+    disablePassThrough: () => {},
+    unsupportedTransactionSelection: { transactionIds: [], route: null },
+    auditSections: [],
+    liabilityReallocations: [],
+    passThroughReallocations: [],
+    detailsVisible: false,
+    selectedItem: null,
+    selectedItemLabel: '',
+    selectedItemDetails: { sourcePercent: null, destinationPercent: null },
+    selectedRows: [],
+    selectedRefundCoverage: null,
+    selectedTransactionIds: [],
+    ...contextOverrides,
+    analyticsStore: analyticsStoreContext,
+  }
+}
+
+test('renders all Money flow controls, the threshold currency field, named searchable roles, and localized final graph order', async () => {
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', moneyFlowControlContext())
+
+  for (const label of ['Amount', 'Type, then amount', 'Top 5', 'Top 10', 'All', 'Minimum amount']) assert.match(html, new RegExp(`>${label}<`))
+  assert.match(html, /analytics-flow-order-control/)
+  assert.match(html, /analytics-flow-threshold-control/)
+  assert.match(html, /Minimum amount.*USD/)
+  assert.match(html, /analytics-flow-pass-through-control/)
+  assert.match(html, /data-multi-select="true"/)
+  assert.match(html, /data-search="true"/)
+  assert.match(html, /Payroll clearing/)
+  assert.doesNotMatch(html, /payroll-internal-id/)
+  assert.match(html, /data-node-labels="Income\|Refunds\|Existing funds\|New debt"/)
+  assert.match(html, /Type, then amount · Minimum amount 25 USD · Pass-through: Payroll clearing/)
+})
+
+test('filters the real Money flow account selector from its bound search model', async () => {
+  const otherAccount = { id: 'other-internal-id', attributes: { name: 'Everyday checking' } }
+  const context = moneyFlowControlContext({
+    analyticsStore: { eligiblePassThroughAccounts: [otherAccount] },
+    passThroughAccountSearch: 'pay',
+  })
+  context.analyticsStore.eligiblePassThroughAccounts = [context.selectedPassThroughAccounts[0], otherAccount]
+  context.filteredEligiblePassThroughAccounts = [context.selectedPassThroughAccounts[0]]
+
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', context)
+
+  assert.match(html, /data-search-value="pay"/)
+  assert.match(html, /Payroll clearing/)
+  assert.doesNotMatch(html, /Everyday checking/)
+})
+
+test('shows the minimum-amount field only in threshold mode and disables treatment with no selected role', async () => {
+  const thresholdHtml = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', moneyFlowControlContext())
+  const topFiveHtml = await renderAnalyticsCard(
+    '../../components/analytics/analytics-money-flow.vue',
+    moneyFlowControlContext({
+      analyticsStore: { graphDetail: 5, moneyFlowPassThroughEnabled: false },
+      selectedPassThroughAccounts: [],
+      passThroughSwitchDisabled: true,
+      flowSettingsNote: 'Amount · Top 5 · Pass-through: None',
+    }),
+  )
+
+  assert.match(thresholdHtml, /app-field-test/)
+  assert.doesNotMatch(topFiveHtml, /app-field-test/)
+  assert.match(topFiveHtml, /app-boolean-test" disabled/)
+})
+
+test('renders the unsupported pass-through blocker with exact-ID drilldown and original-view recovery', async () => {
+  const html = await renderAnalyticsCard(
+    '../../components/analytics/analytics-money-flow.vue',
+    moneyFlowControlContext({
+      presentation: { showAudit: true, reason: 'unclassified', showEmpty: false, showGraph: false },
+      stateLabel: 'Unclassified activity',
+      stateDescription: 'Generic unclassified description',
+      hasUnclassified: true,
+      hasUnsupportedPassThrough: true,
+      unsupportedTransactionSelection: { transactionIds: ['actual-blocked-1'], route: '/transactions/list?id=actual-blocked-1' },
+      flow: {
+        nodes: [],
+        links: [],
+        details: { nodes: [], links: [] },
+        audit: { pools: {}, passThrough: { 'payroll-internal-id': { incoming: 100, outgoing: 40, net: 60 } }, passThroughReallocations: [] },
+        unclassified: { value: 12, transactionIds: ['actual-blocked-1'] },
+        isBalanced: false,
+      },
+    }),
+  )
+
+  assert.match(html, /analytics\.flow\.pass_through_unsupported/)
+  assert.match(html, /actual-blocked-1/)
+  assert.match(html, /analytics\.flow\.view_transactions/)
+  assert.match(html, /analytics\.flow\.disable_pass_through/)
+  assert.match(html, /analytics\.common\.retry/)
+})
+
+test('keeps pass-through account audit, reallocation, exact rows, and actual transaction evidence visible', async () => {
+  const html = await renderAnalyticsCard(
+    '../../components/analytics/analytics-money-flow.vue',
+    moneyFlowControlContext({
+      flow: {
+        nodes: [],
+        links: [],
+        details: { nodes: [], links: [] },
+        audit: { pools: {}, passThrough: { 'payroll-internal-id': { incoming: 100, outgoing: 95, net: 5 } }, passThroughReallocations: [] },
+        unclassified: { value: 0, transactionIds: [] },
+        isBalanced: true,
+      },
+      fullLinks: [{ id: 'exact-link', label: 'Payroll clearing → Expenses', value: 40 }],
+      auditSections: [{ id: 'pass-through-payroll', label: 'Payroll clearing', rows: [{ id: 'pass-incoming', label: 'Pass-through incoming', value: 100 }] }],
+      passThroughReallocations: [{ id: 'pass-reallocation', label: 'Payroll clearing → Benefits clearing', value: 10, transactionIds: ['transfer-audit-1'] }],
+      detailsVisible: true,
+      selectedItem: { id: 'exact-link', value: 40 },
+      selectedItemLabel: 'Payroll clearing → Expenses',
+      selectedItemDetails: { sourcePercent: null, destinationPercent: null },
+      selectedRows: [{ id: 'exact-row', label: 'Payroll clearing → Expenses', value: 40, transactionIds: ['actual-expense-1'] }],
+      selectedRefundCoverage: null,
+      selectedTransactionIds: ['actual-expense-1'],
+      formatCurrency: String,
+      formatPercent: String,
+      openTransactions: () => {},
+    }),
+  )
+
+  assert.match(html, /Pass-through incoming/)
+  assert.match(html, /analytics\.flow\.audit\.pass_through_reallocations/)
+  assert.match(html, /transfer-audit-1/)
+  assert.match(html, /actual-expense-1/)
+  assert.match(html, /analytics\.flow\.view_transactions/)
 })
 
 test('keeps a completed snapshot on its captured exchange rates', async () => {
