@@ -150,6 +150,7 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
   const availableSavingsDeposits = []
   const savingsAvailableWithdrawals = []
   const unclassified = { value: 0, transactionIds: new Set() }
+  let hasUnsupportedPassThrough = false
   const liabilityReallocations = new Map()
   const passThroughPools = new Map()
   const passThroughReallocations = new Map()
@@ -215,6 +216,11 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
   const passThroughId = (pool) => `passThrough:${pool.refId}`
   const addPassThroughValue = (pool, value, transactionId) =>
     addNode(passThroughId(pool), { layer: stages.passThrough, kind: 'passThroughPool', refId: pool.refId, label: pool.account?.attributes?.name }, value, transactionId)
+  for (const entry of entries.filter((entry) => entry?.monthKey === monthKey)) {
+    for (const account of [entry.sourceAccount, entry.destinationAccount]) {
+      if (passThroughIds.has(accountId(account, ''))) passThroughPool(account)
+    }
+  }
   const addSavingsChange = (kind, account, value, transactionId) => {
     const id = accountId(account, 'unknown-savings')
     const key = `${kind}:${id}`
@@ -429,6 +435,7 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
         addPassThroughDebt(entry, amount)
         continue
       }
+      hasUnsupportedPassThrough ||= amount > 0
       addUnclassified(amount, entry.transactionId)
       continue
     }
@@ -437,6 +444,7 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
         addPassThroughOutgoing(entry, amount)
         continue
       }
+      hasUnsupportedPassThrough ||= amount > 0
       addUnclassified(amount, entry.transactionId)
       continue
     }
@@ -607,8 +615,10 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
     liabilityReallocations: [...liabilityReallocations.values()].map((entry) => ({ ...entry, transactionIds: sortedIds(entry.transactionIds) })),
     ...(hasPassThrough
       ? {
-          passThrough: Object.fromEntries([...passThroughPools.values()].map((pool) => [pool.refId, passThroughDetails(pool)])),
-          passThroughReallocations: [...passThroughReallocations.values()].map((entry) => ({ ...entry, transactionIds: sortedIds(entry.transactionIds) })),
+          passThrough: Object.fromEntries([...passThroughPools.values()].sort((left, right) => left.refId.localeCompare(right.refId)).map((pool) => [pool.refId, passThroughDetails(pool)])),
+          passThroughReallocations: [...passThroughReallocations.values()]
+            .sort((left, right) => left.sourceId.localeCompare(right.sourceId) || left.targetId.localeCompare(right.targetId))
+            .map((entry) => ({ ...entry, transactionIds: sortedIds(entry.transactionIds) })),
         }
       : {}),
     unclassified: unclassified.value,
@@ -628,8 +638,8 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
   })
 
   return {
-    nodes: orderedGraph.nodes,
-    links: orderedGraph.links,
+    nodes: hasUnsupportedPassThrough ? [] : orderedGraph.nodes,
+    links: hasUnsupportedPassThrough ? [] : orderedGraph.links,
     pools: audit.pools,
     audit,
     meta: { savingsView },

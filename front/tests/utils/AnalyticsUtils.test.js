@@ -2147,26 +2147,157 @@ test('blocks unsupported selected-account inbound transitions and audits interna
   )
   assert.deepEqual(reallocation.nodes, [])
   assert.deepEqual(reallocation.links, [])
+  assert.deepEqual(unsupported.audit.passThrough, { payroll: { incoming: 0, outgoing: 0, net: 0, incomingTransactionIds: [], outgoingTransactionIds: [] } })
+  assert.deepEqual(reallocation.audit.passThrough, {
+    benefits: { incoming: 0, outgoing: 0, net: 0, incomingTransactionIds: [], outgoingTransactionIds: [] },
+    payroll: { incoming: 0, outgoing: 0, net: 0, incomingTransactionIds: [], outgoingTransactionIds: [] },
+  })
   assert.deepEqual(reallocation.audit.passThroughReallocations, [{ sourceId: 'payroll', targetId: 'benefits', value: 35, transactionIds: ['move'] }])
   assert.equal(reallocation.isBalanced, true)
 })
 
-test('preserves pass-through reconciliation while blocking unclassified and missing-FX ledger rows', () => {
+test('withholds the complete pass-through graph when one unsupported selected-account inbound is present', () => {
   const graph = buildLedgerFlow(
     [
       ledgerEntry({ id: 'salary', value: 100, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'payroll', categoryId: 'salary' }),
-      ledgerEntry({ id: 'tax', value: 20, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'payroll', categoryId: 'tax' }),
-      ledgerEntry({ id: 'unknown', value: 5, sourceKind: 'available', destinationKind: 'other', sourceAccountId: 'checking' }),
-      { ...ledgerEntry({ id: 'fx', value: 50, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'payroll', categoryId: 'salary' }), conversion: { missingCurrency: 'JPY' } },
+      ledgerEntry({
+        id: 'refund',
+        value: 10,
+        sourceKind: 'expense',
+        destinationKind: 'available',
+        destinationAccountId: 'payroll',
+        categoryId: 'tax',
+        refund: { isRefund: true, coverageCategoryId: 'tax', coverageMonthKey: '2026-08', coverageValue: 10 },
+      }),
+      ledgerEntry({ id: 'loan-proceeds', value: 20, sourceKind: 'liability', destinationKind: 'available', sourceAccountId: 'loan', destinationAccountId: 'payroll' }),
+      ledgerEntry({ id: 'tax', value: 30, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'payroll', categoryId: 'tax' }),
+      ledgerEntry({ id: 'checking', value: 40, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'payroll', destinationAccountId: 'checking' }),
+      ledgerEntry({ id: 'blocked', value: 7, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'checking', destinationAccountId: 'payroll' }),
+    ],
+    { passThroughAccountIds: ['payroll'], passThroughEnabled: true },
+  )
+  const off = buildLedgerFlow(
+    [
+      ledgerEntry({ id: 'salary', value: 100, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'payroll', categoryId: 'salary' }),
+      ledgerEntry({
+        id: 'refund',
+        value: 10,
+        sourceKind: 'expense',
+        destinationKind: 'available',
+        destinationAccountId: 'payroll',
+        categoryId: 'tax',
+        refund: { isRefund: true, coverageCategoryId: 'tax', coverageMonthKey: '2026-08', coverageValue: 10 },
+      }),
+      ledgerEntry({ id: 'loan-proceeds', value: 20, sourceKind: 'liability', destinationKind: 'available', sourceAccountId: 'loan', destinationAccountId: 'payroll' }),
+      ledgerEntry({ id: 'tax', value: 30, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'payroll', categoryId: 'tax' }),
+      ledgerEntry({ id: 'checking', value: 40, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'payroll', destinationAccountId: 'checking' }),
+      ledgerEntry({ id: 'blocked', value: 7, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'checking', destinationAccountId: 'payroll' }),
+    ],
+    { passThroughAccountIds: ['payroll'], passThroughEnabled: false },
+  )
+
+  assert.deepEqual(graph.nodes, [])
+  assert.deepEqual(graph.links, [])
+  assert.deepEqual(graph.unclassified, { value: 7, transactionIds: ['blocked'] })
+  assert.deepEqual(graph.audit.passThrough.payroll, {
+    incoming: 130,
+    outgoing: 70,
+    net: 60,
+    incomingTransactionIds: ['loan-proceeds', 'refund', 'salary'],
+    outgoingTransactionIds: ['checking', 'tax'],
+  })
+  assert.equal(graph.isBalanced, false)
+  assert.equal(off.nodes.length > 0, true)
+  assert.equal(off.isBalanced, true)
+})
+
+test('keeps pass-through audit deterministic for immutable reversed inputs', () => {
+  const entries = [
+    ledgerEntry({ id: 'a-income', value: 100, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'a', categoryId: 'a-income' }),
+    ledgerEntry({ id: 'a-expense', value: 70, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'a', categoryId: 'a-expense' }),
+    ledgerEntry({ id: 'b-income', value: 90, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'b', categoryId: 'b-income' }),
+    ledgerEntry({ id: 'b-expense', value: 20, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'b', categoryId: 'b-expense' }),
+    ledgerEntry({ id: 'b-to-a', value: 5, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'b', destinationAccountId: 'a' }),
+    ledgerEntry({ id: 'a-to-b', value: 6, sourceKind: 'available', destinationKind: 'available', sourceAccountId: 'a', destinationAccountId: 'b' }),
+  ]
+  const before = structuredClone(entries)
+  const options = { passThroughAccountIds: ['a', 'b'], passThroughEnabled: true }
+
+  const forward = buildLedgerFlow(entries, options)
+  const reversed = buildLedgerFlow([...entries].reverse(), options)
+
+  assert.deepEqual(entries, before)
+  assert.deepEqual(reversed, forward)
+  assert.deepEqual(Object.keys(forward.audit.passThrough), ['a', 'b'])
+  assert.deepEqual(
+    forward.audit.passThroughReallocations.map(({ sourceId, targetId }) => `${sourceId}->${targetId}`),
+    ['a->b', 'b->a'],
+  )
+})
+
+test('threshold detail may reduce generated pass-through residuals but never their central pools', () => {
+  const graph = buildLedgerFlow(
+    [
+      ledgerEntry({ id: 'payroll-income', value: 10, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'payroll', categoryId: 'salary' }),
+      ledgerEntry({ id: 'payroll-expense', value: 30, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'payroll', categoryId: 'tax' }),
+      ledgerEntry({ id: 'benefits-income', value: 30, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'benefits', categoryId: 'benefits' }),
+      ledgerEntry({ id: 'benefits-expense', value: 10, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'benefits', categoryId: 'health' }),
+    ],
+    { passThroughAccountIds: ['payroll', 'benefits'], passThroughEnabled: true },
+  )
+  const existing = graph.nodes.find(({ id }) => id === 'existingPassThrough:payroll')
+  const retained = graph.nodes.find(({ id }) => id === 'retainedPassThrough:benefits')
+  const existingLink = graph.links.find(({ sourceId }) => sourceId === existing.id)
+  const retainedLink = graph.links.find(({ targetId }) => targetId === retained.id)
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({
+    graph: {
+      ...graph,
+      nodes: [...graph.nodes, { ...existing, id: 'existingPassThrough:payroll-shadow', refId: 'payroll-shadow' }, { ...retained, id: 'retainedPassThrough:benefits-shadow', refId: 'benefits-shadow' }],
+      links: [
+        ...graph.links,
+        { ...existingLink, id: 'existing-shadow-link', sourceId: 'existingPassThrough:payroll-shadow' },
+        { ...retainedLink, id: 'retained-shadow-link', targetId: 'retainedPassThrough:benefits-shadow' },
+      ],
+    },
+    detailLevel: 'threshold',
+    minimumAmount: 50,
+  })
+
+  assert.equal(
+    limited.nodes.some(({ kind }) => kind === 'otherExistingPassThrough'),
+    true,
+  )
+  assert.equal(
+    limited.nodes.some(({ kind }) => kind === 'otherRetainedPassThrough'),
+    true,
+  )
+  assert.equal(
+    limited.nodes.some(({ id }) => id === 'passThrough:payroll'),
+    true,
+  )
+  assert.equal(
+    limited.nodes.some(({ id }) => id === 'passThrough:benefits'),
+    true,
+  )
+})
+
+test('keeps ordinary and active pass-through Money Flow paths strictly forward while ordinary paths skip the central stage', () => {
+  const graph = buildLedgerFlow(
+    [
+      ledgerEntry({ id: 'ordinary-income', value: 80, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'checking', categoryId: 'ordinary' }),
+      ledgerEntry({ id: 'ordinary-expense', value: 20, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'checking', categoryId: 'food' }),
+      ledgerEntry({ id: 'payroll-income', value: 60, sourceKind: 'revenue', destinationKind: 'available', destinationAccountId: 'payroll', categoryId: 'salary' }),
+      ledgerEntry({ id: 'payroll-expense', value: 30, sourceKind: 'available', destinationKind: 'expense', sourceAccountId: 'payroll', categoryId: 'tax' }),
     ],
     { passThroughAccountIds: ['payroll'], passThroughEnabled: true },
   )
 
-  assert.equal(graph.audit.totalSources, graph.audit.totalDestinations)
-  assert.deepEqual(graph.unclassified, { value: 5, transactionIds: ['unknown'] })
-  assert.deepEqual(graph.missingCurrencies, ['JPY'])
-  assert.equal(graph.isBalanced, false)
-  assert.equal(linkValue(graph, 'income', 'passThrough:payroll'), 100)
+  assert.equal(
+    graph.links.every((link) => graph.nodes.find(({ id }) => id === link.sourceId).layer < graph.nodes.find(({ id }) => id === link.targetId).layer),
+    true,
+  )
+  assert.equal(linkValue(graph, 'income', 'available'), 80)
+  assert.equal(linkValue(graph, 'income', 'passThrough:payroll'), 60)
 })
 
 test('All graph detail preserves every original node and link', () => {
