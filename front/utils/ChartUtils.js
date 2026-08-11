@@ -606,12 +606,23 @@ export function resolveMoneyFlowItemDetails({ item, nodes }) {
 export function resolveMoneyFlowInteraction({ state = {}, action, targets = [] }) {
   let preview = state.preview ?? null
   let pinned = state.pinned ?? null
-  let selection = null
-  let focusTarget = null
+  let selection = state.selection ?? null
+  let focusTarget = state.focusTarget ?? null
+  let drag = state.drag ?? null
+  let pointerStart = state.pointerStart ?? null
+  const targetExists = (target) => target && targets.some(({ type, id }) => type === target.type && id === target.id)
 
-  if (['activate', 'pointer-enter', 'focus'].includes(action.type)) preview = action.target
+  if (action.type === 'targetsChanged') {
+    preview = targetExists(preview) ? preview : null
+    pinned = targetExists(pinned) ? pinned : null
+    selection = targetExists(selection) ? selection : null
+    focusTarget = targetExists(focusTarget) ? focusTarget : null
+    drag = targetExists(drag) ? drag : null
+    pointerStart = targetExists(pointerStart) ? pointerStart : null
+  }
+  if (['activate', 'pointer-enter', 'focus'].includes(action.type)) preview = targetExists(action.target) ? action.target : null
   if (['deactivate', 'pointer-leave', 'blur'].includes(action.type)) preview = null
-  if (action.type === 'select') {
+  if (action.type === 'select' && targetExists(action.target)) {
     pinned = action.target
     selection = { ...action.target, contextNodes: action.contextNodes ?? [] }
   }
@@ -625,7 +636,7 @@ export function resolveMoneyFlowInteraction({ state = {}, action, targets = [] }
     focusTarget = targets[(startIndex + action.amount + targets.length) % targets.length]
   }
 
-  return { preview, pinned, active: preview ?? pinned, selection, focusTarget }
+  return { preview, pinned, active: preview ?? pinned, selection, focusTarget, drag, pointerStart }
 }
 
 export function projectMoneyFlowTransactionSelection({ item = {}, rows = [], nodes = [], toUrl, route }) {

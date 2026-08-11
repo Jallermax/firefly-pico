@@ -171,6 +171,12 @@ const layout = computed(() =>
 const nodeDictionary = computed(() => new Map(displayedGraph.value.nodes.map((node) => [node.id, node])))
 const linkDictionary = computed(() => new Map(displayedGraph.value.links.map((link) => [link.id, link])))
 const interactionTargets = computed(() => [...layout.value.ribbons.map(({ id }) => ({ type: 'link', id })), ...layout.value.nodes.map(({ id }) => ({ type: 'node', id }))])
+const interactionTargetSignature = computed(() =>
+  interactionTargets.value
+    .map(({ type, id }) => JSON.stringify([type, id]))
+    .sort()
+    .join('|'),
+)
 const active = computed(() => interaction.value.active)
 const activeItem = computed(() => (active.value?.type === 'link' ? linkDictionary.value.get(active.value.id) : nodeDictionary.value.get(active.value?.id)) ?? null)
 const activeDetails = computed(() => resolveMoneyFlowItemDetails({ item: activeItem.value ?? {}, nodes: displayedGraph.value.nodes }))
@@ -238,6 +244,7 @@ const nodeLabel = (node) => {
 }
 
 const dispatchInteraction = (action) => (interaction.value = resolveMoneyFlowInteraction({ state: interaction.value, action, targets: interactionTargets.value }))
+watch(interactionTargetSignature, () => dispatchInteraction({ type: 'targetsChanged' }))
 const activateNode = ({ id }, type) => dispatchInteraction({ type, target: { type: 'node', id } })
 const activateLink = ({ id }, type) => dispatchInteraction({ type, target: { type: 'link', id } })
 const deactivate = (type) => dispatchInteraction({ type })

@@ -1257,6 +1257,16 @@ test('layered flow renderer uses filled ribbons and accessible patterns', () => 
   assert.doesNotMatch(component, /<details[\s\S]*analytics-flow-values/)
 })
 
+test('layered flow renderer repairs interaction from a stable target signature without selecting anything', () => {
+  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+
+  assert.match(
+    component,
+    /const interactionTargetSignature = computed\(\(\) =>\s+interactionTargets\.value\s+\.map\(\(\{ type, id \}\) => JSON\.stringify\(\[type, id\]\)\)\s+\.sort\(\)\s+\.join\('\|'\)/,
+  )
+  assert.match(component, /watch\(interactionTargetSignature, \(\) => dispatchInteraction\(\{ type: 'targetsChanged' \}\)\)/)
+})
+
 test('scrolled SVG pointer move and down preview the same ribbon before click selects it', () => {
   const ribbons = [
     {
@@ -1321,6 +1331,112 @@ test('money flow interaction controller previews, pins, traverses, and dismisses
   state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'select', target: targets[1] }, targets })
   state = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'escape' }, targets })
   assert.equal(state.active, null)
+})
+
+test('money flow interaction clears stale preview, pin, selection, focus, drag, and pointer start when controls replace targets', () => {
+  const staleTarget = { type: 'link', id: 'expenses->expense:small' }
+  const state = {
+    preview: staleTarget,
+    pinned: staleTarget,
+    selection: { ...staleTarget, contextNodes: layeredGeometryGraph.nodes },
+    focusTarget: staleTarget,
+    drag: staleTarget,
+    pointerStart: staleTarget,
+  }
+
+  const repaired = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'targetsChanged' }, targets: [{ type: 'node', id: 'other:expenses' }] })
+
+  assert.equal(repaired.preview, null)
+  assert.equal(repaired.pinned, null)
+  assert.equal(repaired.selection, null)
+  assert.equal(repaired.focusTarget, null)
+  assert.equal(repaired.drag, null)
+  assert.equal(repaired.pointerStart, null)
+  assert.equal(repaired.active, null)
+})
+
+test('money flow interaction repair preserves surviving target state by exact type and id despite changed target data and index', () => {
+  const target = { type: 'link', id: 'pass-through:payroll->expenses' }
+  const state = {
+    preview: target,
+    pinned: target,
+    selection: { ...target, contextNodes: layeredGeometryGraph.nodes },
+    focusTarget: target,
+  }
+  const targets = [
+    { type: 'node', id: 'expenses', label: 'Expenses', value: 310 },
+    { type: 'link', id: 'pass-through:payroll->expenses', label: 'Payroll distribution', value: 250 },
+  ]
+
+  const repaired = ChartUtils.resolveMoneyFlowInteraction({ state, action: { type: 'targetsChanged' }, targets })
+
+  assert.deepEqual(repaired.preview, target)
+  assert.deepEqual(repaired.pinned, target)
+  assert.deepEqual(repaired.selection, state.selection)
+  assert.deepEqual(repaired.focusTarget, target)
+})
+
+test('money flow interaction repair clears an empty graph so a later pointer up cannot reselect a removed target', () => {
+  const target = { type: 'link', id: 'expenses->expense:small' }
+  const repaired = ChartUtils.resolveMoneyFlowInteraction({
+    state: { pinned: target, selection: { ...target, contextNodes: layeredGeometryGraph.nodes }, pointerStart: target },
+    action: { type: 'targetsChanged' },
+    targets: [],
+  })
+  const pointerUp = ChartUtils.resolveMoneyFlowInteraction({ state: repaired, action: { type: 'pointerUp', target }, targets: [] })
+
+  assert.equal(repaired.pointerStart, null)
+  assert.equal(pointerUp.selection, null)
+  assert.equal(pointerUp.pinned, null)
+})
+
+test('money flow interaction treats a node and link with the same ID as different targets during repair', () => {
+  const target = { type: 'link', id: 'shared-id' }
+  const repaired = ChartUtils.resolveMoneyFlowInteraction({
+    state: { preview: target, pinned: target, selection: { ...target, contextNodes: [] }, focusTarget: target },
+    action: { type: 'targetsChanged' },
+    targets: [{ type: 'node', id: 'shared-id' }],
+  })
+
+  assert.equal(repaired.preview, null)
+  assert.equal(repaired.pinned, null)
+  assert.equal(repaired.selection, null)
+  assert.equal(repaired.focusTarget, null)
+})
+
+test('pass-through and threshold Other selections keep only actual transaction evidence from full-graph rows', () => {
+  const fullGraph = {
+    nodes: [
+      { id: 'pass-through:payroll', transactionIds: ['txn-payroll'] },
+      { id: 'expense:utilities', transactionIds: ['txn-utilities'] },
+      { id: 'expense:household', transactionIds: ['txn-household'], refundCoverage: { value: 8, transactionIds: ['txn-refund'] } },
+      { id: 'pass-through:payroll:retained', transactionIds: [] },
+    ],
+    links: [
+      { id: 'pass-through:payroll->expense:utilities', sourceId: 'pass-through:payroll', targetId: 'expense:utilities', transactionIds: ['txn-utilities'] },
+      { id: 'pass-through:payroll->expense:household', sourceId: 'pass-through:payroll', targetId: 'expense:household', transactionIds: ['txn-household'] },
+    ],
+  }
+  const otherLink = {
+    id: 'pass-through:payroll->other:expenses',
+    sourceId: 'pass-through:payroll',
+    targetId: 'other:expenses',
+    transactionIds: ['txn-household', 'txn-utilities'],
+  }
+  const selectedRows = fullGraph.links.filter(({ sourceId }) => sourceId === otherLink.sourceId)
+
+  const selection = ChartUtils.projectMoneyFlowTransactionSelection({
+    item: otherLink,
+    rows: selectedRows,
+    nodes: fullGraph.nodes,
+    toUrl: (value) => `id=${value}`,
+    route: RouteConstants.ROUTE_TRANSACTION_LIST,
+  })
+
+  assert.deepEqual(selection.transactionIds, ['txn-household', 'txn-refund', 'txn-utilities'])
+  assert.equal(selection.transactionIds.includes('pass-through:payroll:retained'), false)
+  assert.deepEqual(selection.refundCoverage, { value: 8, transactionIds: ['txn-refund'] })
+  assert.equal(selection.route, '/transactions/list?id=txn-household,txn-refund,txn-utilities')
 })
 
 test('limited Other raw detail selection projects popup coverage and the final card query', () => {
