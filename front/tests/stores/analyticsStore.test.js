@@ -180,7 +180,7 @@ const debitLiability = () => ({
     include_net_worth: false,
     currency_code: 'USD',
     current_balance: null,
-    current_balance_date: format(new Date(), 'yyyy-MM-dd') + 'T23:59:59+00:00',
+    current_balance_date: format(now, 'yyyy-MM-dd') + 'T23:59:59+00:00',
     current_debt: '250',
   },
 })
@@ -192,7 +192,7 @@ const currentExpenseTransaction = (amount, categoryId = 'food') => ({
       {
         amount: String(amount),
         currency_code: 'USD',
-        date: new Date(),
+        date: now,
         category_id: categoryId,
         source_id: 'checking',
         destination_id: 'expense',
