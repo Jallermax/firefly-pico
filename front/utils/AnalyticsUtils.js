@@ -509,9 +509,21 @@ const moneyFlowFamilyKind = (kind) => {
 }
 
 const sourceFamilyRank = (node) => ({ income: 0, refund: 1, existingAvailable: 2, existingSavings: 2, existingPassThrough: 2, newDebt: 3 })[moneyFlowFamilyKind(node.kind)] ?? 4
-const destinationFamilyRank = (node) => ({ expenseCategory: 0, debtPaid: 1, savingsDeposit: 2, newExcess: 3 })[moneyFlowFamilyKind(node.kind)] ?? 4
+const destinationFamilyRank = (node) => ({ expenseCategory: 0, debtPaid: 1, savingsDeposit: 2, newExcess: 3, retainedPassThrough: 3 })[moneyFlowFamilyKind(node.kind)] ?? 4
 const middleFamilyRank = (node) =>
   ({ income: 0, refund: 1, passThrough: 2, passThroughPool: 2, available: 3, savings: 4, expenses: 5, debtPaid: 6, savingsDeposited: 7, newExcess: 8 })[moneyFlowFamilyKind(node.kind)] ?? 9
+const moneyFlowDetailKinds = new Set([
+  'income',
+  'refund',
+  'existingAvailable',
+  'existingSavings',
+  'existingPassThrough',
+  'newDebt',
+  'expenseCategory',
+  'debtPaid',
+  'savingsDeposit',
+  'retainedPassThrough',
+])
 
 export function orderMoneyFlowGraph({ graph, orderMode = 'amount', labelOf = (node) => node.label ?? node.refId ?? node.id }) {
   const layers = [...new Set(graph.nodes.map(({ layer }) => layer))].sort((left, right) => left - right)
@@ -526,10 +538,8 @@ export function orderMoneyFlowGraph({ graph, orderMode = 'amount', labelOf = (no
             ? destinationFamilyRank
             : middleFamilyRank
         : () => 0
-    return sortMoneyFlowPresentationItems(
-      graph.nodes.filter((node) => node.layer === layer),
-      { familyRank, labelOf },
-    )
+    const items = graph.nodes.filter((node) => node.layer === layer)
+    return orderMode === 'type' ? sortMoneyFlowPresentationItems(items, { familyRank, labelOf }) : sortMoneyFlowPresentationItems(items)
   })
   const nodeOrder = new Map(nodes.map(({ id }, index) => [id, index]))
   const links = [...graph.links].sort(
@@ -558,7 +568,7 @@ export function limitMoneyFlowGraphDetail({ graph, detailLevel, minimumAmount = 
   }
 
   const groups = new Map()
-  for (const node of graph.nodes.filter(({ refId }) => refId !== undefined && refId !== null)) {
+  for (const node of graph.nodes.filter(({ kind, refId }) => moneyFlowDetailKinds.has(kind) && refId !== undefined && refId !== null)) {
     const connections = linksByNode.get(node.id) ?? []
     const outgoing = connections.filter(({ side }) => side === 'source')
     const incoming = connections.filter(({ side }) => side === 'destination')

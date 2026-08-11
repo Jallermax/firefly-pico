@@ -66,8 +66,10 @@ export const buildCategoryReadyPresentation = ({ usedMonths, requestedMonths, un
   }
 }
 
-export const sortMoneyFlowPresentationItems = (items, { familyRank = () => 0, labelOf = (item) => item.refId ?? item.id } = {}) =>
-  [...items].sort((left, right) => {
+export const sortMoneyFlowPresentationItems = (items, options = {}) => {
+  const { familyRank = () => 0, labelOf = (item) => item.refId ?? item.id } = options
+  const usePresentationTies = Object.hasOwn(options, 'familyRank') || Object.hasOwn(options, 'labelOf')
+  return [...items].sort((left, right) => {
     const leftFamily = familyRank(left)
     const rightFamily = familyRank(right)
     const leftIsOther = String(left.id).startsWith('other:') || String(left.kind).startsWith('other') || left.label === 'Other'
@@ -76,7 +78,9 @@ export const sortMoneyFlowPresentationItems = (items, { familyRank = () => 0, la
       leftFamily - rightFamily ||
       Number(leftIsOther) - Number(rightIsOther) ||
       Math.abs(right.value) - Math.abs(left.value) ||
-      String(labelOf(left) ?? left.refId ?? left.id).localeCompare(String(labelOf(right) ?? right.refId ?? right.id)) ||
-      String(left.id).localeCompare(String(right.id))
+      (usePresentationTies
+        ? String(labelOf(left) ?? left.refId ?? left.id).localeCompare(String(labelOf(right) ?? right.refId ?? right.id)) || String(left.id).localeCompare(String(right.id))
+        : String(left.refId ?? left.id).localeCompare(String(right.refId ?? right.id)))
     )
   })
+}

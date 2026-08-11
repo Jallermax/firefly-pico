@@ -1266,6 +1266,7 @@ test('orders Money Flow outer layers by type and then amount with Other last ins
       { id: 'other:expense', layer: 5, kind: 'otherExpenseCategory', value: 90, label: 'Other' },
       { id: 'expense', layer: 5, kind: 'expenseCategory', value: 10, label: 'Food' },
       { id: 'debt-paid', layer: 5, kind: 'debtPaid', value: 30, label: 'Card' },
+      { id: 'retained-pass-through', layer: 5, kind: 'retainedPassThrough', value: 100, label: 'Payroll' },
     ],
     links: [
       { id: 'expense-link', sourceId: 'income', targetId: 'expense', value: 10 },
@@ -1284,7 +1285,7 @@ test('orders Money Flow outer layers by type and then amount with Other last ins
   )
   assert.deepEqual(
     ordered.nodes.filter(({ layer }) => layer === 5).map(({ id }) => id),
-    ['expense', 'other:expense', 'debt-paid', 'saving', 'new-excess'],
+    ['expense', 'other:expense', 'debt-paid', 'saving', 'retained-pass-through', 'new-excess'],
   )
   assert.deepEqual(
     ordered.links.map(({ id }) => id),
@@ -1305,6 +1306,50 @@ test('orders Money Flow amount mode by absolute value across families with Other
   assert.deepEqual(
     AnalyticsUtils.orderMoneyFlowGraph({ graph, orderMode: 'amount', labelOf: (node) => node.label }).nodes.map(({ id }) => id),
     ['refund', 'income', 'other:income'],
+  )
+})
+
+test('preserves legacy Amount-mode equal-refId insertion order and links for income and refund encounters', () => {
+  const refund = ledgerEntry({
+    id: 'refund',
+    value: 50,
+    sourceKind: 'expense',
+    destinationKind: 'available',
+    categoryId: 'same-category',
+    refund: { isRefund: true, coverageCategoryId: 'same-category', coverageMonthKey: '2026-08', coverageValue: 50 },
+  })
+  const income = ledgerEntry({ id: 'income', value: 50, sourceKind: 'revenue', destinationKind: 'available', categoryId: 'same-category' })
+
+  const refundFirst = buildLedgerFlow([refund, income])
+  const incomeFirst = buildLedgerFlow([income, refund])
+
+  assert.deepEqual(
+    refundFirst.nodes.map(({ id }) => id),
+    ['refund:same-category', 'income:same-category', 'income', 'refundIncome', 'available', 'newExcess', 'expense:same-category'],
+  )
+  assert.deepEqual(
+    refundFirst.links.map(({ id }) => id),
+    [
+      'refund:same-category->refundIncome:refund:available',
+      'income:same-category->income:income:available',
+      'income->available:income:available',
+      'refundIncome->available:refund:available',
+      'available->newExcess:newExcess:available',
+    ],
+  )
+  assert.deepEqual(
+    incomeFirst.nodes.map(({ id }) => id),
+    ['income:same-category', 'refund:same-category', 'income', 'refundIncome', 'available', 'newExcess', 'expense:same-category'],
+  )
+  assert.deepEqual(
+    incomeFirst.links.map(({ id }) => id),
+    [
+      'income:same-category->income:income:available',
+      'refund:same-category->refundIncome:refund:available',
+      'income->available:income:available',
+      'refundIncome->available:refund:available',
+      'available->newExcess:newExcess:available',
+    ],
   )
 })
 
@@ -1946,6 +1991,35 @@ test('minimum amount uses absolute values and never combines different funding p
     ],
   )
   assert.equal(limited.nodes.find(({ id }) => id === 'other:refunds:available:negative').value, -60)
+})
+
+test('minimum amount never groups central pass-through pools', () => {
+  const graph = {
+    nodes: [
+      { id: 'income', layer: 1, kind: 'income', value: 30, transactionIds: [] },
+      { id: 'passThrough:payroll-a', layer: 2, kind: 'passThroughPool', refId: 'payroll-a', value: 10, transactionIds: ['payroll-a'] },
+      { id: 'passThrough:payroll-b', layer: 2, kind: 'passThroughPool', refId: 'payroll-b', value: 20, transactionIds: ['payroll-b'] },
+      { id: 'available', layer: 3, kind: 'available', value: 30, transactionIds: [] },
+    ],
+    links: [
+      { id: 'income->payroll-a', sourceId: 'income', targetId: 'passThrough:payroll-a', kind: 'income', fundingPool: 'passThrough', value: 10, transactionIds: ['payroll-a'] },
+      { id: 'income->payroll-b', sourceId: 'income', targetId: 'passThrough:payroll-b', kind: 'income', fundingPool: 'passThrough', value: 20, transactionIds: ['payroll-b'] },
+      { id: 'payroll-a->available', sourceId: 'passThrough:payroll-a', targetId: 'available', kind: 'bridge', fundingPool: 'passThrough', value: 10, transactionIds: ['payroll-a'] },
+      { id: 'payroll-b->available', sourceId: 'passThrough:payroll-b', targetId: 'available', kind: 'bridge', fundingPool: 'passThrough', value: 20, transactionIds: ['payroll-b'] },
+    ],
+  }
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 'threshold', minimumAmount: 50 })
+
+  assert.equal(limited, graph)
+  assert.deepEqual(
+    limited.nodes.map(({ id }) => id),
+    ['income', 'passThrough:payroll-a', 'passThrough:payroll-b', 'available'],
+  )
+  assert.deepEqual(
+    limited.links.map(({ id }) => id),
+    ['income->payroll-a', 'income->payroll-b', 'payroll-a->available', 'payroll-b->available'],
+  )
 })
 
 test('All graph detail preserves every original node and link', () => {
