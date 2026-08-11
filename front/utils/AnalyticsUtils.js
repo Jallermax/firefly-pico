@@ -474,19 +474,16 @@ export function buildMonthlyMoneyFlow({ entries = [], monthKey, currencyDecimalP
   const isBalanced =
     poolsBalanced && Math.abs(audit.equationDifference) <= tolerance && Number.isFinite(unclassified.value) && Math.abs(unclassified.value) <= tolerance && missingCurrencies.length === 0
 
-  const graphNodes = [...nodes.values()].map((node) => ({ ...node, transactionIds: sortedIds(node.transactionIds) }))
-  const sortedNodes = sortMoneyFlowNodes(graphNodes)
-  const nodeOrder = new Map(sortedNodes.map(({ id }, index) => [id, index]))
-  const sortedLinks = [...links.values()]
-    .map((link) => ({ ...link, transactionIds: sortedIds(link.transactionIds) }))
-    .sort(
-      (left, right) =>
-        (nodeOrder.get(left.sourceId) ?? 0) - (nodeOrder.get(right.sourceId) ?? 0) || (nodeOrder.get(left.targetId) ?? 0) - (nodeOrder.get(right.targetId) ?? 0) || left.id.localeCompare(right.id),
-    )
+  const orderedGraph = orderMoneyFlowGraph({
+    graph: {
+      nodes: [...nodes.values()].map((node) => ({ ...node, transactionIds: sortedIds(node.transactionIds) })),
+      links: [...links.values()].map((link) => ({ ...link, transactionIds: sortedIds(link.transactionIds) })),
+    },
+  })
 
   return {
-    nodes: sortedNodes,
-    links: sortedLinks,
+    nodes: orderedGraph.nodes,
+    links: orderedGraph.links,
     pools: audit.pools,
     audit,
     meta: { savingsView },
@@ -505,12 +502,49 @@ const moneyFlowOtherGroups = {
 
 const moneyFlowOtherKind = (kind) => `other${kind.charAt(0).toUpperCase()}${kind.slice(1)}`
 const sortedTransactionIds = (items) => unique(items.flatMap(({ transactionIds }) => transactionIds ?? [])).sort()
-const sortMoneyFlowNodes = (nodes) => [...new Set(nodes.map(({ layer }) => layer))].sort().flatMap((layer) => sortMoneyFlowPresentationItems(nodes.filter((node) => node.layer === layer)))
 
-export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
+const moneyFlowFamilyKind = (kind) => {
+  const value = String(kind ?? '')
+  return value.startsWith('other') ? value.charAt(5).toLowerCase() + value.slice(6) : value
+}
+
+const sourceFamilyRank = (node) => ({ income: 0, refund: 1, existingAvailable: 2, existingSavings: 2, existingPassThrough: 2, newDebt: 3 })[moneyFlowFamilyKind(node.kind)] ?? 4
+const destinationFamilyRank = (node) => ({ expenseCategory: 0, debtPaid: 1, savingsDeposit: 2, newExcess: 3 })[moneyFlowFamilyKind(node.kind)] ?? 4
+const middleFamilyRank = (node) =>
+  ({ income: 0, refund: 1, passThrough: 2, passThroughPool: 2, available: 3, savings: 4, expenses: 5, debtPaid: 6, savingsDeposited: 7, newExcess: 8 })[moneyFlowFamilyKind(node.kind)] ?? 9
+
+export function orderMoneyFlowGraph({ graph, orderMode = 'amount', labelOf = (node) => node.label ?? node.refId ?? node.id }) {
+  const layers = [...new Set(graph.nodes.map(({ layer }) => layer))].sort((left, right) => left - right)
+  const sourceLayer = layers.at(0)
+  const destinationLayer = layers.at(-1)
+  const nodes = layers.flatMap((layer) => {
+    const familyRank =
+      orderMode === 'type'
+        ? layer === sourceLayer && layer !== destinationLayer
+          ? sourceFamilyRank
+          : layer === destinationLayer && layer !== sourceLayer
+            ? destinationFamilyRank
+            : middleFamilyRank
+        : () => 0
+    return sortMoneyFlowPresentationItems(
+      graph.nodes.filter((node) => node.layer === layer),
+      { familyRank, labelOf },
+    )
+  })
+  const nodeOrder = new Map(nodes.map(({ id }, index) => [id, index]))
+  const links = [...graph.links].sort(
+    (left, right) =>
+      (nodeOrder.get(left.sourceId) ?? 0) - (nodeOrder.get(right.sourceId) ?? 0) || (nodeOrder.get(left.targetId) ?? 0) - (nodeOrder.get(right.targetId) ?? 0) || left.id.localeCompare(right.id),
+  )
+
+  return { ...graph, nodes, links }
+}
+
+export function limitMoneyFlowGraphDetail({ graph, detailLevel, minimumAmount = 0 }) {
   if (detailLevel === 'all') return graph
 
   const limit = Number(detailLevel)
+  const threshold = Number.isFinite(minimumAmount) && minimumAmount >= 0 ? minimumAmount : 0
   const linksByNode = new Map()
   for (const link of graph.links) {
     for (const [side, id] of [
@@ -546,7 +580,8 @@ export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
   const reducedGroups = []
   for (const group of groups.values()) {
     const ranked = [...group.nodes].sort((left, right) => Math.abs(right.value) - Math.abs(left.value) || String(left.refId ?? left.id).localeCompare(String(right.refId ?? right.id)))
-    const hidden = ranked.slice(Number.isFinite(limit) && limit >= 0 ? limit : ranked.length)
+    const hidden = detailLevel === 'threshold' ? ranked.filter(({ value }) => Math.abs(value) < threshold) : ranked.slice(Number.isFinite(limit) && limit >= 0 ? limit : ranked.length)
+    if (detailLevel === 'threshold' && hidden.length < 2) continue
     if (!hidden.length) continue
 
     const suffix = group.savingsGroup ? `:${group.savingsGroup}` : ''
@@ -601,13 +636,7 @@ export function limitMoneyFlowGraphDetail({ graph, detailLevel }) {
     existing.transactionIds = sortedTransactionIds([existing, link])
   }
 
-  const nodes = sortMoneyFlowNodes([...graph.nodes.filter(({ id }) => !hiddenToOther.has(id)), ...otherNodes])
-  const nodeOrder = new Map(nodes.map(({ id }, index) => [id, index]))
-  const links = [...rewiredLinks.values()].sort(
-    (left, right) =>
-      (nodeOrder.get(left.sourceId) ?? 0) - (nodeOrder.get(right.sourceId) ?? 0) || (nodeOrder.get(left.targetId) ?? 0) - (nodeOrder.get(right.targetId) ?? 0) || left.id.localeCompare(right.id),
-  )
-  return { ...graph, nodes, links }
+  return orderMoneyFlowGraph({ graph: { ...graph, nodes: [...graph.nodes.filter(({ id }) => !hiddenToOther.has(id)), ...otherNodes], links: [...rewiredLinks.values()] } })
 }
 
 export function buildCategoryLedger({ transactions, displayCurrencyCode, primaryCurrencyCode, rates }) {

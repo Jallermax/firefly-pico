@@ -1252,6 +1252,62 @@ const ledgerEntry = ({
 
 const buildLedgerFlow = (entries, overrides = {}) => buildMonthlyMoneyFlow({ entries, ...flowArgs, ...overrides })
 
+test('orders Money Flow outer layers by type and then amount with Other last inside each family', () => {
+  const graph = {
+    nodes: [
+      { id: 'new-debt', layer: 0, kind: 'newDebt', value: 30, label: 'Loan' },
+      { id: 'existing-available', layer: 0, kind: 'existingAvailable', value: 20, label: 'Checking' },
+      { id: 'other:income', layer: 0, kind: 'otherIncome', value: 90, label: 'Other' },
+      { id: 'refund', layer: 0, kind: 'refund', value: 40, label: 'Tax refund' },
+      { id: 'income', layer: 0, kind: 'income', value: 10, label: 'Salary' },
+      { id: 'existing-savings', layer: 0, kind: 'existingSavings', value: 70, label: 'Savings' },
+      { id: 'new-excess', layer: 5, kind: 'newExcess', value: 80, label: 'Retained' },
+      { id: 'saving', layer: 5, kind: 'savingsDeposit', value: 60, label: 'Reserve' },
+      { id: 'other:expense', layer: 5, kind: 'otherExpenseCategory', value: 90, label: 'Other' },
+      { id: 'expense', layer: 5, kind: 'expenseCategory', value: 10, label: 'Food' },
+      { id: 'debt-paid', layer: 5, kind: 'debtPaid', value: 30, label: 'Card' },
+    ],
+    links: [
+      { id: 'expense-link', sourceId: 'income', targetId: 'expense', value: 10 },
+      { id: 'other-expense-link', sourceId: 'other:income', targetId: 'other:expense', value: 90 },
+      { id: 'debt-link', sourceId: 'existing-available', targetId: 'debt-paid', value: 20 },
+      { id: 'saving-link', sourceId: 'existing-savings', targetId: 'saving', value: 60 },
+      { id: 'excess-link', sourceId: 'new-debt', targetId: 'new-excess', value: 30 },
+    ],
+  }
+
+  const ordered = AnalyticsUtils.orderMoneyFlowGraph({ graph, orderMode: 'type', labelOf: (node) => node.label })
+
+  assert.deepEqual(
+    ordered.nodes.filter(({ layer }) => layer === 0).map(({ id }) => id),
+    ['income', 'other:income', 'refund', 'existing-savings', 'existing-available', 'new-debt'],
+  )
+  assert.deepEqual(
+    ordered.nodes.filter(({ layer }) => layer === 5).map(({ id }) => id),
+    ['expense', 'other:expense', 'debt-paid', 'saving', 'new-excess'],
+  )
+  assert.deepEqual(
+    ordered.links.map(({ id }) => id),
+    ['expense-link', 'other-expense-link', 'saving-link', 'debt-link', 'excess-link'],
+  )
+})
+
+test('orders Money Flow amount mode by absolute value across families with Other last', () => {
+  const graph = {
+    nodes: [
+      { id: 'income', layer: 0, kind: 'income', value: 10, label: 'Salary' },
+      { id: 'refund', layer: 0, kind: 'refund', value: -70, label: 'Tax refund' },
+      { id: 'other:income', layer: 0, kind: 'otherIncome', value: 100, label: 'Other' },
+    ],
+    links: [],
+  }
+
+  assert.deepEqual(
+    AnalyticsUtils.orderMoneyFlowGraph({ graph, orderMode: 'amount', labelOf: (node) => node.label }).nodes.map(({ id }) => id),
+    ['refund', 'income', 'other:income'],
+  )
+})
+
 test('sorts income and expense categories by amount descending with stable ID ties', () => {
   const graph = buildLedgerFlow([
     ledgerEntry({ id: 'income-z', value: 40, sourceKind: 'revenue', destinationKind: 'available', categoryId: 'z-art' }),
@@ -1802,6 +1858,94 @@ test('keeps colliding Other identities path-unique and independently rewired', (
     assert.equal(linkValue(limited, parentId, otherId), 1)
     assert.equal(linkTotal(limited, parentId, 'source'), 21)
   }
+})
+
+test('minimum amount groups two compatible siblings but keeps a lone sibling named', () => {
+  const thresholdGraph = buildLedgerFlow([
+    ledgerEntry({ id: 'expense-large', value: 120, sourceKind: 'available', destinationKind: 'expense', categoryId: 'large' }),
+    ledgerEntry({ id: 'expense-40', value: 40, sourceKind: 'available', destinationKind: 'expense', categoryId: 'small-40' }),
+    ledgerEntry({ id: 'expense-20', value: 20, sourceKind: 'available', destinationKind: 'expense', categoryId: 'small-20' }),
+    ledgerEntry({ id: 'saving-large', value: 70, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'reserve-large' }),
+    ledgerEntry({ id: 'saving-only', value: 35, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'reserve-only' }),
+  ])
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: thresholdGraph, detailLevel: 'threshold', minimumAmount: 50 })
+
+  assert.deepEqual(
+    limited.nodes.filter(({ kind }) => ['expenseCategory', 'otherExpenseCategory'].includes(kind)).map(({ id }) => id),
+    ['expense:large', 'other:expenses:available:positive'],
+  )
+  assert.deepEqual(limited.nodes.find(({ id }) => id === 'other:expenses:available:positive').transactionIds, ['expense-20', 'expense-40'])
+  assert.equal(
+    limited.nodes.some(({ id }) => id === 'savingsDeposit:reserve-only'),
+    true,
+  )
+  assert.equal(
+    limited.nodes.some(({ id }) => id.startsWith('other:savingsDeposited')),
+    false,
+  )
+})
+
+test('minimum amount keeps threshold boundaries and lone incompatible nodes expanded', () => {
+  const graph = buildLedgerFlow([
+    ledgerEntry({ id: 'equal', value: 50, sourceKind: 'available', destinationKind: 'expense', categoryId: 'equal' }),
+    ledgerEntry({ id: 'small', value: 20, sourceKind: 'available', destinationKind: 'expense', categoryId: 'small' }),
+    ledgerEntry({ id: 'saving', value: 20, sourceKind: 'available', destinationKind: 'savingsAccessible', destinationAccountId: 'reserve' }),
+  ])
+
+  const threshold = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 'threshold', minimumAmount: 50 })
+  const zero = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 'threshold', minimumAmount: 0 })
+  const invalid = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph, detailLevel: 'threshold', minimumAmount: -1 })
+
+  assert.deepEqual(
+    threshold.nodes.filter(({ refId }) => refId).map(({ id }) => id),
+    ['expense:equal', 'savingsDeposit:reserve', 'expense:small'],
+  )
+  assert.equal(zero, graph)
+  assert.equal(invalid, graph)
+})
+
+test('minimum amount uses absolute values and never combines different funding pools or savings groups', () => {
+  const nodes = [
+    { id: 'income', layer: 1, kind: 'income', value: 60, transactionIds: [] },
+    { id: 'expenses', layer: 4, kind: 'expenses', value: 80, transactionIds: [] },
+    { id: 'savingsDeposited', layer: 4, kind: 'savingsDeposited', value: 40, transactionIds: [] },
+    { id: 'refund-a', layer: 0, kind: 'refund', refId: 'a', value: -40, transactionIds: ['refund-a'] },
+    { id: 'refund-b', layer: 0, kind: 'refund', refId: 'b', value: -20, transactionIds: ['refund-b'] },
+    { id: 'expense-available-a', layer: 5, kind: 'expenseCategory', refId: 'available-a', value: 20, transactionIds: ['available-a'] },
+    { id: 'expense-available-b', layer: 5, kind: 'expenseCategory', refId: 'available-b', value: 10, transactionIds: ['available-b'] },
+    { id: 'expense-savings-a', layer: 5, kind: 'expenseCategory', refId: 'savings-a', value: 20, transactionIds: ['savings-a'] },
+    { id: 'expense-savings-b', layer: 5, kind: 'expenseCategory', refId: 'savings-b', value: 10, transactionIds: ['savings-b'] },
+    { id: 'deposit-included-a', layer: 5, kind: 'savingsDeposit', refId: 'included-a', value: 20, savingsGroup: 'included', transactionIds: ['included-a'] },
+    { id: 'deposit-included-b', layer: 5, kind: 'savingsDeposit', refId: 'included-b', value: 10, savingsGroup: 'included', transactionIds: ['included-b'] },
+    { id: 'deposit-excluded-a', layer: 5, kind: 'savingsDeposit', refId: 'excluded-a', value: 20, savingsGroup: 'excluded', transactionIds: ['excluded-a'] },
+    { id: 'deposit-excluded-b', layer: 5, kind: 'savingsDeposit', refId: 'excluded-b', value: 10, savingsGroup: 'excluded', transactionIds: ['excluded-b'] },
+  ]
+  const links = [
+    { id: 'refund-a->income', sourceId: 'refund-a', targetId: 'income', kind: 'refund', fundingPool: 'available', value: 40, transactionIds: ['refund-a'] },
+    { id: 'refund-b->income', sourceId: 'refund-b', targetId: 'income', kind: 'refund', fundingPool: 'available', value: 20, transactionIds: ['refund-b'] },
+    { id: 'available-a', sourceId: 'expenses', targetId: 'expense-available-a', kind: 'expense', fundingPool: 'available', value: 20, transactionIds: ['available-a'] },
+    { id: 'available-b', sourceId: 'expenses', targetId: 'expense-available-b', kind: 'expense', fundingPool: 'available', value: 10, transactionIds: ['available-b'] },
+    { id: 'savings-a', sourceId: 'expenses', targetId: 'expense-savings-a', kind: 'expense', fundingPool: 'savings', value: 20, transactionIds: ['savings-a'] },
+    { id: 'savings-b', sourceId: 'expenses', targetId: 'expense-savings-b', kind: 'expense', fundingPool: 'savings', value: 10, transactionIds: ['savings-b'] },
+    { id: 'included-a', sourceId: 'savingsDeposited', targetId: 'deposit-included-a', kind: 'savingsDeposit', fundingPool: 'savings', value: 20, transactionIds: ['included-a'] },
+    { id: 'included-b', sourceId: 'savingsDeposited', targetId: 'deposit-included-b', kind: 'savingsDeposit', fundingPool: 'savings', value: 10, transactionIds: ['included-b'] },
+    { id: 'excluded-a', sourceId: 'savingsDeposited', targetId: 'deposit-excluded-a', kind: 'savingsDeposit', fundingPool: 'savings', value: 20, transactionIds: ['excluded-a'] },
+    { id: 'excluded-b', sourceId: 'savingsDeposited', targetId: 'deposit-excluded-b', kind: 'savingsDeposit', fundingPool: 'savings', value: 10, transactionIds: ['excluded-b'] },
+  ]
+
+  const limited = AnalyticsUtils.limitMoneyFlowGraphDetail({ graph: { nodes, links }, detailLevel: 'threshold', minimumAmount: 50 })
+
+  assert.deepEqual(
+    limited.nodes.filter(({ id }) => id.startsWith('other:')).map(({ id }) => id),
+    [
+      'other:refunds:available:negative',
+      'other:expenses:available:positive',
+      'other:expenses:savings:positive',
+      'other:savingsDeposited:savings:positive:excluded',
+      'other:savingsDeposited:savings:positive:included',
+    ],
+  )
+  assert.equal(limited.nodes.find(({ id }) => id === 'other:refunds:available:negative').value, -60)
 })
 
 test('All graph detail preserves every original node and link', () => {

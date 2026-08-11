@@ -307,3 +307,21 @@ test('money-flow presentation order is amount descending, stable by ID, with Oth
     ['expense:largest', 'expense:a', 'expense:z', 'other:expenses'],
   )
 })
+
+test('money flow type ordering groups the right side by family before amount', () => {
+  const items = [
+    { id: 'excess', kind: 'newExcess', value: 500, label: 'Excess' },
+    { id: 'saving', kind: 'savingsDeposit', value: 400, label: 'Saving' },
+    { id: 'debt', kind: 'debtPaid', value: 300, label: 'Debt' },
+    { id: 'expense-b', kind: 'expenseCategory', value: 20, label: 'Beta' },
+    { id: 'expense-a', kind: 'expenseCategory', value: 20, label: 'Alpha' },
+  ]
+
+  assert.deepEqual(
+    CategoryPresentation.sortMoneyFlowPresentationItems(items, {
+      familyRank: (item) => ({ expenseCategory: 0, debtPaid: 1, savingsDeposit: 2, newExcess: 3 })[item.kind],
+      labelOf: (item) => item.label,
+    }).map(({ id }) => id),
+    ['expense-a', 'expense-b', 'debt', 'saving', 'excess'],
+  )
+})
