@@ -24,6 +24,7 @@ const RECONSTRUCTED_METRICS = ['netWorth', 'savings', 'savingsIncluded', 'saving
 const SAVINGS_VIEWS = ['combined', 'split']
 const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
 const MONEY_FLOW_DETAIL_LEVELS = [5, 10, 'all', 'threshold']
+const CASH_USE_DETAIL_LEVELS = [5, 10, 'all']
 const MONEY_FLOW_ORDERS = ['amount', 'type']
 const CASH_USE_MODES = ['spending', 'full']
 const DAILY_FORECAST_PERIODS = [3, 6, 12]
@@ -452,19 +453,22 @@ export function createAnalyticsStore(id, useDependencies) {
         storedFinancialTrendView.value = FINANCIAL_TREND_VIEWS.includes(view) ? view : 'balances'
       },
     })
-    const normalizeGraphDetail = (detailLevel) => (MONEY_FLOW_DETAIL_LEVELS.includes(detailLevel) ? detailLevel : 5)
+    const normalizeMoneyFlowDetail = (detailLevel) => (MONEY_FLOW_DETAIL_LEVELS.includes(detailLevel) ? detailLevel : 5)
+    const normalizeCashUseDetail = (detailLevel) => (CASH_USE_DETAIL_LEVELS.includes(detailLevel) ? detailLevel : 5)
     const normalizeMoneyFlowMinimumAmount = (value) => {
+      if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null
       const amount = Number(value)
       return Number.isFinite(amount) && amount >= 0 ? amount : null
     }
     const normalizePassThroughAccountIds = (ids) => [...new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))]
     if (!MONEY_FLOW_DETAIL_LEVELS.includes(storedGraphDetail.value)) storedGraphDetail.value = 5
+    if (!CASH_USE_DETAIL_LEVELS.includes(storedCashUseDetail.value)) storedCashUseDetail.value = 5
     if (!MONEY_FLOW_ORDERS.includes(storedMoneyFlowOrder.value)) storedMoneyFlowOrder.value = 'amount'
-    if (normalizeMoneyFlowMinimumAmount(storedMoneyFlowMinimumAmount.value) === null) storedMoneyFlowMinimumAmount.value = 0
+    storedMoneyFlowMinimumAmount.value = normalizeMoneyFlowMinimumAmount(storedMoneyFlowMinimumAmount.value) ?? 0
     const graphDetail = computed({
-      get: () => normalizeGraphDetail(storedGraphDetail.value),
+      get: () => normalizeMoneyFlowDetail(storedGraphDetail.value),
       set: (detailLevel) => {
-        storedGraphDetail.value = normalizeGraphDetail(detailLevel)
+        storedGraphDetail.value = normalizeMoneyFlowDetail(detailLevel)
       },
     })
     const moneyFlowOrder = computed({
@@ -499,9 +503,9 @@ export function createAnalyticsStore(id, useDependencies) {
       },
     })
     const cashUseDetail = computed({
-      get: () => normalizeGraphDetail(storedCashUseDetail.value),
+      get: () => normalizeCashUseDetail(storedCashUseDetail.value),
       set: (value) => {
-        storedCashUseDetail.value = normalizeGraphDetail(value)
+        storedCashUseDetail.value = normalizeCashUseDetail(value)
       },
     })
     const dailyForecastMonths = computed({

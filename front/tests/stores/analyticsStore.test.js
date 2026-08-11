@@ -23,6 +23,7 @@ const currencyStore = reactive({ defaultCurrency: usd, exchangeRates: { rates: {
 const transactionRequests = []
 const snapshotRequests = []
 const storageOverrides = new Map()
+const storageRefs = new Map()
 let transactionResult = []
 let transactionResponse = async () => ({ ok: true, data: transactionResult })
 let freshAccountResult = async () => ({ ok: true, data: structuredClone(accountStore.accountList) })
@@ -137,7 +138,11 @@ const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   dashboardStore,
   accountStore,
   currencyStore,
-  useStoredValue: (key, initialValue) => ref(structuredClone(storageOverrides.get(key) ?? initialValue)),
+  useStoredValue: (key, initialValue) => {
+    const storedValue = ref(structuredClone(storageOverrides.has(key) ? storageOverrides.get(key) : initialValue))
+    storageRefs.set(key, storedValue)
+    return storedValue
+  },
   accountRepository: new AccountRepository(),
   transactionRepository: new TransactionRepository(),
   transactionLinkRepository: new TransactionLinkRepository(),
@@ -286,6 +291,7 @@ beforeEach(() => {
   ledgerBuilds.length = 0
   balanceReconstructions.length = 0
   storageOverrides.clear()
+  storageRefs.clear()
   transactionResult = []
   transactionResponse = async () => ({ ok: true, data: transactionResult })
   freshAccountResult = async () => ({ ok: true, data: [...accountStore.accountList] })
@@ -790,6 +796,72 @@ test('repairs an initially non-finite Money Flow threshold to zero', () => {
   const store = (analyticsStore = useAnalyticsStore())
 
   assert.equal(store.moneyFlowMinimumAmount, 0)
+})
+
+test('repairs every corrupt initial Money Flow threshold to a persisted numeric zero', () => {
+  const corruptValues = [null, true, false, '', '   ', [], [7], {}, Number.NaN, -1]
+
+  for (const value of corruptValues) {
+    setActivePinia(createPinia())
+    storageOverrides.clear()
+    storageRefs.clear()
+    storageOverrides.set('analyticsMoneyFlowMinimumAmount', value)
+    const store = useAnalyticsStore()
+
+    assert.equal(store.moneyFlowMinimumAmount, 0)
+    assert.equal(storageRefs.get('analyticsMoneyFlowMinimumAmount').value, 0)
+
+    store.$dispose()
+  }
+})
+
+test('retains a valid Money Flow threshold for every invalid assignment', () => {
+  const invalidValues = [null, true, false, '', '   ', [], [7], {}, Number.NaN, -1]
+  const store = (analyticsStore = useAnalyticsStore())
+
+  store.moneyFlowMinimumAmount = 12
+  for (const value of invalidValues) {
+    store.moneyFlowMinimumAmount = value
+
+    assert.equal(store.moneyFlowMinimumAmount, 12)
+    assert.equal(storageRefs.get('analyticsMoneyFlowMinimumAmount').value, 12)
+  }
+
+  store.moneyFlowMinimumAmount = '12.5'
+
+  assert.equal(store.moneyFlowMinimumAmount, 12.5)
+  assert.equal(storageRefs.get('analyticsMoneyFlowMinimumAmount').value, 12.5)
+})
+
+test('keeps Money Flow threshold detail out of Cash Use settings and series', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  transactionResult = [currentExpenseTransaction(25, 'food')]
+  const baselineStore = (analyticsStore = useAnalyticsStore())
+
+  await baselineStore.init()
+
+  const baselineSeries = JSON.parse(JSON.stringify(baselineStore.cashUseSeries))
+  baselineStore.$dispose()
+  setActivePinia(createPinia())
+  storageOverrides.clear()
+  storageRefs.clear()
+  storageOverrides.set('analyticsCashUseDetail', 'threshold')
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.equal(store.cashUseDetail, 5)
+  assert.equal(storageRefs.get('analyticsCashUseDetail').value, 5)
+  assert.equal(store.cashUseSeries.detailLevel, 5)
+  assert.deepEqual(JSON.parse(JSON.stringify(store.cashUseSeries)), baselineSeries)
+
+  store.cashUseDetail = 'threshold'
+  await nextTick()
+
+  assert.equal(store.cashUseDetail, 5)
+  assert.equal(storageRefs.get('analyticsCashUseDetail').value, 5)
+  assert.equal(store.cashUseSeries.detailLevel, 5)
+  assert.deepEqual(JSON.parse(JSON.stringify(store.cashUseSeries)), baselineSeries)
 })
 
 test('keeps Amount-mode graph output unchanged when pass-through treatment is disabled', async () => {
