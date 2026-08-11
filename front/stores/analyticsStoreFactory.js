@@ -9,6 +9,7 @@ import {
   convertAnalyticsAmount,
   getAnalyticsAccountKind,
   limitMoneyFlowGraphDetail,
+  orderMoneyFlowGraph,
   rankCategoryIds,
   summarizeBalanceMovements,
   summarizeCategoryWindow,
@@ -22,7 +23,8 @@ const BALANCE_GROUPS = ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'
 const RECONSTRUCTED_METRICS = ['netWorth', 'savings', 'savingsIncluded', 'savingsExcluded', 'debt', 'expenses']
 const SAVINGS_VIEWS = ['combined', 'split']
 const FINANCIAL_TREND_VIEWS = ['balances', 'changes']
-const MONEY_FLOW_DETAIL_LEVELS = [5, 10, 'all']
+const MONEY_FLOW_DETAIL_LEVELS = [5, 10, 'all', 'threshold']
+const MONEY_FLOW_ORDERS = ['amount', 'type']
 const CASH_USE_MODES = ['spending', 'full']
 const DAILY_FORECAST_PERIODS = [3, 6, 12]
 const DAILY_FLOW_KEYS = ['income', 'refunds', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt']
@@ -403,6 +405,10 @@ export function createAnalyticsStore(id, useDependencies) {
     const storedVisibleBalanceMetrics = useStoredValue('analyticsVisibleBalanceTotalMetrics', balanceMetricIdsForSavingsView('combined'))
     const storedFinancialTrendView = useStoredValue('analyticsFinancialTrendView', 'balances')
     const storedGraphDetail = useStoredValue('analyticsMoneyFlowDetail', 5)
+    const storedMoneyFlowOrder = useStoredValue('analyticsMoneyFlowOrder', 'amount')
+    const storedMoneyFlowMinimumAmount = useStoredValue('analyticsMoneyFlowMinimumAmount', 0)
+    const storedPassThroughAccountIds = useStoredValue('analyticsPassThroughAccountIds', [])
+    const storedMoneyFlowPassThroughEnabled = useStoredValue('analyticsMoneyFlowUsePassThrough', false)
     const storedCashUseMode = useStoredValue('analyticsCashUseMode', 'spending')
     const storedCashUseDetail = useStoredValue('analyticsCashUseDetail', 5)
     const storedDailyForecastMonths = useStoredValue('analyticsDailyForecastMonths', 6)
@@ -447,11 +453,43 @@ export function createAnalyticsStore(id, useDependencies) {
       },
     })
     const normalizeGraphDetail = (detailLevel) => (MONEY_FLOW_DETAIL_LEVELS.includes(detailLevel) ? detailLevel : 5)
+    const normalizeMoneyFlowMinimumAmount = (value) => {
+      const amount = Number(value)
+      return Number.isFinite(amount) && amount >= 0 ? amount : null
+    }
+    const normalizePassThroughAccountIds = (ids) => [...new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))]
     if (!MONEY_FLOW_DETAIL_LEVELS.includes(storedGraphDetail.value)) storedGraphDetail.value = 5
+    if (!MONEY_FLOW_ORDERS.includes(storedMoneyFlowOrder.value)) storedMoneyFlowOrder.value = 'amount'
+    if (normalizeMoneyFlowMinimumAmount(storedMoneyFlowMinimumAmount.value) === null) storedMoneyFlowMinimumAmount.value = 0
     const graphDetail = computed({
       get: () => normalizeGraphDetail(storedGraphDetail.value),
       set: (detailLevel) => {
         storedGraphDetail.value = normalizeGraphDetail(detailLevel)
+      },
+    })
+    const moneyFlowOrder = computed({
+      get: () => (MONEY_FLOW_ORDERS.includes(storedMoneyFlowOrder.value) ? storedMoneyFlowOrder.value : 'amount'),
+      set: (value) => {
+        storedMoneyFlowOrder.value = MONEY_FLOW_ORDERS.includes(value) ? value : 'amount'
+      },
+    })
+    const moneyFlowMinimumAmount = computed({
+      get: () => normalizeMoneyFlowMinimumAmount(storedMoneyFlowMinimumAmount.value) ?? 0,
+      set: (value) => {
+        const normalizedValue = normalizeMoneyFlowMinimumAmount(value)
+        if (normalizedValue !== null) storedMoneyFlowMinimumAmount.value = normalizedValue
+      },
+    })
+    const passThroughAccountIds = computed({
+      get: () => normalizePassThroughAccountIds(storedPassThroughAccountIds.value),
+      set: (ids) => {
+        storedPassThroughAccountIds.value = normalizePassThroughAccountIds(ids)
+      },
+    })
+    const moneyFlowPassThroughEnabled = computed({
+      get: () => storedMoneyFlowPassThroughEnabled.value === true,
+      set: (value) => {
+        storedMoneyFlowPassThroughEnabled.value = value === true
       },
     })
     const cashUseMode = computed({
@@ -720,21 +758,42 @@ export function createAnalyticsStore(id, useDependencies) {
         ...persistedSelectedCategoryIds.value.filter((id) => !candidateIds.has(id)).map((id) => ({ id, amount: categoryBlockingTransactionIds.value.length ? null : 0 })),
       ]
     })
+    const eligiblePassThroughAccounts = computed(() =>
+      accounts.value
+        .filter((account) => account?.attributes?.active === true && getAnalyticsAccountKind(account) === 'available')
+        .sort((left, right) => String(left.id).localeCompare(String(right.id))),
+    )
+    const effectivePassThroughAccountIds = computed(() => {
+      const eligibleIds = new Set(eligiblePassThroughAccounts.value.map(({ id }) => String(id)))
+      return passThroughAccountIds.value.filter((id) => eligibleIds.has(id))
+    })
     const selectedFullFlow = computed(() => {
       return buildMonthlyMoneyFlow({
         entries: ledger.value.entries,
         monthKey: format(selectedFlowMonth.value, 'yyyy-MM'),
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
         savingsView: savingsView.value,
+        passThroughAccountIds: effectivePassThroughAccountIds.value,
+        passThroughEnabled: moneyFlowPassThroughEnabled.value && effectivePassThroughAccountIds.value.length > 0,
       })
     })
     const selectedFlow = computed(() => {
       const fullGraph = selectedFullFlow.value
-      const graph = limitMoneyFlowGraphDetail({ graph: fullGraph, detailLevel: graphDetail.value })
+      const graph = orderMoneyFlowGraph({
+        graph: limitMoneyFlowGraphDetail({ graph: fullGraph, detailLevel: graphDetail.value, minimumAmount: moneyFlowMinimumAmount.value }),
+        orderMode: moneyFlowOrder.value,
+      })
       return {
         ...graph,
         details: { nodes: fullGraph.nodes, links: fullGraph.links },
-        meta: { ...fullGraph.meta, detailLevel: graphDetail.value },
+        meta: {
+          ...fullGraph.meta,
+          detailLevel: graphDetail.value,
+          order: moneyFlowOrder.value,
+          minimumAmount: moneyFlowMinimumAmount.value,
+          passThroughAccountIds: effectivePassThroughAccountIds.value,
+          passThroughEnabled: moneyFlowPassThroughEnabled.value && effectivePassThroughAccountIds.value.length > 0,
+        },
       }
     })
     const flowMonthMin = computed(() => (rawSnapshot.value.transactionCoverage?.startMonth ? startOfMonth(parseISO(rawSnapshot.value.transactionCoverage.startMonth + '-01')) : null))
@@ -1149,6 +1208,12 @@ export function createAnalyticsStore(id, useDependencies) {
       visibleBalanceMetrics,
       visibleFinancialMetrics,
       graphDetail,
+      moneyFlowOrder,
+      moneyFlowMinimumAmount,
+      passThroughAccountIds,
+      eligiblePassThroughAccounts,
+      effectivePassThroughAccountIds,
+      moneyFlowPassThroughEnabled,
       cashUseMode,
       cashUseDetail,
       dailyForecastMonths,

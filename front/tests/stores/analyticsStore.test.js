@@ -686,6 +686,140 @@ test('repairs graph detail and derives layered flow with the shared savings view
   assert.equal(store.selectedFlow.meta.detailLevel, 'all')
 })
 
+test('persists and applies normalized Money Flow account-role settings without changing shared analytics projections', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const payroll = { ...analyticsAccount('payroll', 'asset', 'defaultAsset', true), attributes: { ...analyticsAccount('payroll', 'asset', 'defaultAsset', true).attributes, name: 'Payroll' } }
+  const hysa = { ...analyticsAccount('hysa', 'asset', 'savingAsset', true), attributes: { ...analyticsAccount('hysa', 'asset', 'savingAsset', true).attributes, name: 'High yield savings' } }
+  const closed = {
+    ...analyticsAccount('closed', 'asset', 'defaultAsset', true),
+    attributes: { ...analyticsAccount('closed', 'asset', 'defaultAsset', true).attributes, active: false, name: 'Closed' },
+  }
+  const loan = { ...analyticsAccount('loan', 'liabilities'), attributes: { ...analyticsAccount('loan', 'liabilities').attributes, name: 'Loan' } }
+  const wallet = { ...analyticsAccount('wallet', 'cash'), attributes: { ...analyticsAccount('wallet', 'cash').attributes, name: 'Wallet' } }
+  const revenue = analyticsAccount('revenue', 'revenue')
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [payroll, hysa, closed, loan, wallet, revenue, expense]
+  transactionResult = [
+    dailyTransaction({ id: 'income', date: '2026-08-05', amount: 200, source: revenue, destination: payroll }),
+    dailyTransaction({ id: 'food', date: '2026-08-06', amount: 125.5, source: payroll, destination: expense, categoryId: 'food' }),
+    dailyTransaction({ id: 'small-food', date: '2026-08-07', amount: 10, source: payroll, destination: expense, categoryId: 'small-food' }),
+    dailyTransaction({ id: 'small-utility', date: '2026-08-08', amount: 8, source: payroll, destination: expense, categoryId: 'small-utility' }),
+  ]
+  storageOverrides.set('analyticsMoneyFlowOrder', 'type')
+  storageOverrides.set('analyticsMoneyFlowDetail', 'threshold')
+  storageOverrides.set('analyticsMoneyFlowMinimumAmount', 125.5)
+  storageOverrides.set('analyticsPassThroughAccountIds', ['payroll', 'payroll', 'missing', 'hysa', ''])
+  storageOverrides.set('analyticsMoneyFlowUsePassThrough', true)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(
+    store.eligiblePassThroughAccounts.map(({ id }) => id),
+    ['payroll', 'wallet'],
+  )
+  assert.deepEqual(store.passThroughAccountIds, ['payroll', 'missing', 'hysa'])
+  assert.deepEqual(store.effectivePassThroughAccountIds, ['payroll'])
+  assert.equal(store.moneyFlowOrder, 'type')
+  assert.equal(store.graphDetail, 'threshold')
+  assert.equal(store.moneyFlowMinimumAmount, 125.5)
+  assert.equal(store.moneyFlowPassThroughEnabled, true)
+  assert.deepEqual(store.selectedFlow.meta.passThroughAccountIds, ['payroll'])
+  assert.equal(store.selectedFlow.meta.passThroughEnabled, true)
+  assert.equal(store.selectedFlow.meta.minimumAmount, 125.5)
+  assert.equal(
+    store.selectedFlow.details.nodes.some(({ id, kind }) => kind === 'expenseCategory' && ['expense:small-food', 'expense:small-utility'].includes(id)),
+    true,
+  )
+  assert.equal(
+    store.selectedFlow.nodes.some(({ kind }) => kind === 'otherExpenseCategory'),
+    true,
+  )
+
+  const sharedProjectionBefore = JSON.parse(
+    JSON.stringify({
+      ledger: store.ledger,
+      balances: store.balanceSeries,
+      forecast: store.financialTrend.forecast,
+      cashUse: store.cashUseSeries,
+      categories: store.categorySummary,
+    }),
+  )
+  const treatmentOn = JSON.parse(JSON.stringify(store.selectedFlow))
+  store.moneyFlowPassThroughEnabled = false
+  await nextTick()
+  const treatmentOff = JSON.parse(JSON.stringify(store.selectedFlow))
+
+  assert.deepEqual(store.passThroughAccountIds, ['payroll', 'missing', 'hysa'])
+  assert.equal(treatmentOff.meta.passThroughEnabled, false)
+  assert.notDeepEqual(treatmentOn.nodes, treatmentOff.nodes)
+  assert.deepEqual(
+    JSON.parse(JSON.stringify({ ledger: store.ledger, balances: store.balanceSeries, forecast: store.financialTrend.forecast, cashUse: store.cashUseSeries, categories: store.categorySummary })),
+    sharedProjectionBefore,
+  )
+})
+
+test('repairs invalid Money Flow settings while keeping valid assignments and raw selections', async () => {
+  storageOverrides.set('analyticsMoneyFlowOrder', 'corrupt')
+  storageOverrides.set('analyticsMoneyFlowDetail', 'corrupt')
+  storageOverrides.set('analyticsMoneyFlowMinimumAmount', -1)
+  storageOverrides.set('analyticsPassThroughAccountIds', ['checking', 'checking', '', null, 'missing'])
+  const store = (analyticsStore = useAnalyticsStore())
+
+  assert.equal(store.moneyFlowOrder, 'amount')
+  assert.equal(store.graphDetail, 5)
+  assert.equal(store.moneyFlowMinimumAmount, 0)
+  assert.deepEqual(store.passThroughAccountIds, ['checking', 'missing'])
+  assert.deepEqual(store.effectivePassThroughAccountIds, [])
+
+  store.moneyFlowMinimumAmount = 12
+  store.moneyFlowMinimumAmount = Number.NaN
+  store.passThroughAccountIds = ['checking', 'checking', '', 'missing', null]
+
+  assert.equal(store.moneyFlowMinimumAmount, 12)
+  assert.deepEqual(store.passThroughAccountIds, ['checking', 'missing'])
+  assert.deepEqual(store.effectivePassThroughAccountIds, [])
+
+  await store.init()
+
+  assert.deepEqual(store.effectivePassThroughAccountIds, ['checking'])
+})
+
+test('repairs an initially non-finite Money Flow threshold to zero', () => {
+  storageOverrides.set('analyticsMoneyFlowMinimumAmount', Number.NaN)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  assert.equal(store.moneyFlowMinimumAmount, 0)
+})
+
+test('keeps Amount-mode graph output unchanged when pass-through treatment is disabled', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  const payroll = analyticsAccount('payroll', 'asset', 'defaultAsset', true)
+  const revenue = analyticsAccount('revenue', 'revenue')
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [payroll, revenue, expense]
+  transactionResult = [
+    dailyTransaction({ id: 'income', date: '2026-08-05', amount: 200, source: revenue, destination: payroll }),
+    dailyTransaction({ id: 'food', date: '2026-08-06', amount: 125.5, source: payroll, destination: expense, categoryId: 'food' }),
+  ]
+  storageOverrides.set('analyticsMoneyFlowOrder', 'amount')
+  storageOverrides.set('analyticsPassThroughAccountIds', ['payroll'])
+  storageOverrides.set('analyticsMoneyFlowUsePassThrough', false)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const disabledGraph = JSON.parse(JSON.stringify({ nodes: store.selectedFlow.nodes, links: store.selectedFlow.links }))
+  store.$dispose()
+  setActivePinia(createPinia())
+  storageOverrides.clear()
+  const baselineStore = (analyticsStore = useAnalyticsStore())
+
+  await baselineStore.init()
+
+  assert.deepEqual(disabledGraph, { nodes: baselineStore.selectedFlow.nodes, links: baselineStore.selectedFlow.links })
+})
+
 test('limits only visible flow detail while retaining full audit and transaction details', async () => {
   transactionResult = [70, 60, 50, 40, 30, 20, 10].map((amount, index) => currentExpenseTransaction(amount, `category-${index + 1}`))
   const store = (analyticsStore = useAnalyticsStore())
