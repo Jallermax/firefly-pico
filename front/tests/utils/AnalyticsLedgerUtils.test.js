@@ -13,7 +13,7 @@ const account = ({ id, type, role = null, includeNetWorth = true, balance = '0' 
   },
 })
 
-const split = ({ journalId, amount, date, source, destination, categoryId = null, tags = [], currencyCode = 'USD', primaryAmount = null }) => ({
+const split = ({ journalId, amount, date, source, destination, categoryId = null, description = null, tags = [], currencyCode = 'USD', primaryAmount = null }) => ({
   transaction_journal_id: journalId,
   amount: String(amount),
   primary_amount: primaryAmount,
@@ -22,6 +22,7 @@ const split = ({ journalId, amount, date, source, destination, categoryId = null
   source_id: source.id,
   destination_id: destination.id,
   category_id: categoryId,
+  description,
   tags,
 })
 
@@ -54,7 +55,9 @@ const build = ({ transactions, transactionLinks = [], linkTypes = [], ledgerAcco
 test('normalizes each split with stable provenance and fresh account roles', () => {
   const ledger = build({
     transactions: [
-      transaction('expense-group', [split({ journalId: 'purchase-journal', amount: 100, date: '2026-01-15', source: checking, destination: expense, categoryId: 'food' })]),
+      transaction('expense-group', [
+        split({ journalId: 'purchase-journal', amount: 100, date: '2026-01-15', source: checking, destination: expense, categoryId: 'food', description: 'Grocery split' }),
+      ]),
       transaction('income-group', [split({ journalId: 'income-journal', amount: 200, date: '2026-01-16', source: revenue, destination: checking, categoryId: 'salary' })]),
       transaction('transfer-group', [split({ journalId: 'transfer-journal', amount: 30, date: '2026-01-17', source: checking, destination: creditCard })]),
       transaction('saving-group', [split({ journalId: 'saving-journal', amount: 40, date: '2026-01-18', source: checking, destination: savingsAccessible })]),
@@ -100,6 +103,7 @@ test('normalizes each split with stable provenance and fresh account roles', () 
   )
   assert.equal(ledger.entries[2].destinationAccount.id, 'credit-card')
   assert.equal(ledger.entries[2].destinationKind, 'available')
+  assert.equal(ledger.entries[0].description, 'Grocery split')
   assert.deepEqual(ledger.months['2026-01'], {
     entryIds: ledger.entries.map(({ id }) => id),
     transactionIds: ['expense-group', 'income-group', 'liability-group', 'multi-group', 'restricted-saving-group', 'saving-group', 'transfer-group'],

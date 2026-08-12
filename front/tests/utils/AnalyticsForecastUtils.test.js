@@ -212,6 +212,35 @@ const separatePayrollHistory = ({ latestRegimes = ['current', 'current'], ambigu
     ]
   })
 
+const payrollOccurrenceWithDuplicateContexts = ({ date, sequence, regime = 'old', reimbursement = false, omitTax = null }) => {
+  const values = payrollAmounts[regime]
+  const base = payrollOccurrence({ date, sequence, regime, reimbursement })
+    .filter(({ description }) => description !== 'Payroll taxes')
+    .map((item) => (item.description === 'Expense reimbursement' ? { ...item, categoryId: 'salary' } : item))
+  const sharedTax = (name, ratio) =>
+    entry({
+      id: `payroll-${sequence}-${name}`,
+      transactionId: `payroll-${sequence}-${name}-group`,
+      date,
+      value: values.taxes * ratio,
+      sourceId: 'checking',
+      destinationId: 'tax-authority',
+      categoryId: 'taxes',
+      description: name === 'state-tax' ? 'State payroll tax' : 'Local payroll tax',
+      tags: ['paystub/payroll'],
+    })
+  return separatePayrollTransactions([...base, ...(omitTax === 'state-tax' ? [] : [sharedTax('state-tax', 0.75)]), ...(omitTax === 'local-tax' ? [] : [sharedTax('local-tax', 0.25)])])
+}
+
+const duplicateContextPayrollHistory = ({ missingLatestStateTax = false } = {}) => [
+  ...payrollOccurrenceWithDuplicateContexts({ date: '2026-05-15', sequence: 'may-mid' }),
+  ...payrollOccurrenceWithDuplicateContexts({ date: '2026-05-29', sequence: 'may-end', reimbursement: true }),
+  ...payrollOccurrenceWithDuplicateContexts({ date: '2026-06-15', sequence: 'june-mid' }),
+  ...payrollOccurrenceWithDuplicateContexts({ date: '2026-06-30', sequence: 'june-end', reimbursement: true }),
+  ...payrollOccurrenceWithDuplicateContexts({ date: '2026-07-15', sequence: 'july-mid', regime: 'current' }),
+  ...payrollOccurrenceWithDuplicateContexts({ date: '2026-07-31', sequence: 'july-end', regime: 'current', reimbursement: true, omitTax: missingLatestStateTax ? 'state-tax' : null }),
+]
+
 const payrollHistoryWithIdenticalPhases = () => [
   ...payrollOccurrence({ date: '2026-05-15', sequence: 'may-mid' }),
   ...payrollOccurrence({ date: '2026-05-29', sequence: 'may-end' }),
@@ -663,6 +692,119 @@ test('does not guess employer-sourced companion ownership when same-day payroll 
   assert.ok([...employerContributionIds, ...secondAnchorIds].every((id) => !bundle.entryIds.includes(id)))
   assert.ok([...employerContributionIds, ...secondAnchorIds].every((id) => !ordered.audit.recurring.removedHistoryEntryIds.includes(id)))
   assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+})
+
+test('keeps stable duplicate-context payroll components distinct across the current regime and phase-only reimbursement', () => {
+  const history = duplicateContextPayrollHistory()
+  const input = ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' })
+  const snapshot = structuredClone(input.entries)
+  const ordered = buildRemainingActivityForecast({ ledger: input, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+  const reversed = buildRemainingActivityForecast({ ledger: { ...input, entries: [...input.entries].reverse() }, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+
+  assert.equal(ordered.audit.bundles.length, 1)
+  const bundle = ordered.audit.bundles[0]
+  const projected = ordered.dailyProjectedEntries.filter(({ bundleId }) => bundleId === bundle.id)
+  const amounts = (label) => projected.filter(({ bundleLabel }) => bundleLabel === label).map(({ amount }) => amount)
+
+  assert.deepEqual([...new Set(projected.map(({ date }) => date))], ['2026-08-14', '2026-08-31'])
+  assert.deepEqual(amounts('Base pay'), [3150, 3150])
+  assert.deepEqual(amounts('State payroll tax'), [472.5, 472.5])
+  assert.deepEqual(amounts('Local payroll tax'), [157.5, 157.5])
+  assert.deepEqual(amounts('Expense reimbursement'), [75])
+  assert.equal(projected.find(({ bundleLabel }) => bundleLabel === 'Expense reimbursement').date, '2026-08-31')
+  assert.equal(bundle.regimePolicy, 'latestEquivalentPairAtLeastTwoPercent')
+  assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+  assert.deepEqual(input.entries, snapshot)
+})
+
+test('fulfills duplicate-context payroll only from a complete current phase', () => {
+  const history = duplicateContextPayrollHistory()
+  const completeActual = payrollOccurrenceWithDuplicateContexts({ date: '2026-08-14', sequence: 'august-middle', regime: 'current' })
+  const complete = buildRemainingActivityForecast({
+    ledger: ledger([...history, ...completeActual], { startMonth: '2026-05', endDate: '2026-08-16' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-16',
+    endDate: '2026-08-31',
+  })
+  assert.equal(complete.audit.bundles.length, 1)
+  assert.deepEqual(complete.audit.bundles[0].projectedDates, [{ date: '2026-08-31', phase: 'monthEnd' }])
+  assert.deepEqual(complete.audit.bundles[0].fulfilledPhases, [
+    {
+      phase: 'middle',
+      entryIds: completeActual.map(({ id }) => id).sort(),
+      transactionIds: completeActual.map(({ transactionId }) => transactionId).sort(),
+    },
+  ])
+
+  const incompleteActual = completeActual.filter(({ description }) => description !== 'State payroll tax')
+  const incomplete = buildRemainingActivityForecast({
+    ledger: ledger([...history, ...incompleteActual], { startMonth: '2026-05', endDate: '2026-08-16' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-16',
+    endDate: '2026-08-31',
+  })
+  assert.deepEqual(incomplete.audit.bundles[0].fulfilledPhases, [])
+  assert.deepEqual(incomplete.audit.bundles[0].projectedDates, [{ date: '2026-08-31', phase: 'monthEnd' }])
+})
+
+test('keeps an inconsistent duplicate context out of the bundle instead of shifting ordinal identities', () => {
+  const history = duplicateContextPayrollHistory({ missingLatestStateTax: true })
+  const taxIds = history.filter(({ destinationAccount }) => destinationAccount.id === 'tax-authority').map(({ id }) => id)
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.audit.bundles.length, 1)
+  const bundle = result.audit.bundles[0]
+  assert.equal(
+    bundle.components.some(({ context }) => context.destinationAccountId === 'tax-authority'),
+    false,
+  )
+  assert.equal(
+    result.dailyProjectedEntries.some(({ destinationAccountId }) => destinationAccountId === 'tax-authority'),
+    false,
+  )
+  assert.ok(taxIds.every((id) => !bundle.entryIds.includes(id)))
+  assert.ok(taxIds.every((id) => !result.audit.recurring.removedHistoryEntryIds.includes(id)))
+  assert.ok(result.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => taxIds.includes(id))))
+  assert.ok(bundle.inconsistentComponentKeys.length >= 2)
+})
+
+test('keeps a transaction-linked one-off candidate when only other splits from its legacy group are admitted to payroll', () => {
+  const history = [
+    ...payrollOccurrence({ date: '2026-05-15', sequence: 'may-mid', oneOff: true }),
+    ...payrollOccurrence({ date: '2026-05-29', sequence: 'may-end' }),
+    ...payrollOccurrence({ date: '2026-06-15', sequence: 'june-mid' }),
+    ...payrollOccurrence({ date: '2026-06-30', sequence: 'june-end' }),
+    ...payrollOccurrence({ date: '2026-07-15', sequence: 'july-mid', regime: 'current' }),
+    ...payrollOccurrence({ date: '2026-07-31', sequence: 'july-end', regime: 'current' }),
+  ]
+  const oneOff = history.find(({ description }) => description === 'One-off adjustment')
+  const candidateBase = definedCandidate({ id: 'one-off-specialist', sourceAccountId: 'checking', destinationAccountId: 'specialist', date: '2026-08-20', amount: 777 })
+  const candidate = {
+    ...candidateBase,
+    identity: { ...candidateBase.identity, categoryId: 'one-off', payee: 'one-off adjustment' },
+    evidence: { entryIds: [], transactionIds: [oneOff.transactionId], dates: [oneOff.date] },
+  }
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate], { ...accountContexts, specialist: { kind: 'expense', includeNetWorth: false } }),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.audit.bundles.length, 1)
+  assert.equal(result.audit.bundles[0].entryIds.includes(oneOff.id), false)
+  assert.equal(result.audit.recurring.suppressedCandidateIds.includes(candidate.id), false)
+  assert.equal(result.dailyProjectedEntries.filter(({ candidateId }) => candidateId === candidate.id).length, 1)
 })
 
 test('uses a recency-weighted median with medium confidence when only one payroll occurrence changes', () => {
