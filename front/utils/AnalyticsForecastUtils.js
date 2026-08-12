@@ -687,12 +687,9 @@ const candidateWithMatchedContext = (candidate, entries) => {
 
 const budgetAttribution = ({ explicitBudgetId = null, entries = [] }) => {
   if (explicitBudgetId !== null && explicitBudgetId !== undefined && String(explicitBudgetId)) return { status: 'exact', budgetId: String(explicitBudgetId), budgetIds: [String(explicitBudgetId)] }
-  const budgetIds = unique(
-    entries
-      .map(({ budgetId }) => budgetId)
-      .filter(Boolean)
-      .map(String),
-  ).sort()
+  const memberships = entries.map(({ budgetId }) => (budgetId === null || budgetId === undefined || !String(budgetId) ? null : String(budgetId)))
+  const budgetIds = unique(memberships.filter((budgetId) => budgetId !== null)).sort()
+  if (memberships.some((budgetId) => budgetId === null)) return { status: 'incomplete', budgetId: null, budgetIds, missingMembership: true }
   if (budgetIds.length === 1) return { status: 'exact', budgetId: budgetIds[0], budgetIds }
   if (budgetIds.length > 1) return { status: 'ambiguous', budgetId: null, budgetIds }
   return { status: 'unassigned', budgetId: null, budgetIds: [] }
@@ -1181,6 +1178,14 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
   const { plans, conflictingPlanIds } = normalizedBudgetPlans(budgetPlans)
   const planById = new Map(plans.map((plan) => [plan.id, plan]))
   const conflictingPlanIdSet = new Set(conflictingPlanIds)
+  const incompleteAttributions = [
+    ...new Map(
+      projectedEntries
+        .filter(({ budgetAttribution: attribution }) => attribution?.status === 'incomplete')
+        .map(({ candidateId, budgetAttribution: attribution }) => [String(candidateId), { candidateId: String(candidateId), budgetIds: [...attribution.budgetIds], missingMembership: true }]),
+    ).values(),
+  ].sort((left, right) => left.candidateId.localeCompare(right.candidateId))
+  const incompleteBudgetIdSet = new Set(incompleteAttributions.flatMap(({ budgetIds }) => budgetIds))
   const groups = new Map()
   const ensureGroup = ({ key, budgetId = null, categoryId = null, context = null, budgetAttribution: groupBudgetAttribution = null }) => {
     const group = groups.get(key) ?? {
@@ -1238,7 +1243,8 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
       const samples = months.map((month) => group.monthly[month])
       const historySufficient = historyReady && months.length >= 3 && months.every((month) => group.observedMonths.has(month))
       const historical = historySufficient ? roundAmount(median(samples), currencyDecimalPlaces) : null
-      const selectedPlan = plan?.type === 'reset' ? plan.amount : null
+      const attributionIncomplete = incompleteBudgetIdSet.has(group.budgetId)
+      const selectedPlan = !attributionIncomplete && plan?.type === 'reset' ? plan.amount : null
       const expected = historySufficient ? historical : selectedPlan
       const variableRemaining = Number.isFinite(expected) ? roundAmount(Math.max(0, expected - group.actual), currencyDecimalPlaces) : 0
       return {
@@ -1249,7 +1255,7 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
         known: group.known,
         historical,
         plan: plan?.amount ?? null,
-        planStatus: conflictingPlanIdSet.has(group.budgetId) ? 'conflicting' : plan ? 'ready' : 'none',
+        planStatus: conflictingPlanIdSet.has(group.budgetId) ? 'conflicting' : attributionIncomplete ? 'attributionIncomplete' : plan ? 'ready' : 'none',
         expected,
         remaining: roundAmount(variableRemaining + group.known, currencyDecimalPlaces),
         confidence: historySufficient ? 'high' : Number.isFinite(selectedPlan) ? 'low' : 'insufficient',
@@ -1266,7 +1272,7 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
         planStatus === 'conflicting' || evidenceIds.length > 0 || [actual, known, historical, plan, remaining].some((value) => Number.isFinite(value) && value !== 0),
     )
     .sort((left, right) => left.id.localeCompare(right.id))
-  return { envelopes, conflictingPlanIds }
+  return { envelopes, conflictingPlanIds, incompleteAttributions }
 }
 
 export function summarizeProjectedSources(sources = [], evidencePreviewLimit = 8) {
@@ -1767,7 +1773,10 @@ export function buildRemainingActivityForecast({
         samples: historyReady ? historySamples : null,
         variableRemainderSamples: historyReady ? Object.fromEntries(variableEnvelopes.map((envelope) => [envelope.id, envelope.historySamples])) : null,
       },
-      budgets: { conflictingPlanIds: variableEnvelopeResult.conflictingPlanIds },
+      budgets: {
+        conflictingPlanIds: variableEnvelopeResult.conflictingPlanIds,
+        ...(variableEnvelopeResult.incompleteAttributions.length > 0 ? { incompleteAttributions: variableEnvelopeResult.incompleteAttributions } : {}),
+      },
       recurring: {
         fulfilledExpectedIds: recurring.fulfilled.map(({ expectedId }) => expectedId).sort(),
         remainingExpectedIds: recurring.remaining.map(({ expectedId }) => expectedId).sort(),
