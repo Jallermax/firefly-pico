@@ -3638,6 +3638,88 @@ const dailyForecastSfcFixture = (overrides = {}) => ({
   ...overrides,
 })
 
+test('renders known gross payroll inflow when another source metric is unavailable without changing the Available chart path', async () => {
+  const availableLine = {
+    labelKey: 'analytics.daily_forecast.available_change',
+    openingValue: 0,
+    excludesVariableEnvelope: true,
+    points: [
+      { x: '2026-08-14', value: 2520, kind: 'forecast' },
+      { x: '2026-08-31', value: 5040, kind: 'forecast' },
+    ],
+  }
+  const payrollEvent = (date) => ({
+    id: `payroll:${date}`,
+    date,
+    sourceKind: 'inferred',
+    bundleLabel: 'Payroll',
+    availableCashChange: 2520,
+    confidence: { level: 'high' },
+    sourceIds: ['bundle:payroll'],
+    candidateIds: [],
+    evidenceIds: ['bundle:payroll'],
+    components: [{ id: `salary:${date}`, bundleLabel: 'Base pay', flowAmounts: { income: 3150 } }],
+  })
+  const dailyForecast = dailyForecastSfcFixture({
+    dateKeys: ['2026-08-14', '2026-08-31'],
+    barGroups: [
+      {
+        id: 'inflow',
+        direction: 'sources',
+        labelKey: 'analytics.daily_forecast.inflow',
+        points: [
+          { x: '2026-08-14', value: 3150 },
+          { x: '2026-08-31', value: 3150 },
+        ],
+      },
+      { id: 'outflow', direction: 'uses', labelKey: 'analytics.daily_forecast.outflow', points: [] },
+    ],
+    availableLine,
+    monthlyTotals: {
+      components: { income: 6300, refunds: null, expenses: 1260, savingsDeposits: 0, savingsWithdrawals: 0, debtRepayments: 0, newDebt: 0 },
+    },
+    summary: {
+      inflow: { actual: null, projected: null, final: null, status: 'unavailable' },
+      outflow: { actual: 0, projected: 1260, final: 1260, status: 'ready' },
+      availableChange: { actual: 0, projected: 5040, final: 5040, status: 'ready' },
+    },
+    eventSummaries: [payrollEvent('2026-08-14'), payrollEvent('2026-08-31')],
+    state: {
+      status: 'ready',
+      forecastStatus: 'partial',
+      isStale: false,
+      isBlockingUnavailable: false,
+      isPartiallyUnavailable: true,
+      unavailableTransactionIds: [],
+      unclassifiedTransactionIds: [],
+      sourceErrors: [],
+      unavailableEvidenceSummary: { count: 1, previewIds: ['unavailable:refund'], omittedCount: 0 },
+    },
+  })
+  const component = loadAnalyticsDailyComponent({ dailyForecast })
+  const render = component.setup({}, { expose: () => {} })
+  const tree = render({ $t: (key, values = {}) => (values.level ? `${key}:${values.level}` : key) }, [])
+  const chart = findVNodes(tree, (node) => node.props?.onSelect)[0]
+
+  assert.deepEqual(chart.props.series.availableLine.points, availableLine.points)
+  assert.equal(chart.props.series.availableLine.openingValue, 0)
+  assert.equal(chart.props.series.availableLine.excludesVariableEnvelope, true)
+
+  const app = createSSRApp(component)
+  app.config.globalProperties.$t = (key, values = {}) => (values.level ? `${key}:${values.level}` : key)
+  const stub = {
+    setup:
+      (_, { slots }) =>
+      () =>
+        h('div', slots.default?.()),
+  }
+  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-tabs', 'analytics-combination-chart']) app.component(name, stub)
+  const html = await renderToString(app)
+
+  assert.match(html, /analytics\.daily_forecast\.expected_inflow[\s\S]*?6300 USD/)
+  assert.doesNotMatch(html, /analytics\.daily_forecast\.expected_inflow[\s\S]*?<strong>—<\/strong>/)
+})
+
 test('derives event detail rows from real flow data without guessing semantics from human labels', async () => {
   const component = loadAnalyticsDailyComponent({
     dailyForecast: dailyForecastSfcFixture({
