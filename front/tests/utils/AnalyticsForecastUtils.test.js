@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildRemainingActivityForecast as buildForecastCore, projectMetricForecast as projectMetricForecastCore, summarizeProjectedSources } from '../../utils/AnalyticsForecastUtils.js'
+import {
+  buildRemainingActivityForecast as buildForecastCore,
+  classifyForecastFlowAmounts,
+  projectMetricForecast as projectMetricForecastCore,
+  summarizeProjectedSources,
+} from '../../utils/AnalyticsForecastUtils.js'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
 import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
 
@@ -230,8 +235,15 @@ const payrollHistoryWithExpandedCurrentRegime = () => {
   return [...history, ...newDeductions]
 }
 
+const withExcludedPayrollAccount = (items) =>
+  items.map((item) => ({
+    ...item,
+    sourceAccount: item.sourceAccount.id === 'checking' ? endpoint('payroll', 'available', false) : item.sourceAccount,
+    destinationAccount: item.destinationAccount.id === 'checking' ? endpoint('payroll', 'available', false) : item.destinationAccount,
+  }))
+
 const payrollHistoryWithReconciliationVariance = () =>
-  separatePayrollHistory().map((item) =>
+  withExcludedPayrollAccount(separatePayrollHistory()).map((item) =>
     item.description === 'Internal allocation' && item.date === '2026-07-15'
       ? { ...item, value: 726 }
       : item.description === 'Internal allocation' && item.date === '2026-07-31'
@@ -785,7 +797,7 @@ test('uses an expanded equivalent latest payroll pair as the current regime', ()
   assert.deepEqual(input.entries, snapshot)
 })
 
-test('ignores reconciliation-only amount variance when selecting the latest payroll regime', () => {
+test('ignores net-worth-only allocation variance when selecting the latest payroll regime', () => {
   const history = payrollHistoryWithReconciliationVariance()
   const input = ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' })
   const snapshot = structuredClone(input.entries)
@@ -797,7 +809,12 @@ test('ignores reconciliation-only amount variance when selecting the latest payr
   const projected = ordered.dailyProjectedEntries.filter(({ bundleId }) => bundleId === bundle.id)
   const amounts = (label) => projected.filter(({ bundleLabel }) => bundleLabel === label).map(({ amount }) => amount)
   const internalIds = history.filter(({ description }) => description === 'Internal allocation').map(({ id }) => id)
+  const internalFlow = classifyForecastFlowAmounts({ entry: history.find(({ id }) => id === 'payroll-july-mid-internal-transfer'), currencyDecimalPlaces: 2 })
 
+  assert.equal(internalFlow.sourceIncluded, false)
+  assert.equal(internalFlow.destinationIncluded, true)
+  assert.equal(internalFlow.flowAmounts.netWorthChange, 726)
+  assert.ok(['income', 'refunds', 'expenses', 'savingsDeposits', 'savingsWithdrawals', 'debtRepayments', 'newDebt'].every((metric) => internalFlow.flowAmounts[metric] === 0))
   assert.equal(bundle.regimePolicy, 'latestEquivalentPairAtLeastTwoPercent')
   assert.equal(bundle.confidence.level, 'high')
   assert.deepEqual(amounts('Base pay'), [3150, 3150])
@@ -806,7 +823,11 @@ test('ignores reconciliation-only amount variance when selecting the latest payr
   const internalComponent = bundle.components.find(({ label }) => label === 'Internal allocation')
   assert.equal(internalComponent.reconciliationOnly, true)
   assert.equal(internalComponent.amount, 726)
-  assert.deepEqual(amounts('Internal allocation'), [])
+  assert.deepEqual(amounts('Internal allocation'), [726, 726])
+  assert.deepEqual(
+    projected.filter(({ bundleLabel }) => bundleLabel === 'Internal allocation').map(({ flowAmounts }) => flowAmounts.netWorthChange),
+    [726, 726],
+  )
   assert.ok(internalIds.every((id) => bundle.entryIds.includes(id)))
   assert.ok(internalIds.every((id) => ordered.audit.recurring.removedHistoryEntryIds.includes(id)))
   assert.equal(
@@ -817,9 +838,9 @@ test('ignores reconciliation-only amount variance when selecting the latest payr
   assert.deepEqual(input.entries, snapshot)
 })
 
-test('fulfills the current payroll phase when only a reconciliation-only amount varies', () => {
+test('fulfills the current payroll phase when only a net-worth-only allocation amount varies', () => {
   const history = payrollHistoryWithReconciliationVariance()
-  const actual = separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' })).map((item) =>
+  const actual = withExcludedPayrollAccount(separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' }))).map((item) =>
     item.description === 'Internal allocation' ? { ...item, value: 744 } : item,
   )
   const result = buildRemainingActivityForecast({
@@ -846,9 +867,11 @@ test('fulfills the current payroll phase when only a reconciliation-only amount 
   )
 })
 
-test('does not fulfill the current payroll phase when a reconciliation-only component is missing', () => {
+test('does not fulfill the current payroll phase when a net-worth-only allocation is missing', () => {
   const history = payrollHistoryWithReconciliationVariance()
-  const actual = separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' })).filter(({ description }) => description !== 'Internal allocation')
+  const actual = withExcludedPayrollAccount(separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' }))).filter(
+    ({ description }) => description !== 'Internal allocation',
+  )
   const result = buildRemainingActivityForecast({
     ledger: ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-10' }),
     candidates: [],
@@ -864,24 +887,30 @@ test('does not fulfill the current payroll phase when a reconciliation-only comp
   ])
 })
 
-test('does not fulfill the current payroll phase when a material component amount differs', () => {
+test('does not fulfill the current payroll phase when an expense, savings, or debt amount differs', () => {
   const history = payrollHistoryWithReconciliationVariance()
-  const actual = separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' })).map((item) =>
-    item.description === 'Payroll taxes' ? { ...item, value: item.value + 12 } : item.description === 'Internal allocation' ? { ...item, value: 744 } : item,
-  )
-  const result = buildRemainingActivityForecast({
-    ledger: ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-10' }),
-    candidates: [],
-    historyMonths: 3,
-    today: '2026-08-10',
-    endDate: '2026-08-31',
-  })
+  for (const changedLabel of ['Payroll taxes', 'Savings deduction', 'Debt deduction']) {
+    const actual = withExcludedPayrollAccount(separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: `august-middle-${changedLabel}`, regime: 'current' }))).map((item) =>
+      item.description === changedLabel ? { ...item, value: item.value + 12 } : item.description === 'Internal allocation' ? { ...item, value: 744 } : item,
+    )
+    const result = buildRemainingActivityForecast({
+      ledger: ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-10' }),
+      candidates: [],
+      historyMonths: 3,
+      today: '2026-08-10',
+      endDate: '2026-08-31',
+    })
 
-  assert.deepEqual(result.audit.bundles[0].fulfilledPhases, [])
-  assert.deepEqual(result.audit.bundles[0].projectedDates, [
-    { date: '2026-08-14', phase: 'middle' },
-    { date: '2026-08-31', phase: 'monthEnd' },
-  ])
+    assert.deepEqual(result.audit.bundles[0].fulfilledPhases, [], changedLabel)
+    assert.deepEqual(
+      result.audit.bundles[0].projectedDates,
+      [
+        { date: '2026-08-14', phase: 'middle' },
+        { date: '2026-08-31', phase: 'monthEnd' },
+      ],
+      changedLabel,
+    )
+  }
 })
 
 test('fulfills duplicate-context payroll only from a complete current phase', () => {
