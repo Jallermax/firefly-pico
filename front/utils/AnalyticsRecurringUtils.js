@@ -453,10 +453,11 @@ const cadenceFromDefinition = ({ attributes, repetition = {}, dates, sourceType 
   return null
 }
 
-const subscriptionPaidDates = (attributes) => [...(attributes.paid_dates ?? []), ...(attributes.pay_dates ?? [])]
+const subscriptionScheduleDates = (attributes) => [...(attributes.pay_dates ?? []), attributes.next_expected_match]
+const subscriptionPaidEvidence = (attributes) => [...(attributes.paid_dates ?? [])]
 
 const datesFromDefinition = ({ attributes, repetition = null, sourceType }) => {
-  const values = repetition ? (repetition.occurrences ?? []) : sourceType === 'subscription' ? [...subscriptionPaidDates(attributes), attributes.next_expected_match] : (attributes.occurrences ?? [])
+  const values = repetition ? (repetition.occurrences ?? []) : sourceType === 'subscription' ? subscriptionScheduleDates(attributes) : (attributes.occurrences ?? [])
   return unique(values.map(dateKey)).sort()
 }
 
@@ -670,7 +671,7 @@ const definedCandidate = ({ item, sourceType, startDate, endDate, schedule, incl
     sourceType === 'subscription'
       ? expectedAmount({ value: attributes.pc_amount_avg ?? attributes.amount_avg, min: attributes.pc_amount_min ?? attributes.amount_min, max: attributes.pc_amount_max ?? attributes.amount_max })
       : expectedAmount({ value: transaction.amount ?? attributes.amount })
-  const paidDates = subscriptionPaidDates(attributes)
+  const paidDates = sourceType === 'subscription' ? subscriptionPaidEvidence(attributes) : []
   const paidTransactionIds = unique(paidDates.map((item) => idOf(item?.transaction_group_id))).sort()
   const definitionAudit = {
     authoritativeOccurrenceDates: [...schedule.dates],
@@ -895,6 +896,14 @@ const currentExpectedDates = (candidate, today) => {
   return definedDates.length ? definedDates : datesForCadence({ cadence: candidate.cadence, startDate: boundedStart, endDate: boundedEnd })
 }
 
+const hasCurrentCyclePaidEvidence = (candidate, today) => {
+  const start = currentMonthStart(today)
+  return (candidate.evidence?.dates ?? []).some((date) => {
+    const paidDate = dateKey(date)
+    return paidDate && paidDate >= start && paidDate <= today
+  })
+}
+
 const entryMatches = (candidate, entry) => {
   const identity = identityOf(entry)
   if (candidate.identityVariants?.length) {
@@ -947,9 +956,16 @@ export function matchRecurringOccurrences({ candidates = [], actualEntries = [],
   const matchedCandidates = [...candidates]
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((candidate) => {
-      const occurrences = currentExpectedDates(candidate, todayKey).map((expectedDate) => {
-        const bundleMatch = splitBundleMatch({ candidate, actual, expectedDate, usedEntries })
+      const evidenceTransactionIds = new Set(unique(candidate.evidence?.transactionIds ?? []))
+      const linkedEntries = () => actual.filter((entry) => !usedEntries.has(entry.id) && evidenceTransactionIds.has(idOf(entry.transactionId)))
+      const expectedDates = linkedEntries().length || !hasCurrentCyclePaidEvidence(candidate, todayKey) ? currentExpectedDates(candidate, todayKey) : []
+      const occurrences = expectedDates.map((expectedDate) => {
+        const linkedMatches = linkedEntries()
+        const exactMatch = linkedMatches.filter((entry) => entryMatches(candidate, entry))
+        const exactMatches = exactMatch.length ? exactMatch : linkedMatches
+        const bundleMatch = exactMatches.length ? [] : splitBundleMatch({ candidate, actual, expectedDate, usedEntries })
         const match =
+          exactMatches[0] ??
           bundleMatch[0] ??
           actual
             .filter((entry) => !usedEntries.has(entry.id) && entryMatches(candidate, entry) && Math.abs(daysBetween(expectedDate, entry.date)) <= (candidate.matching?.dateWindowDays ?? 4))
@@ -959,7 +975,7 @@ export function matchRecurringOccurrences({ candidates = [], actualEntries = [],
                 left.date.localeCompare(right.date) ||
                 String(left.id).localeCompare(String(right.id)),
             )[0]
-        const actualMatches = bundleMatch.length > 0 ? bundleMatch : match ? [match] : []
+        const actualMatches = exactMatches.length ? exactMatches : bundleMatch.length > 0 ? bundleMatch : match ? [match] : []
         const occurrence = {
           expectedId: `expected:${candidate.id}:${expectedDate}`,
           candidateId: candidate.id,

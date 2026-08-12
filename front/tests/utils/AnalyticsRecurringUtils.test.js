@@ -96,7 +96,8 @@ test('recovers missing subscription account identity only from consistent linked
           name: 'Rent',
           repeat_freq: 'monthly',
           amount_avg: '100',
-          pay_dates: [{ date: '2026-07-01', transaction_group_id: 'paid-rent' }],
+          pay_dates: ['2026-07-01'],
+          paid_dates: [{ date: '2026-07-01', transaction_group_id: 'paid-rent' }],
           next_expected_match: '2026-08-01',
         },
       },
@@ -124,6 +125,95 @@ test('recovers missing subscription account identity only from consistent linked
     entries: [paidRent, entry({ id: 'paid-rent', date: '2026-07-01', sourceId: 'credit-card', destinationId: 'landlord', categoryId: 'housing', description: 'Landlord' })],
   })
   assert.equal(conflicting[0].identity.sourceAccountId, null)
+})
+
+test('keeps paid subscription dates as evidence instead of scheduled occurrences', () => {
+  const [candidate] = buildDefinedOccurrences({
+    subscriptions: [
+      {
+        id: 'subscription-rent',
+        attributes: {
+          active: true,
+          name: 'Rent',
+          repeat_freq: 'monthly',
+          amount_min: '2321',
+          amount_max: '2321',
+          amount_avg: '2321',
+          pay_dates: ['2026-09-02T00:00:00-04:00'],
+          paid_dates: [{ date: '2026-08-03T00:00:00-04:00', transaction_group_id: 'paid-rent', amount: '2321' }],
+        },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-09-30',
+  })
+
+  assert.deepEqual(candidate.expectedDates, ['2026-09-02'])
+  assert.deepEqual(candidate.evidence.transactionIds, ['paid-rent'])
+  assert.deepEqual(candidate.evidence.dates, ['2026-08-03'])
+})
+
+test('suppresses an unpaid current-cycle subscription occurrence after an early paid date', () => {
+  const candidates = buildDefinedOccurrences({
+    subscriptions: [
+      {
+        id: 'subscription-rent-early',
+        attributes: {
+          active: true,
+          name: 'Rent',
+          repeat_freq: 'monthly',
+          amount_min: '2321',
+          amount_max: '2321',
+          amount_avg: '2321',
+          pay_dates: ['2026-08-25T00:00:00-04:00'],
+          paid_dates: [{ date: '2026-08-03T00:00:00-04:00', transaction_group_id: 'paid-rent-early', amount: '2321' }],
+        },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+  })
+
+  const result = matchRecurringOccurrences({ candidates, actualEntries: [], today: '2026-08-25' })
+
+  assert.deepEqual(result.remaining, [])
+})
+
+test('fulfills a paid multi-split subscription from its linked transaction group before fuzzy matching', () => {
+  const candidates = buildDefinedOccurrences({
+    subscriptions: [
+      {
+        id: 'subscription-rent-water',
+        attributes: {
+          active: true,
+          name: 'Rent',
+          repeat_freq: 'monthly',
+          amount_min: '2321',
+          amount_max: '2321',
+          amount_avg: '2321',
+          pay_dates: ['2026-08-25T00:00:00-04:00'],
+          paid_dates: [{ date: '2026-08-03T00:00:00-04:00', transaction_group_id: 'paid-rent-water', amount: '2321' }],
+        },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+  })
+  const actualEntries = [
+    { ...entry({ id: 'rent-split', date: '2026-08-03', value: 2000, destinationId: 'landlord', categoryId: 'housing', description: 'Building payment' }), transactionId: 'paid-rent-water' },
+    { ...entry({ id: 'water-split', date: '2026-08-03', value: 321, destinationId: 'water-utility', categoryId: 'utilities', description: 'Municipal supply' }), transactionId: 'paid-rent-water' },
+  ]
+  const [candidate] = enrichRecurringCandidatesFromEvidence({ candidates, entries: actualEntries })
+
+  assert.equal(candidate.identity.destinationAccountId, null)
+  assert.equal(candidate.identity.categoryId, null)
+
+  const result = matchRecurringOccurrences({ candidates: [candidate], actualEntries, today: '2026-08-25' })
+
+  assert.equal(result.fulfilled.length, 1)
+  assert.deepEqual(result.fulfilled[0].actualEntryIds, ['rent-split', 'water-split'])
+  assert.deepEqual(result.fulfilled[0].actualTransactionIds, ['paid-rent-water'])
+  assert.deepEqual(result.remaining, [])
 })
 
 test('infers monthly rent despite local weekend shifts and retains exact evidence', () => {
