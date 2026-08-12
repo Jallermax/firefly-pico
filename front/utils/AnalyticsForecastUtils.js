@@ -1186,6 +1186,7 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
     ).values(),
   ].sort((left, right) => left.candidateId.localeCompare(right.candidateId))
   const incompleteBudgetIdSet = new Set(incompleteAttributions.flatMap(({ budgetIds }) => budgetIds))
+  const hasUnscopedIncompleteAttribution = incompleteAttributions.some(({ budgetIds }) => budgetIds.length === 0)
   const groups = new Map()
   const ensureGroup = ({ key, budgetId = null, categoryId = null, context = null, budgetAttribution: groupBudgetAttribution = null }) => {
     const group = groups.get(key) ?? {
@@ -1243,7 +1244,7 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
       const samples = months.map((month) => group.monthly[month])
       const historySufficient = historyReady && months.length >= 3 && months.every((month) => group.observedMonths.has(month))
       const historical = historySufficient ? roundAmount(median(samples), currencyDecimalPlaces) : null
-      const attributionIncomplete = incompleteBudgetIdSet.has(group.budgetId)
+      const attributionIncomplete = incompleteBudgetIdSet.has(group.budgetId) || (hasUnscopedIncompleteAttribution && Boolean(plan) && !historySufficient)
       const selectedPlan = !attributionIncomplete && plan?.type === 'reset' ? plan.amount : null
       const expected = historySufficient ? historical : selectedPlan
       const variableRemaining = Number.isFinite(expected) ? roundAmount(Math.max(0, expected - group.actual), currencyDecimalPlaces) : 0

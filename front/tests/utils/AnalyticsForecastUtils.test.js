@@ -2442,11 +2442,12 @@ test('types partially missing matched-history budget membership without attribut
   assert.deepEqual({ history, candidate, budgetPlans }, inputsBefore)
 })
 
-test('keeps entirely missing matched-history budget membership typed and unassigned', () => {
+test('keeps entirely missing matched-history budget membership typed and suppresses an unproven reset plan', () => {
   const months = ['2026-05', '2026-06', '2026-07']
   const history = months.map((month, index) => entry({ id: `delivery-${index}`, date: `${month}-20`, value: 20, destinationId: 'merchant', categoryId: 'food', description: 'Food delivery' }))
   const candidate = definedCandidate({ id: 'unassigned-delivery', sourceAccountId: 'checking', destinationAccountId: 'merchant', date: '2026-08-20', amount: 20 })
   candidate.identity.categoryId = 'food'
+  const budgetPlans = [{ id: 'budget-a', type: 'reset', period: 'monthly', amount: 40 }]
   const options = {
     candidates: [candidate],
     ...normalizedCandidateInputs([candidate]),
@@ -2454,14 +2455,84 @@ test('keeps entirely missing matched-history budget membership typed and unassig
     today: '2026-08-10',
     endDate: '2026-08-31',
   }
-  const ordered = buildRemainingActivityForecast({ ...options, ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-10' }) })
-  const reversed = buildRemainingActivityForecast({ ...options, ledger: ledger([...history].reverse(), { startMonth: '2026-05', endDate: '2026-08-10' }) })
+  const inputsBefore = structuredClone({ history, candidate, budgetPlans })
+  const ordered = buildRemainingActivityForecast({ ...options, ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-10' }), budgetPlans })
+  const reversed = buildRemainingActivityForecast({
+    ...options,
+    ledger: ledger([...history].reverse(), { startMonth: '2026-05', endDate: '2026-08-10' }),
+    budgetPlans: [...budgetPlans].reverse(),
+  })
   const projected = ordered.dailyProjectedEntries.find(({ candidateId }) => candidate.id === candidateId)
+  const budgetEnvelope = ordered.variableEnvelopes.find(({ budgetId }) => budgetId === 'budget-a')
+  const typedEnvelope = ordered.variableEnvelopes.find(({ budgetId, known }) => budgetId === null && known === 20)
 
   assert.equal(projected.budgetId, null)
   assert.deepEqual(projected.budgetAttribution, { status: 'incomplete', budgetId: null, budgetIds: [], missingMembership: true })
+  assert.deepEqual(
+    { expected: budgetEnvelope.expected, remaining: budgetEnvelope.remaining, planStatus: budgetEnvelope.planStatus },
+    { expected: null, remaining: 0, planStatus: 'attributionIncomplete' },
+  )
+  assert.deepEqual({ expected: typedEnvelope.expected, known: typedEnvelope.known, remaining: typedEnvelope.remaining }, { expected: 0, known: 20, remaining: 20 })
+  assert.equal(
+    ordered.variableEnvelopes.reduce((total, { remaining }) => total + remaining, 0),
+    20,
+  )
+  assert.equal(ordered.remainingFromToday.expenses, 20)
   assert.deepEqual(ordered.audit.budgets.incompleteAttributions, [{ candidateId: candidate.id, budgetIds: [], missingMembership: true }])
   assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+  assert.deepEqual({ history, candidate, budgetPlans }, inputsBefore)
+})
+
+test('suppresses every unproven reset fallback for all-null membership deterministically', () => {
+  const months = ['2026-05', '2026-06', '2026-07']
+  const history = [
+    ...months.map((month, index) => entry({ id: `delivery-${index}`, date: `${month}-20`, value: 20, destinationId: 'merchant', categoryId: 'food', description: 'Food delivery' })),
+    ...months.map((month, index) =>
+      entry({ id: `independent-${index}`, date: `${month}-05`, value: 10, destinationId: 'other-merchant', categoryId: 'travel', budgetId: 'budget-c', description: 'Independent travel' }),
+    ),
+  ]
+  const candidate = definedCandidate({ id: 'unassigned-multiple-plans', sourceAccountId: 'checking', destinationAccountId: 'merchant', date: '2026-08-20', amount: 20 })
+  candidate.identity.categoryId = 'food'
+  const budgetPlans = [
+    { id: 'budget-b', type: 'reset', period: 'monthly', amount: 30 },
+    { id: 'budget-a', type: 'reset', period: 'monthly', amount: 40 },
+    { id: 'budget-c', type: 'reset', period: 'monthly', amount: 50 },
+  ]
+  const options = {
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+  const inputsBefore = structuredClone({ history, candidate, budgetPlans })
+  const ordered = buildRemainingActivityForecast({ ...options, ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-10' }), budgetPlans })
+  const reversed = buildRemainingActivityForecast({
+    ...options,
+    ledger: ledger([...history].reverse(), { startMonth: '2026-05', endDate: '2026-08-10' }),
+    budgetPlans: [...budgetPlans].reverse(),
+  })
+  const planEnvelopes = ordered.variableEnvelopes.filter(({ budgetId }) => budgetId !== null)
+
+  assert.deepEqual(
+    planEnvelopes.map(({ budgetId, historical, plan, expected, remaining, planStatus }) => ({ budgetId, historical, plan, expected, remaining, planStatus })),
+    [
+      { budgetId: 'budget-a', historical: null, plan: 40, expected: null, remaining: 0, planStatus: 'attributionIncomplete' },
+      { budgetId: 'budget-b', historical: null, plan: 30, expected: null, remaining: 0, planStatus: 'attributionIncomplete' },
+      { budgetId: 'budget-c', historical: 10, plan: 50, expected: 10, remaining: 10, planStatus: 'ready' },
+    ],
+  )
+  assert.deepEqual(
+    ordered.variableEnvelopes.filter(({ budgetId }) => budgetId === null).map(({ known, remaining }) => ({ known, remaining })),
+    [{ known: 20, remaining: 20 }],
+  )
+  assert.equal(
+    ordered.variableEnvelopes.reduce((total, { remaining }) => total + remaining, 0),
+    30,
+  )
+  assert.equal(ordered.remainingFromToday.expenses, 30)
+  assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+  assert.deepEqual({ history, candidate, budgetPlans }, inputsBefore)
 })
 
 test('preserves explicit authoritative budget membership over missing matched history', () => {
@@ -2483,7 +2554,12 @@ test('preserves explicit authoritative budget membership over missing matched hi
 
   assert.equal(projected.budgetId, 'budget-a')
   assert.deepEqual(projected.budgetAttribution, { status: 'exact', budgetId: 'budget-a', budgetIds: ['budget-a'] })
-  assert.equal(result.variableEnvelopes.find(({ budgetId }) => budgetId === 'budget-a').known, 20)
+  assert.deepEqual((({ known, expected, remaining, planStatus }) => ({ known, expected, remaining, planStatus }))(result.variableEnvelopes.find(({ budgetId }) => budgetId === 'budget-a')), {
+    known: 20,
+    expected: 40,
+    remaining: 60,
+    planStatus: 'ready',
+  })
   assert.equal(result.audit.budgets.incompleteAttributions, undefined)
 })
 
