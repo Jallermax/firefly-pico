@@ -162,6 +162,7 @@ export function buildAnalyticsLedger({ transactions = [], transactionLinks = [],
         sourceKind,
         destinationKind,
         categoryId: item?.category_id ?? ANALYTICS_UNCATEGORIZED_ID,
+        ...(valuePresent(item?.description ?? transaction?.attributes?.description) ? { description: item?.description ?? transaction?.attributes?.description, descriptionFromLedger: true } : {}),
         tags,
         refund: refundState(),
       }

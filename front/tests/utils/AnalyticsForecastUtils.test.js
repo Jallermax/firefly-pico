@@ -719,12 +719,12 @@ test('keeps stable duplicate-context payroll components distinct across the curr
 
 test('fulfills duplicate-context payroll only from a complete current phase', () => {
   const history = duplicateContextPayrollHistory()
-  const completeActual = payrollOccurrenceWithDuplicateContexts({ date: '2026-08-14', sequence: 'august-middle', regime: 'current' })
+  const completeActual = payrollOccurrenceWithDuplicateContexts({ date: '2026-08-13', sequence: 'august-middle', regime: 'current' })
   const complete = buildRemainingActivityForecast({
-    ledger: ledger([...history, ...completeActual], { startMonth: '2026-05', endDate: '2026-08-16' }),
+    ledger: ledger([...history, ...completeActual], { startMonth: '2026-05', endDate: '2026-08-13' }),
     candidates: [],
     historyMonths: 3,
-    today: '2026-08-16',
+    today: '2026-08-13',
     endDate: '2026-08-31',
   })
   assert.equal(complete.audit.bundles.length, 1)
@@ -739,19 +739,22 @@ test('fulfills duplicate-context payroll only from a complete current phase', ()
 
   const incompleteActual = completeActual.filter(({ description }) => description !== 'State payroll tax')
   const incomplete = buildRemainingActivityForecast({
-    ledger: ledger([...history, ...incompleteActual], { startMonth: '2026-05', endDate: '2026-08-16' }),
+    ledger: ledger([...history, ...incompleteActual], { startMonth: '2026-05', endDate: '2026-08-13' }),
     candidates: [],
     historyMonths: 3,
-    today: '2026-08-16',
+    today: '2026-08-13',
     endDate: '2026-08-31',
   })
   assert.deepEqual(incomplete.audit.bundles[0].fulfilledPhases, [])
-  assert.deepEqual(incomplete.audit.bundles[0].projectedDates, [{ date: '2026-08-31', phase: 'monthEnd' }])
+  assert.deepEqual(incomplete.audit.bundles[0].projectedDates, [
+    { date: '2026-08-14', phase: 'middle' },
+    { date: '2026-08-31', phase: 'monthEnd' },
+  ])
 })
 
 test('keeps an inconsistent duplicate context out of the bundle instead of shifting ordinal identities', () => {
   const history = duplicateContextPayrollHistory({ missingLatestStateTax: true })
-  const taxIds = history.filter(({ destinationAccount }) => destinationAccount.id === 'tax-authority').map(({ id }) => id)
+  const stateTaxIds = history.filter(({ description }) => description === 'State payroll tax').map(({ id }) => id)
   const result = buildRemainingActivityForecast({
     ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
     candidates: [],
@@ -763,17 +766,48 @@ test('keeps an inconsistent duplicate context out of the bundle instead of shift
   assert.equal(result.audit.bundles.length, 1)
   const bundle = result.audit.bundles[0]
   assert.equal(
-    bundle.components.some(({ context }) => context.destinationAccountId === 'tax-authority'),
+    bundle.components.some(({ label }) => label === 'State payroll tax'),
     false,
   )
   assert.equal(
-    result.dailyProjectedEntries.some(({ destinationAccountId }) => destinationAccountId === 'tax-authority'),
+    bundle.components.some(({ label }) => label === 'Local payroll tax'),
+    true,
+  )
+  assert.equal(
+    result.dailyProjectedEntries.some(({ bundleLabel }) => bundleLabel === 'State payroll tax'),
     false,
   )
+  assert.deepEqual(
+    result.dailyProjectedEntries.filter(({ bundleLabel }) => bundleLabel === 'Local payroll tax').map(({ amount }) => amount),
+    [157.5, 157.5],
+  )
+  assert.ok(stateTaxIds.every((id) => !bundle.entryIds.includes(id)))
+  assert.ok(stateTaxIds.every((id) => !result.audit.recurring.removedHistoryEntryIds.includes(id)))
+  assert.ok(result.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => stateTaxIds.includes(id))))
+  assert.ok(bundle.inconsistentComponentKeys.some((key) => key.includes('state payroll tax')))
+})
+
+test('rejects indistinguishable duplicate-context rows without choosing an amount or input-order winner', () => {
+  const history = duplicateContextPayrollHistory().map((item) =>
+    item.destinationAccount.id === 'tax-authority'
+      ? { ...item, description: 'Payroll tax', value: item.description === 'State payroll tax' && item.date >= '2026-07-01' ? item.value + 9 : item.value }
+      : item,
+  )
+  const input = ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' })
+  const ordered = buildRemainingActivityForecast({ ledger: input, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+  const reversed = buildRemainingActivityForecast({ ledger: { ...input, entries: [...input.entries].reverse() }, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+  const taxIds = history.filter(({ destinationAccount }) => destinationAccount.id === 'tax-authority').map(({ id }) => id)
+
+  assert.equal(ordered.audit.bundles.length, 1)
+  const bundle = ordered.audit.bundles[0]
+  assert.equal(
+    bundle.components.some(({ context }) => context.destinationAccountId === 'tax-authority'),
+    false,
+  )
+  assert.ok(bundle.inconsistentComponentKeys.some((key) => key.includes('component:ambiguous')))
   assert.ok(taxIds.every((id) => !bundle.entryIds.includes(id)))
-  assert.ok(taxIds.every((id) => !result.audit.recurring.removedHistoryEntryIds.includes(id)))
-  assert.ok(result.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => taxIds.includes(id))))
-  assert.ok(bundle.inconsistentComponentKeys.length >= 2)
+  assert.ok(taxIds.every((id) => !ordered.audit.recurring.removedHistoryEntryIds.includes(id)))
+  assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
 })
 
 test('keeps a transaction-linked one-off candidate when only other splits from its legacy group are admitted to payroll', () => {

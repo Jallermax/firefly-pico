@@ -807,6 +807,39 @@ const precedingBusinessDay = (value) => {
 
 const bundleEntryCurrency = (entry) => String(entry?.conversion?.displayCurrency ?? entry?.conversion?.sourceCurrency ?? '')
 
+const bundleComponentDescription = (entry) => normalizeIdentityText(entry?.description)
+
+const recurringBundleComponents = (entries) => {
+  const byContext = new Map()
+  for (const entry of entries) {
+    const key = contextKey(projectionContext(entry).context)
+    byContext.set(key, [...(byContext.get(key) ?? []), entry])
+  }
+  const components = new Map()
+  const ambiguousKeys = []
+  for (const [baseKey, contextEntries] of [...byContext.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const sorted = contextEntries.sort(
+      (left, right) =>
+        bundleComponentDescription(left).localeCompare(bundleComponentDescription(right)) ||
+        amountOf(right) - amountOf(left) ||
+        String(left.transactionId).localeCompare(String(right.transactionId)) ||
+        String(left.id).localeCompare(String(right.id)),
+    )
+    if (sorted.length === 1) {
+      const description = bundleComponentDescription(sorted[0])
+      components.set(description ? `${baseKey}|component:${description}` : baseKey, sorted[0])
+      continue
+    }
+    const descriptions = sorted.map(bundleComponentDescription)
+    if (descriptions.some((description) => !description) || new Set(descriptions).size !== descriptions.length) {
+      ambiguousKeys.push(baseKey)
+      continue
+    }
+    for (const entry of sorted) components.set(`${baseKey}|component:${bundleComponentDescription(entry)}`, entry)
+  }
+  return { components, ambiguousKeys }
+}
+
 const recurringBundleOccurrences = ({ entries, months = null, conflictingTransactionIds, currencyDecimalPlaces }) => {
   const conflictingTransactions = new Set(conflictingTransactionIds)
   const byDate = new Map()
@@ -863,16 +896,12 @@ const recurringBundleOccurrences = ({ entries, months = null, conflictingTransac
 
     for (const group of groups) {
       const cohort = assigned.get(group.key).sort((left, right) => String(left.id).localeCompare(String(right.id)))
-      const components = new Map()
-      let duplicateComponent = false
-      for (const entry of cohort) {
-        const key = contextKey(projectionContext(entry).context)
-        if (components.has(key)) duplicateComponent = true
-        components.set(key, entry)
-      }
-      if (duplicateComponent || components.size < 2) continue
+      const { components, ambiguousKeys } = recurringBundleComponents(cohort)
+      if (components.size < 2) continue
       const anchor = group.entries[0]
-      const anchorKey = contextKey(projectionContext(anchor).context)
+      const anchorBaseKey = contextKey(projectionContext(anchor).context)
+      const anchorKey = [...components.entries()].find(([, entry]) => entry === anchor)?.[0]
+      if (!anchorKey) continue
       occurrences.push({
         date,
         monthKey: String(anchor.monthKey),
@@ -880,6 +909,8 @@ const recurringBundleOccurrences = ({ entries, months = null, conflictingTransac
         transactionIds: unique(cohort.map(({ transactionId }) => String(transactionId))).sort(),
         entries: cohort,
         components,
+        ambiguousKeys,
+        anchorBaseKey,
         anchorKey,
       })
     }
@@ -887,7 +918,7 @@ const recurringBundleOccurrences = ({ entries, months = null, conflictingTransac
   return occurrences.sort((left, right) => left.date.localeCompare(right.date) || left.transactionId.localeCompare(right.transactionId) || left.anchorKey.localeCompare(right.anchorKey))
 }
 
-const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, currencyDecimalPlaces }) => {
+const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, anchorKey, currencyDecimalPlaces }) => {
   const evidence = occurrences
     .map((occurrence) => ({ occurrence, entry: occurrence.components.get(key) }))
     .filter(({ entry }) => entry)
@@ -898,7 +929,7 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
   return {
     id,
     key,
-    label: bundleComponentLabel(representative, context),
+    label: bundleComponentLabel(key === anchorKey && representative.descriptionFromLedger ? { ...representative, description: null } : representative, context),
     phase,
     context,
     budgetAttribution: context.direction === 'expense' ? budgetAttribution({ entries: evidence.map(({ entry }) => entry) }) : { status: 'unassigned', budgetId: null, budgetIds: [] },
@@ -907,6 +938,21 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
     evidenceTransactionIds: unique(evidence.map(({ entry }) => String(entry.transactionId))).sort(),
     samples: evidence.map(({ entry, occurrence }) => ({ id: String(entry.id), date: occurrence.date, value: amountOf(entry) })),
   }
+}
+
+const bundleCandidateMatchesAdmittedComponent = ({ candidate, bundle, amount }) => {
+  const explicitEntryIds = new Set((candidate?.evidence?.entryIds ?? []).map(String))
+  if (bundle.candidateMatchingEntryIds.some((id) => explicitEntryIds.has(String(id)))) return true
+  const transactionIds = new Set((candidate?.evidence?.transactionIds ?? []).map(String))
+  if (transactionIds.size === 0) return false
+  const candidateContext = projectionContext(candidate).context
+  const amountRange = authoritativeAmountRange({ candidate, amount })
+  return bundle.matchingComponents.some(
+    ({ context, evidenceTransactionIds, sampleValues }) =>
+      contextKey(context) === contextKey(candidateContext) &&
+      evidenceTransactionIds.some((id) => transactionIds.has(String(id))) &&
+      (!amountRange || sampleValues.some((value) => value >= amountRange.min && value <= amountRange.max)),
+  )
 }
 
 const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, today, endDate, currencyDecimalPlaces }) => {
@@ -930,7 +976,7 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
     )
       continue
 
-    const allKeys = unique(occurrences.flatMap(({ components }) => [...components.keys()])).sort()
+    const allKeys = unique(occurrences.flatMap(({ components, ambiguousKeys }) => [...components.keys(), ...ambiguousKeys.map((key) => `${key}|component:ambiguous`)])).sort()
     const commonKeys = allKeys.filter((key) => occurrences.every(({ components }) => components.has(key)))
     if (commonKeys.length < 2 || !commonKeys.includes(anchorKey)) continue
     const signature = commonKeys.join('||')
@@ -969,16 +1015,25 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
       reasons: [regimeChanged ? 'Latest two equivalent occurrences establish a new regime' : 'No two-occurrence regime change; uses a recency-weighted median'],
     }
     const components = [
-      ...commonKeys.map((key) => recurringBundleComponent({ key, occurrences, bundleId: id, currencyDecimalPlaces })),
-      ...phaseComponents.middle.map((key) => recurringBundleComponent({ key, occurrences: middleOccurrences, phase: 'middle', bundleId: id, currencyDecimalPlaces })),
-      ...phaseComponents.monthEnd.map((key) => recurringBundleComponent({ key, occurrences: monthEndOccurrences, phase: 'monthEnd', bundleId: id, currencyDecimalPlaces })),
+      ...commonKeys.map((key) => recurringBundleComponent({ key, occurrences, bundleId: id, anchorKey, currencyDecimalPlaces })),
+      ...phaseComponents.middle.map((key) => recurringBundleComponent({ key, occurrences: middleOccurrences, phase: 'middle', bundleId: id, anchorKey, currencyDecimalPlaces })),
+      ...phaseComponents.monthEnd.map((key) => recurringBundleComponent({ key, occurrences: monthEndOccurrences, phase: 'monthEnd', bundleId: id, anchorKey, currencyDecimalPlaces })),
     ].sort((left, right) => left.id.localeCompare(right.id))
+    const matchingComponents = components.map(({ context, evidenceTransactionIds, samples }) => ({
+      context,
+      evidenceTransactionIds: [...evidenceTransactionIds],
+      sampleValues: samples.map(({ value }) => value),
+    }))
     for (const component of components) {
       component.amount = roundAmount(regimeChanged && component.phase === 'both' ? latestPair[1].components.get(component.key).value : recencyWeightedMedian(component.samples), currencyDecimalPlaces)
       delete component.samples
     }
     const admittedComponentKeys = new Set(components.map(({ key }) => key))
     const inconsistentComponentKeys = allKeys.filter((key) => !admittedComponentKeys.has(key))
+    const stableInconsistentComponentKeys = inconsistentComponentKeys.filter(
+      (key) =>
+        occurrences.filter(({ components }) => components.has(key)).length >= 3 && new Set(occurrences.filter(({ components }) => components.has(key)).map(({ monthKey }) => monthKey)).size >= 2,
+    )
 
     const target = dateParts(today)
     const middleDay = Math.round(median(middleOccurrences.map(({ date }) => dateParts(date).day)))
@@ -1013,7 +1068,11 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
       phaseDates,
       projectedDates,
       components,
+      matchingComponents,
       matchingEntryIds: unique(occurrences.flatMap(({ components }) => [...admittedComponentKeys].map((key) => components.get(key)?.id).filter(Boolean))).sort(),
+      candidateMatchingEntryIds: unique(
+        occurrences.flatMap(({ components }) => [...admittedComponentKeys, ...stableInconsistentComponentKeys].map((key) => components.get(key)?.id).filter(Boolean)),
+      ).sort(),
     })
   }
   return discovered.sort((left, right) => left.id.localeCompare(right.id))
@@ -1064,6 +1123,8 @@ const recurringBundleAudit = (bundles) =>
   bundles.map((bundle) => {
     const audit = structuredClone(bundle)
     delete audit.matchingEntryIds
+    delete audit.matchingComponents
+    delete audit.candidateMatchingEntryIds
     delete audit.phaseDates
     return audit
   })
@@ -1522,13 +1583,9 @@ export function buildRemainingActivityForecast({
     endDate: endKey,
     currencyDecimalPlaces,
   })
-  const bundleMatchingEntryIds = new Set(discoveredBundles.flatMap(({ matchingEntryIds }) => matchingEntryIds))
-  const bundleMatchingTransactionIds = new Set(discoveredBundles.flatMap(({ transactionIds }) => transactionIds))
   const bundleSuppressedCandidateIds = preparedProjectionCandidates
-    .filter(
-      (candidate) =>
-        (candidate.evidence?.entryIds ?? []).some((id) => bundleMatchingEntryIds.has(String(id))) ||
-        (candidate.evidence?.transactionIds ?? []).some((id) => bundleMatchingTransactionIds.has(String(id))),
+    .filter((candidate) =>
+      discoveredBundles.some((bundle) => bundleCandidateMatchesAdmittedComponent({ candidate, bundle, amount: Number(candidateAmounts?.[candidate.id]?.value ?? candidate?.expectedAmount?.value) })),
     )
     .map(({ id }) => String(id))
   const aggregateSuppressedCandidateIds = aggregateBundleCandidateIds({
