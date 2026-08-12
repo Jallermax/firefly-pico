@@ -2730,6 +2730,10 @@ test('projects dated payroll and bill events while keeping the variable envelope
   assert.equal(store.dailyForecast.availableLine.excludesVariableEnvelope, true)
   assert.equal(store.dailyForecast.availableLine.points.at(-1).value, 1640)
   assert.equal(store.dailyForecast.monthlyTotals.availableCashChange, 1550)
+  assert.equal(store.dailyForecast.reconciliation.availableCashDelta, 0)
+  assert.equal(store.dailyForecast.reconciliation.status, 'ok')
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+  assert.equal(store.dailyForecast.variableEnvelope.hasDefensibleValue, true)
   const payrollEvent = store.dailyForecast.eventSummaries.find(({ date }) => date === '2026-08-14')
   assert.equal(payrollEvent.sourceKind, 'inferred')
   assert.equal(typeof payrollEvent.bundleId, 'string')
@@ -3285,6 +3289,74 @@ test('shows insufficient future history as unknown instead of a zero daily proje
   assert.equal(store.dailyForecast?.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-11').value, null)
   assert.equal(store.dailyForecastState?.isPartial, true)
   assert.equal(store.dailyForecastState?.isUnavailable, false)
+})
+
+test('keeps a conflicting audit-only budget envelope from turning insufficient daily history into zero bars', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, expense]
+  budgetStore.budgetList = [
+    { id: 'groceries', attributes: { active: true, auto_budget_type: 'reset', auto_budget_period: 'monthly', amount: '100' } },
+    { id: 'groceries', attributes: { active: true, auto_budget_type: 'reset', auto_budget_period: 'monthly', amount: '200' } },
+  ]
+  transactionResponse = async () => ({ ok: false, data: [] })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const envelope = store.dailyForecast.variableEnvelope.items.find(({ budgetId }) => budgetId === 'groceries')
+  const tomorrow = store.dailyForecast.days.find(({ date }) => date === '2026-08-11')
+  assert.equal(envelope.planStatus, 'conflicting')
+  assert.equal(envelope.expected, null)
+  assert.equal(envelope.date, undefined)
+  assert.equal(tomorrow.projected.sources, null)
+  assert.equal(tomorrow.projected.uses, null)
+  assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-11').value, null)
+  assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-11').value, null)
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+  assert.equal(store.dailyForecast.variableEnvelope.hasDefensibleValue, false)
+})
+
+test('keeps an attribution-incomplete plan envelope typed and non-material while its dated event stays separate', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, expense]
+  budgetStore.budgetList = [{ id: 'groceries', attributes: { active: true, auto_budget_type: 'reset', auto_budget_period: 'monthly', amount: '100' } }]
+  transactionResult = ['2026-05-20', '2026-06-20', '2026-07-20'].map((date, index) =>
+    dailyTransaction({ id: `delivery-${index + 1}`, date, amount: 20, source: checking, destination: expense, categoryId: 'groceries' }),
+  )
+  recurringTransactionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'delivery',
+        attributes: {
+          active: true,
+          type: 'withdrawal',
+          first_date: '2026-05-20',
+          repetitions: [{ type: 'monthly', moment: '20' }],
+          transactions: [{ amount: '20', currency_code: 'USD', source_id: checking.id, destination_id: expense.id, category_id: 'groceries' }],
+        },
+      },
+    ],
+  })
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const planEnvelope = store.dailyForecast.variableEnvelope.items.find(({ budgetId }) => budgetId === 'groceries')
+  const event = store.dailyForecast.eventSummaries.find(({ date }) => date === '2026-08-20')
+  assert.equal(planEnvelope.planStatus, 'attributionIncomplete')
+  assert.equal(planEnvelope.expected, null)
+  assert.equal(planEnvelope.date, undefined)
+  assert.equal(store.dailyForecast.variableEnvelope.hasDefensibleValue, false)
+  assert.equal(event.uses, 20)
+  assert.equal(
+    event.components.every(({ transactionIds }) => transactionIds.length === 0),
+    true,
+  )
 })
 
 test('normalizes active JSON API budget plans for forecast envelopes without changing unrelated selectors', async () => {

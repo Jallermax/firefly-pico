@@ -91,6 +91,9 @@ const dailyConfidence = (confidence) => {
   return { ...confidence, level }
 }
 const dailyEntryContributes = (entry, keys) => keys.some((key) => entry.flowAmounts?.[key] !== 0)
+const defensibleVariableEnvelope = (envelope) =>
+  !['conflicting', 'attributionIncomplete'].includes(envelope.planStatus) &&
+  (Number.isFinite(envelope.expected) || DAILY_FLOW_KEYS.some((key) => Number.isFinite(envelope.flowAmounts?.[key]) && envelope.flowAmounts[key] !== 0))
 const dailyEntryValue = (entry, keys, decimalPlaces) => dailyTotal(entry.flowAmounts ?? {}, keys, decimalPlaces)
 const sortDailyEntries = (entries, keys, decimalPlaces) =>
   [...entries].sort((left, right) => {
@@ -258,7 +261,8 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
   }
   const historyMonths = new Set(forecast.audit.history.months ?? [])
   const unavailableEntryIds = new Set(forecast.audit.unavailable.entryIds ?? [])
-  if (forecast.status === 'insufficientHistory' && forecast.dailyProjectedEntries.length === 0 && (forecast.variableEnvelopes ?? []).length === 0)
+  const hasDefensibleVariableEnvelope = (forecast.variableEnvelopes ?? []).some(defensibleVariableEnvelope)
+  if (forecast.status === 'insufficientHistory' && forecast.dailyProjectedEntries.length === 0 && !hasDefensibleVariableEnvelope)
     addProjectedUnavailableFlowKeys('variable', futureDates, DAILY_FLOW_KEYS)
   futureDates.forEach((date) => {
     const components = dayByDate.get(date).projected.components
@@ -341,6 +345,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     sources: envelopeSources,
     uses: envelopeUses,
     availableCashChange: Number.isFinite(envelopeSources) && Number.isFinite(envelopeUses) ? roundDaily(envelopeSources - envelopeUses, currencyDecimalPlaces) : null,
+    hasDefensibleValue: hasDefensibleVariableEnvelope,
     items: structuredClone(forecast.variableEnvelopes ?? []),
   }
   const eventSummaries = buildDailyEventSummaries(days, currencyDecimalPlaces)
@@ -371,7 +376,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     ? null
     : roundDaily(forecast.actualToDate.availableCashChange + forecast.remainingFromToday.availableCashChange, currencyDecimalPlaces)
   const actualAvailable = Number.isFinite(days.at(-1)?.cumulativeAvailableCashChange)
-    ? roundDaily(days.at(-1).cumulativeAvailableCashChange + (envelopeComponents.availableCashChange ?? 0), currencyDecimalPlaces)
+    ? roundDaily(days.at(-1).cumulativeAvailableCashChange + (variableEnvelope.availableCashChange ?? 0), currencyDecimalPlaces)
     : null
   const availableCashDelta = expectedAvailable === null || actualAvailable === null ? null : roundDaily(actualAvailable - expectedAvailable, currencyDecimalPlaces)
   const relevantUnclassifiedMonths = new Set([monthKey, ...(forecast.audit.history.months ?? [])])
