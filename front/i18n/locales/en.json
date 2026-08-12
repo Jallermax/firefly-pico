@@ -112,7 +112,20 @@
       "candidate_id": "Candidate ID: {id}",
       "expected_id": "Expected occurrence: {id}",
       "evidence_ids": "Evidence IDs: {ids}",
-      "conversion": "Conversion: {mode}"
+      "conversion": "Conversion: {mode}",
+      "bundle_details": "Bundle details",
+      "gross_inflow": "Gross inflow",
+      "taxes": "Taxes",
+      "insurance": "Insurance",
+      "debt": "Debt",
+      "savings": "Savings",
+      "variable_envelope": "Variable spending envelope",
+      "expected_range": "Expected range",
+      "plan": "Plan",
+      "history": "History",
+      "undated_estimate": "Undated estimate — not shown as daily transactions.",
+      "event_evidence": "Event evidence",
+      "projected_non_navigable": "Projected evidence only; it does not open a transaction."
     },
     "balance": {
       "title": "Financial trends",

@@ -112,7 +112,20 @@
       "candidate_id": "Candidate ID: {id}",
       "expected_id": "Expected occurrence: {id}",
       "evidence_ids": "Evidence IDs: {ids}",
-      "conversion": "Conversion: {mode}"
+      "conversion": "Conversion: {mode}",
+      "bundle_details": "Szczegóły pakietu",
+      "gross_inflow": "Wpływ brutto",
+      "taxes": "Podatki",
+      "insurance": "Ubezpieczenie",
+      "debt": "Dług",
+      "savings": "Oszczędności",
+      "variable_envelope": "Zakres wydatków zmiennych",
+      "expected_range": "Oczekiwany zakres",
+      "plan": "Plan",
+      "history": "Historia",
+      "undated_estimate": "Szacunek bez daty — nie jest pokazywany jako codzienne transakcje.",
+      "event_evidence": "Dowody zdarzenia",
+      "projected_non_navigable": "Tylko dowody prognozy; nie otwiera transakcji."
     },
     "balance": {
       "title": "Trendy finansowe",

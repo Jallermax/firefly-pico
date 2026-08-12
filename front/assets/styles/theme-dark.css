@@ -562,6 +562,19 @@
     border-color: #444;
 }
 
+.van-theme-dark .analytics-daily-forecast-disclosure {
+  border-color: #555;
+  background: #242426;
+}
+
+.van-theme-dark .analytics-daily-forecast-evidence-item {
+  background: #1c1c1e;
+}
+
+.van-theme-dark .analytics-daily-forecast-component-row {
+  border-color: #444;
+}
+
 .van-theme-dark .analytics-page-switch {
     background: #27272a;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);

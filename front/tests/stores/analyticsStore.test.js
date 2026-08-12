@@ -2349,6 +2349,8 @@ test('analytics warnings summarize projected audit evidence without rendering ev
     unavailableEvidenceSummary: { count: 1, previewIds: ['defined:subscription:rent'], omittedCount: 0 },
     chartSeries: { barGroups: [], availableLine: {} },
     legendItems: [],
+    variableEnvelopeItems: [],
+    eventSummaries: [],
     selectedProjectedSources: [],
     hasRetainedData: false,
     hasActivity: false,
@@ -3469,5 +3471,134 @@ test('keeps the daily card and combination-chart selection contract exact withou
   for (const locale of localeNames) {
     const dailyForecast = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.daily_forecast
     for (const key of ['inflow', 'outflow', 'expected_inflow', 'expected_outflow', 'day_details', 'scheduled_and_estimated']) assert.equal(typeof dailyForecast[key], 'string', `${locale}:${key}`)
+  }
+})
+
+test('renders explainable dated events and an explicitly undated non-navigable variable envelope', async () => {
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-daily-forecast.vue', {
+    analyticsStore: { dailyForecastMonths: 6, retryDailyForecast: () => {} },
+    monthTitle: 'August 2026',
+    periodItems: [],
+    dailyState: {
+      status: 'ready',
+      forecastStatus: 'ready',
+      isStale: false,
+      isBlockingUnavailable: false,
+      isPartiallyUnavailable: false,
+      unavailableTransactionIds: [],
+      unclassifiedTransactionIds: [],
+      sourceErrors: [],
+    },
+    unavailableEvidenceSummary: { count: 0, previewIds: [], omittedCount: 0 },
+    hasRetainedData: false,
+    hasActivity: true,
+    summaryItems: [],
+    legendItems: [
+      { id: 'inflow', label: 'VISIBLE INFLOW LEGEND', color: 'green' },
+      { id: 'outflow', label: 'VISIBLE OUTFLOW LEGEND', color: 'pink' },
+      { id: 'available', label: 'VISIBLE AVAILABLE LINE', color: 'blue' },
+    ],
+    chartSeries: { barGroups: [], availableLine: {} },
+    selectedPayload: null,
+    selectedDayTotals: [],
+    selectedDayEntries: [],
+    selectedProjectedSources: [],
+    variableEnvelopeItems: [
+      {
+        id: 'variable:groceries',
+        label: 'Groceries',
+        confidence: { level: 'high' },
+        evidenceIds: ['history:groceries'],
+        rows: [
+          { id: 'expected', label: 'analytics.daily_forecast.expected_range', value: 90 },
+          { id: 'plan', label: 'analytics.daily_forecast.plan', value: 110 },
+          { id: 'history', label: 'analytics.daily_forecast.history', value: 90 },
+        ],
+      },
+    ],
+    variableEnvelopeChange: -90,
+    eventSummaries: [
+      {
+        id: 'payroll:2026-08-14',
+        date: '2026-08-14',
+        label: 'Payroll',
+        availableCashChange: 1905,
+        confidence: { level: 'medium' },
+        sourceIds: ['bundle:payroll'],
+        candidateIds: ['candidate:payroll'],
+        evidenceIds: ['evidence:payroll'],
+        detailRows: [
+          { id: 'salary:income', label: 'analytics.daily_forecast.gross_inflow', value: 3150 },
+          { id: 'tax:expense', label: 'analytics.daily_forecast.taxes', value: -630 },
+          { id: 'insurance:expense', label: 'analytics.daily_forecast.insurance', value: -105 },
+          { id: 'debt:repayment', label: 'analytics.daily_forecast.debt', value: -210 },
+          { id: 'savings:deposit', label: 'analytics.daily_forecast.savings', value: -300 },
+          { id: 'available', label: 'analytics.daily_forecast.available_change', value: 1905 },
+          { id: 'zero', label: 'zero-component', value: 0 },
+        ],
+      },
+    ],
+    formatCurrency: String,
+    formatSignedCurrency: String,
+    onSelect: () => {},
+    onSelectPoint: () => {},
+    onDetailEntry: () => {},
+  })
+
+  assert.equal((html.match(/VISIBLE INFLOW LEGEND/g) ?? []).length, 1)
+  assert.equal((html.match(/VISIBLE OUTFLOW LEGEND/g) ?? []).length, 1)
+  assert.equal((html.match(/VISIBLE AVAILABLE LINE/g) ?? []).length, 1)
+  for (const key of [
+    'variable_envelope',
+    'expected_range',
+    'plan',
+    'history',
+    'undated_estimate',
+    'projected_non_navigable',
+    'gross_inflow',
+    'taxes',
+    'insurance',
+    'debt',
+    'savings',
+    'available_change',
+  ]) {
+    assert.match(html, new RegExp(`analytics\\.daily_forecast\\.${key}`), key)
+  }
+  assert.doesNotMatch(html, /zero-component/)
+})
+
+test('keeps the explainable Daily Forecast source contract material, expandable, routable, and retryable', () => {
+  const dailySource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url), 'utf8')
+
+  assert.match(dailySource, /daily\.value\.eventSummaries/)
+  assert.match(dailySource, /daily\.value\.variableEnvelope\.items/)
+  assert.match(dailySource, /eventDetailRows/)
+  assert.match(dailySource, /Number\.isFinite\(value\) && value !== 0/)
+  assert.match(dailySource, /analytics\.daily_forecast\.projected_non_navigable/)
+  assert.match(dailySource, /analytics\.daily_forecast\.undated_estimate/)
+  assert.match(dailySource, /entry\.sourceKind === 'actual'/)
+  assert.match(dailySource, /TransactionFilterUtils\.filters\.id\.toUrl/)
+  assert.match(dailySource, /v-if="dailyState\.sourceErrors\.length"[\s\S]*?<van-button[^>]+@click="analyticsStore\.retryDailyForecast"/)
+
+  const requiredKeys = [
+    'bundle_details',
+    'gross_inflow',
+    'taxes',
+    'insurance',
+    'debt',
+    'savings',
+    'variable_envelope',
+    'expected_range',
+    'plan',
+    'history',
+    'undated_estimate',
+    'confidence',
+    'event_evidence',
+    'projected_non_navigable',
+  ]
+  for (const locale of localeNames) {
+    const dailyForecast = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.daily_forecast
+    for (const key of requiredKeys) assert.equal(typeof dailyForecast[key], 'string', `${locale}:${key}`)
+    for (const key of requiredKeys) assert.notEqual(dailyForecast[key].trim(), '', `${locale}:${key}`)
   }
 })

@@ -112,7 +112,20 @@
       "candidate_id": "Candidate ID: {id}",
       "expected_id": "Expected occurrence: {id}",
       "evidence_ids": "Evidence IDs: {ids}",
-      "conversion": "Conversion: {mode}"
+      "conversion": "Conversion: {mode}",
+      "bundle_details": "묶음 상세",
+      "gross_inflow": "총 유입",
+      "taxes": "세금",
+      "insurance": "보험",
+      "debt": "부채",
+      "savings": "저축",
+      "variable_envelope": "변동 지출 범위",
+      "expected_range": "예상 범위",
+      "plan": "계획",
+      "history": "내역",
+      "undated_estimate": "날짜가 없는 추정치이며 일별 거래로 표시되지 않습니다.",
+      "event_evidence": "이벤트 근거",
+      "projected_non_navigable": "예측 근거일 뿐이며 거래를 열지 않습니다."
     },
     "balance": {
       "title": "재무 추세",

@@ -112,7 +112,20 @@
       "candidate_id": "Candidate ID: {id}",
       "expected_id": "Expected occurrence: {id}",
       "evidence_ids": "Evidence IDs: {ids}",
-      "conversion": "Conversion: {mode}"
+      "conversion": "Conversion: {mode}",
+      "bundle_details": "Состав события",
+      "gross_inflow": "Валовой приток",
+      "taxes": "Налоги",
+      "insurance": "Страхование",
+      "debt": "Долг",
+      "savings": "Сбережения",
+      "variable_envelope": "Диапазон переменных расходов",
+      "expected_range": "Ожидаемый диапазон",
+      "plan": "План",
+      "history": "История",
+      "undated_estimate": "Оценка без даты — она не отображается как ежедневные операции.",
+      "event_evidence": "Доказательства события",
+      "projected_non_navigable": "Только прогнозные данные; они не открывают операцию."
     },
     "balance": {
       "title": "Финансовая динамика",

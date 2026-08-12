@@ -112,7 +112,20 @@
       "candidate_id": "Candidate ID: {id}",
       "expected_id": "Expected occurrence: {id}",
       "evidence_ids": "Evidence IDs: {ids}",
-      "conversion": "Conversion: {mode}"
+      "conversion": "Conversion: {mode}",
+      "bundle_details": "组合明细",
+      "gross_inflow": "总流入",
+      "taxes": "税费",
+      "insurance": "保险",
+      "debt": "债务",
+      "savings": "储蓄",
+      "variable_envelope": "可变支出范围",
+      "expected_range": "预期范围",
+      "plan": "计划",
+      "history": "历史",
+      "undated_estimate": "未定日期的估算，不会显示为每日交易。",
+      "event_evidence": "事件依据",
+      "projected_non_navigable": "仅为预测依据，无法打开交易。"
     },
     "balance": {
       "title": "财务趋势",

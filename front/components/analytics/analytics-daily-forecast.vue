@@ -19,7 +19,7 @@
     </div>
     <div v-else-if="dailyState.status === 'error' && !hasRetainedData" class="analytics-card-state">
       <span>{{ $t('analytics.daily_forecast.error') }}</span>
-      <van-button size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
+      <van-button class="analytics-daily-forecast-retry" size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
     </div>
     <div v-else-if="dailyState.isBlockingUnavailable" class="analytics-warning" role="alert">
       <div>{{ $t('analytics.daily_forecast.unavailable') }}</div>
@@ -35,7 +35,7 @@
     <template v-else>
       <div v-if="dailyState.status === 'error'" class="analytics-card-state analytics-card-state-compact">
         <span>{{ $t('analytics.daily_forecast.error') }}</span>
-        <van-button size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
+        <van-button class="analytics-daily-forecast-retry" size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
       </div>
       <div v-else-if="dailyState.status === 'loading' && dailyState.isStale" class="analytics-assumption-note">{{ $t('analytics.common.stale') }}</div>
       <div v-if="dailyState.isPartiallyUnavailable" class="analytics-warning" role="status">
@@ -49,8 +49,9 @@
         </details>
         <div v-if="dailyState.sourceErrors.length">
           <div v-for="sourceError in dailyState.sourceErrors" :key="sourceError.source">{{ $t('analytics.daily_forecast.error') }} ({{ sourceError.source }})</div>
-          <van-button size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
+          <van-button class="analytics-daily-forecast-retry" size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
         </div>
+        <van-button v-else class="analytics-daily-forecast-retry" size="small" @click="analyticsStore.retryDailyForecast">{{ $t('analytics.common.retry') }}</van-button>
       </div>
 
       <div class="analytics-daily-forecast-summary" :aria-label="$t('analytics.daily_forecast.chart_label')">
@@ -69,6 +70,61 @@
       </div>
 
       <analytics-combination-chart :series="chartSeries" :value-formatter="formatCurrency" :aria-label="$t('analytics.daily_forecast.chart_label')" @select="onSelect" @select-point="onSelectPoint" />
+
+      <div v-if="variableEnvelopeItems.length || eventSummaries.length" class="analytics-daily-forecast-disclosures">
+        <details v-if="variableEnvelopeItems.length" class="analytics-daily-forecast-disclosure analytics-daily-forecast-envelope">
+          <summary>
+            <span>{{ $t('analytics.daily_forecast.variable_envelope') }}</span>
+            <strong>{{ formatSignedCurrency(variableEnvelopeChange) }}</strong>
+          </summary>
+          <div class="analytics-daily-forecast-disclosure-body">
+            <div class="analytics-assumption-note">{{ $t('analytics.daily_forecast.undated_estimate') }}</div>
+            <div class="analytics-assumption-note">{{ $t('analytics.daily_forecast.projected_non_navigable') }}</div>
+            <div v-for="item in variableEnvelopeItems" :key="item.id" class="analytics-daily-forecast-evidence-item">
+              <div class="analytics-daily-forecast-evidence-heading">
+                <strong>{{ item.label }}</strong>
+                <small v-if="item.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: item.confidence.level }) }}</small>
+              </div>
+              <div class="analytics-daily-forecast-evidence-grid">
+                <div v-for="row in item.rows" :key="row.id">
+                  <span>{{ row.label }}</span>
+                  <strong>{{ formatCurrency(row.value) }}</strong>
+                </div>
+              </div>
+              <small v-if="item.evidenceIds.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: item.evidenceIds.join(', ') }) }}</small>
+            </div>
+          </div>
+        </details>
+
+        <div v-if="eventSummaries.length" class="analytics-daily-forecast-events">
+          <div class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.bundle_details') }}</div>
+          <details v-for="event in eventSummaries" :key="event.id" class="analytics-daily-forecast-disclosure analytics-daily-forecast-event">
+            <summary>
+              <span>
+                <strong>{{ event.label }}</strong>
+                <small>{{ event.dateLabel }}</small>
+              </span>
+              <strong>{{ formatSignedCurrency(event.availableCashChange) }}</strong>
+            </summary>
+            <div class="analytics-daily-forecast-disclosure-body">
+              <div class="analytics-daily-forecast-component-list">
+                <div v-for="row in event.detailRows.filter(({ value }) => Number.isFinite(value) && value !== 0)" :key="row.id" class="analytics-daily-forecast-component-row">
+                  <span>{{ row.label }}</span>
+                  <strong :class="row.value < 0 ? 'analytics-negative-value' : 'analytics-positive-value'">{{ formatSignedCurrency(row.value) }}</strong>
+                </div>
+              </div>
+              <div class="analytics-daily-forecast-evidence">
+                <strong>{{ $t('analytics.daily_forecast.event_evidence') }}</strong>
+                <span>{{ $t('analytics.daily_forecast.projected_non_navigable') }}</span>
+                <span v-if="event.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: event.confidence.level }) }}</span>
+                <span v-if="event.sourceIds.length">{{ $t('analytics.daily_forecast.source_id', { id: event.sourceIds.join(', ') }) }}</span>
+                <span v-if="event.candidateIds.length">{{ $t('analytics.daily_forecast.candidate_id', { id: event.candidateIds.join(', ') }) }}</span>
+                <span v-if="event.evidenceIds.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: event.evidenceIds.join(', ') }) }}</span>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
 
       <div v-if="selectedPayload" class="analytics-calculation-details analytics-daily-forecast-details" aria-live="polite">
         <div class="analytics-daily-forecast-details-heading">
@@ -112,6 +168,7 @@
               <div v-if="source.evidenceIds?.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: source.evidenceIds.join(', ') }) }}</div>
               <div v-if="source.evidenceOmittedCount">{{ $t('analytics.common.more_items', { count: source.evidenceOmittedCount }) }}</div>
               <div v-if="source.conversion?.mode">{{ $t('analytics.daily_forecast.conversion', { mode: source.conversion.mode }) }}</div>
+              <div>{{ $t('analytics.daily_forecast.projected_non_navigable') }}</div>
             </div>
           </details>
         </template>
@@ -166,6 +223,59 @@ const legendItems = computed(() => [
   { id: 'outflow', label: t('analytics.daily_forecast.outflow'), color: 'var(--expense2)' },
   { id: 'available', label: t('analytics.daily_forecast.available_change'), color: 'var(--transfer2)' },
 ])
+const materialRows = (rows) => rows.filter(({ value }) => Number.isFinite(value) && value !== 0)
+const componentIdentity = (component) => `${component.bundleComponentId ?? ''} ${component.bundleLabel ?? ''} ${component.categoryId ?? ''}`.toLowerCase()
+const expenseComponentLabel = (component) => {
+  const identity = componentIdentity(component)
+  if (identity.includes('tax')) return t('analytics.daily_forecast.taxes')
+  if (identity.includes('insurance')) return t('analytics.daily_forecast.insurance')
+  return component.bundleLabel || component.sourceLabel || sourceLabel(component.sourceKind)
+}
+const eventDetailRows = (event) => {
+  const rows = event.components.flatMap((component) => {
+    const flow = component.flowAmounts ?? {}
+    return [
+      { id: `${component.id}:income`, label: t('analytics.daily_forecast.gross_inflow'), value: (flow.income ?? 0) + (flow.refunds ?? 0) },
+      { id: `${component.id}:expenses`, label: expenseComponentLabel(component), value: -(flow.expenses ?? 0) },
+      { id: `${component.id}:debt`, label: t('analytics.daily_forecast.debt'), value: (flow.newDebt ?? 0) - (flow.debtRepayments ?? 0) },
+      { id: `${component.id}:savings`, label: t('analytics.daily_forecast.savings'), value: (flow.savingsWithdrawals ?? 0) - (flow.savingsDeposits ?? 0) },
+    ]
+  })
+  return [
+    ...materialRows(rows),
+    ...(Number.isFinite(event.availableCashChange) ? [{ id: `${event.id}:available`, label: t('analytics.daily_forecast.available_change'), value: event.availableCashChange }] : []),
+  ]
+}
+const eventSummaries = computed(() =>
+  daily.value.eventSummaries.map((event) => ({
+    ...event,
+    label: event.bundleLabel || sourceLabel(event.sourceKind),
+    dateLabel: new Intl.DateTimeFormat(profileStore.language, { month: 'short', day: 'numeric' }).format(parseISO(event.date)),
+    detailRows: eventDetailRows(event),
+  })),
+)
+const envelopeRows = (item) =>
+  [
+    { id: 'expected', label: t('analytics.daily_forecast.expected_range'), value: item.expected },
+    { id: 'plan', label: t('analytics.daily_forecast.plan'), value: item.plan },
+    { id: 'history', label: t('analytics.daily_forecast.history'), value: item.historical },
+  ].filter(({ value }) => Number.isFinite(value))
+const variableEnvelopeItems = computed(() =>
+  daily.value.variableEnvelope.items
+    .filter(
+      (item) =>
+        [item.expected, item.plan, item.historical, item.remaining].some((value) => Number.isFinite(value) && value !== 0) ||
+        item.evidenceIds?.length ||
+        (item.planStatus && item.planStatus !== 'ready'),
+    )
+    .map((item) => ({
+      ...item,
+      label: item.budgetId || item.categoryId || item.id,
+      evidenceIds: [...(item.evidenceIds ?? [])],
+      rows: envelopeRows(item),
+    })),
+)
+const variableEnvelopeChange = computed(() => daily.value.variableEnvelope.availableCashChange)
 const directionKeys = {
   sources: ['income', 'refunds', 'savingsWithdrawals', 'newDebt'],
   uses: ['expenses', 'savingsDeposits', 'debtRepayments'],

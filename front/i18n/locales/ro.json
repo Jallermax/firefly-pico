@@ -112,7 +112,20 @@
       "candidate_id": "Candidate ID: {id}",
       "expected_id": "Expected occurrence: {id}",
       "evidence_ids": "Evidence IDs: {ids}",
-      "conversion": "Conversion: {mode}"
+      "conversion": "Conversion: {mode}",
+      "bundle_details": "Detaliile grupului",
+      "gross_inflow": "Intrare brută",
+      "taxes": "Impozite",
+      "insurance": "Asigurare",
+      "debt": "Datorie",
+      "savings": "Economii",
+      "variable_envelope": "Intervalul cheltuielilor variabile",
+      "expected_range": "Interval estimat",
+      "plan": "Plan",
+      "history": "Istoric",
+      "undated_estimate": "Estimare fără dată — nu este afișată ca tranzacții zilnice.",
+      "event_evidence": "Dovezile evenimentului",
+      "projected_non_navigable": "Doar dovezi proiectate; nu deschide o tranzacție."
     },
     "balance": {
       "title": "Tendințe financiare",

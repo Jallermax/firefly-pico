@@ -112,7 +112,20 @@
       "candidate_id": "Candidate ID: {id}",
       "expected_id": "Expected occurrence: {id}",
       "evidence_ids": "Evidence IDs: {ids}",
-      "conversion": "Conversion: {mode}"
+      "conversion": "Conversion: {mode}",
+      "bundle_details": "Dettagli del gruppo",
+      "gross_inflow": "Entrata lorda",
+      "taxes": "Imposte",
+      "insurance": "Assicurazione",
+      "debt": "Debito",
+      "savings": "Risparmi",
+      "variable_envelope": "Intervallo delle spese variabili",
+      "expected_range": "Intervallo previsto",
+      "plan": "Piano",
+      "history": "Storico",
+      "undated_estimate": "Stima senza data — non viene mostrata come transazioni giornaliere.",
+      "event_evidence": "Prove dell’evento",
+      "projected_non_navigable": "Solo prove previsionali; non apre una transazione."
     },
     "balance": {
       "title": "Andamento finanziario",

@@ -3368,6 +3368,139 @@ body {
     transform: rotate(45deg) scale(0.85);
 }
 
+.analytics-daily-forecast-card .analytics-combination-scroll {
+  max-width: 100%;
+}
+
+.analytics-daily-forecast-retry {
+  min-height: 44px;
+  margin-top: 6px;
+}
+
+.analytics-daily-forecast-disclosures {
+  display: grid;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.analytics-daily-forecast-disclosure {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px dashed var(--van-border-color);
+  border-radius: 8px;
+  background: var(--van-background-2-5);
+}
+
+.analytics-daily-forecast-disclosure > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  list-style-position: inside;
+}
+
+.analytics-daily-forecast-disclosure > summary > span {
+  display: inline-flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.analytics-daily-forecast-disclosure > summary small,
+.analytics-daily-forecast-evidence-heading small,
+.analytics-daily-forecast-evidence-item > small {
+  color: var(--van-text-color-3);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.analytics-daily-forecast-disclosure-body {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.analytics-daily-forecast-section-title {
+  padding: 4px 2px 0;
+  color: var(--van-text-color-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.analytics-daily-forecast-events {
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-daily-forecast-evidence-item {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--white);
+  font-size: 11px;
+}
+
+.analytics-daily-forecast-evidence-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.analytics-daily-forecast-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.analytics-daily-forecast-evidence-grid > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.analytics-daily-forecast-component-list {
+  display: grid;
+}
+
+.analytics-daily-forecast-component-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--van-border-color);
+  font-size: 11px;
+}
+
+.analytics-daily-forecast-component-row:last-child {
+  border-bottom: 0;
+}
+
+.analytics-daily-forecast-evidence {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--van-text-color-3);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .analytics-daily-forecast-evidence-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .analytics-combination-chart,
 .analytics-combination-chart-svg {
     min-height: 280px;
