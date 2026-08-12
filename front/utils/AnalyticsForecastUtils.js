@@ -993,8 +993,8 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
     const allKeys = unique(occurrences.flatMap(({ components, ambiguousKeys }) => [...components.keys(), ...ambiguousKeys.map((key) => `${key}|component:ambiguous`)])).sort()
     const commonKeys = allKeys.filter((key) => occurrences.every(({ components }) => components.has(key)))
     if (commonKeys.length < 2 || !commonKeys.includes(anchorKey)) continue
-    const signature = commonKeys.join('||')
-    const id = `bundle:${stableHash(`${anchorKey}|${signature}`)}`
+    const historicalSignature = commonKeys.join('||')
+    const id = `bundle:${stableHash(`${anchorKey}|${historicalSignature}`)}`
     const phaseComponents = { middle: [], monthEnd: [] }
     for (const [phase, phaseOccurrences, oppositeOccurrences] of [
       ['middle', middleOccurrences, monthEndOccurrences],
@@ -1014,8 +1014,11 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
         .filter((key) => !phaseOnlyKeys.has(key))
         .sort()
         .join('||')
-    const pairSignaturesAgree = eligibleSignature(latestPair[0]) === eligibleSignature(latestPair[1]) && eligibleSignature(latestPair[0]) === signature
-    const pairAmountsAgree = commonKeys.every(
+    const latestPairStableKeys = unique(latestPair.flatMap(({ components }) => [...components.keys()]))
+      .filter((key) => !phaseOnlyKeys.has(key) && latestPair.every(({ components }) => components.has(key)))
+      .sort()
+    const pairSignaturesAgree = eligibleSignature(latestPair[0]) === eligibleSignature(latestPair[1])
+    const pairAmountsAgree = latestPairStableKeys.every(
       (key) => roundAmount(amountOf(latestPair[0].components.get(key)), currencyDecimalPlaces) === roundAmount(amountOf(latestPair[1].components.get(key)), currencyDecimalPlaces),
     )
     const olderAnchorMedian = median(older.map(({ components }) => amountOf(components.get(anchorKey))))
@@ -1028,8 +1031,10 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
       level: regimeChanged ? 'high' : 'medium',
       reasons: [regimeChanged ? 'Latest two equivalent occurrences establish a new regime' : 'No two-occurrence regime change; uses a recency-weighted median'],
     }
+    const regimeComponentKeys = regimeChanged ? unique([...commonKeys, ...latestPairStableKeys]).sort() : commonKeys
+    const signature = regimeComponentKeys.join('||')
     const components = [
-      ...commonKeys.map((key) => recurringBundleComponent({ key, occurrences, bundleId: id, anchorKey, currencyDecimalPlaces })),
+      ...regimeComponentKeys.map((key) => recurringBundleComponent({ key, occurrences, bundleId: id, anchorKey, currencyDecimalPlaces })),
       ...phaseComponents.middle.map((key) => recurringBundleComponent({ key, occurrences: middleOccurrences, phase: 'middle', bundleId: id, anchorKey, currencyDecimalPlaces })),
       ...phaseComponents.monthEnd.map((key) => recurringBundleComponent({ key, occurrences: monthEndOccurrences, phase: 'monthEnd', bundleId: id, anchorKey, currencyDecimalPlaces })),
     ].sort((left, right) => left.id.localeCompare(right.id))

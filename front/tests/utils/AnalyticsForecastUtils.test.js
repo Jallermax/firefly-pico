@@ -768,7 +768,10 @@ test('uses an expanded equivalent latest payroll pair as the current regime', ()
   assert.deepEqual(amounts('New current deduction'), [126, 126])
   assert.ok(newDeductionIds.every((id) => bundle.entryIds.includes(id)))
   assert.ok(newDeductionIds.every((id) => ordered.audit.recurring.removedHistoryEntryIds.includes(id)))
-  assert.equal(ordered.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => newDeductionIds.includes(id))), false)
+  assert.equal(
+    ordered.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => newDeductionIds.includes(id))),
+    false,
+  )
   assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
   assert.deepEqual(input.entries, snapshot)
 })
