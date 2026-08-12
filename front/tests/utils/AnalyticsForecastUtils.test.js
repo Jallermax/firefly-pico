@@ -22,6 +22,7 @@ const entry = ({
   sourceKind = direction === 'income' ? 'revenue' : 'available',
   destinationKind = direction === 'income' ? 'available' : 'expense',
   categoryId = direction === 'income' ? 'salary' : 'general',
+  categoryLabel = null,
   description = direction === 'income' ? 'Salary' : 'Merchant',
   refund = false,
   missingCurrency = null,
@@ -41,6 +42,7 @@ const entry = ({
   sourceAccount: endpoint(sourceId, sourceKind, !['revenue', 'expense', 'savingsRestricted'].includes(sourceKind)),
   destinationAccount: endpoint(destinationId, destinationKind, !['revenue', 'expense', 'savingsRestricted'].includes(destinationKind)),
   categoryId,
+  categoryLabel,
   budgetId,
   description,
   tags,
@@ -2952,6 +2954,43 @@ test('keeps an aggregate payroll candidate when its evidence is only partly cove
   )
 })
 
+test('keeps an aggregate payroll candidate when one of its transaction evidence groups is independent', () => {
+  const history = payrollHistoryWithIdenticalPhases()
+  const coveredTax = history.find(({ categoryId, date }) => categoryId === 'taxes' && date === '2026-07-15')
+  const independentTax = entry({
+    id: 'independent-tax-transaction-evidence',
+    transactionId: 'independent-tax-transaction-group',
+    date: '2026-07-20',
+    value: 42,
+    sourceId: 'checking',
+    destinationId: 'tax-authority',
+    categoryId: 'taxes',
+    description: 'Independent tax payment',
+  })
+  const base = definedCandidate({ id: 'partly-covered-transaction-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-20', amount: 630 })
+  const aggregate = {
+    ...base,
+    identity: { ...base.identity, categoryId: 'taxes', payee: 'payroll taxes' },
+    evidence: { ...base.evidence, entryIds: [], transactionIds: [coveredTax.transactionId, independentTax.transactionId] },
+  }
+  const contexts = { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, independentTax], { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [aggregate],
+    ...normalizedCandidateInputs([aggregate], contexts),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.dailyProjectedEntries.filter(({ candidateId }) => candidateId === aggregate.id).length, 1)
+  assert.equal(result.audit.recurring.suppressedCandidateIds.includes(aggregate.id), false)
+  assert.equal(
+    result.audit.recurring.aggregateReconciliation.some(({ candidateId }) => candidateId === aggregate.id),
+    false,
+  )
+})
+
 test('keeps an aggregate payroll candidate when shared transaction evidence is ambiguous', () => {
   const history = payrollHistoryWithIdenticalPhases()
   const coveredTax = history.find(({ categoryId, date }) => categoryId === 'taxes' && date === '2026-07-15')
@@ -3046,6 +3085,32 @@ test('builds robust undated budget envelopes after removing known evidence and k
   )
   assert.equal(result.remainingFromToday.expenses, 90)
   assert.equal(result.final.expenses, 100)
+})
+
+test('keeps human category names on unbudgeted variable envelopes', () => {
+  const months = ['2026-05', '2026-06', '2026-07']
+  const history = months.flatMap((month, index) => [
+    entry({ id: `food-${index}`, date: `${month}-${10 + index}`, value: 80 + index, categoryId: 'food', categoryLabel: 'Groceries' }),
+    entry({ id: `transport-${index}`, date: `${month}-${18 + index}`, value: 60 + index, categoryId: 'transport', categoryLabel: 'Transportation' }),
+  ])
+  const options = {
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-10' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+  const ordered = buildRemainingActivityForecast(options)
+  const reversed = buildRemainingActivityForecast({ ...options, ledger: ledger([...history].reverse(), { startMonth: '2026-05', endDate: '2026-08-10' }) })
+
+  assert.deepEqual(
+    ordered.variableEnvelopes.filter(({ categoryId }) => ['food', 'transport'].includes(categoryId)).map(({ categoryId, label }) => ({ categoryId, label })),
+    [
+      { categoryId: 'food', label: 'Groceries' },
+      { categoryId: 'transport', label: 'Transportation' },
+    ],
+  )
+  assert.deepEqual(reversed, ordered)
 })
 
 test('uses a reset plan only when completed history is insufficient and keeps rollover reserves plan-only', () => {

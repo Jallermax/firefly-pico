@@ -1273,11 +1273,12 @@ export function createAnalyticsStore(id, useDependencies) {
       items: dailyForecast.value.impactItems,
       payrollEvents: dailyForecast.value.eventSummaries
         .filter(({ bundleId }) => bundleId)
-        .map(({ id, date, bundleId, bundleLabel, impact, components }) => ({
+        .map(({ id, date, bundleId, bundleLabel, confidence, impact, components }) => ({
           id,
           date,
           bundleId,
           bundleLabel,
+          confidence,
           impact,
           components: components.map(({ id: componentId, bundleLabel: componentLabel, sourceLabel, sourceAccountKind, destinationAccountKind, impact: componentImpact }) => ({
             id: componentId,

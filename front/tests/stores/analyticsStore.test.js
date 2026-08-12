@@ -2927,6 +2927,10 @@ test('projects dated payroll and bill events while keeping the variable envelope
       { date: '2026-08-31', impact: { savingsChange: 0, debtChange: 0, netWorthChange: 800, availableCashChange: 800 } },
     ],
   )
+  assert.deepEqual(
+    store.dailyForecastImpact.payrollEvents.map(({ confidence }) => confidence.level),
+    ['medium', 'medium'],
+  )
   assert.equal(
     store.dailyForecastImpact.payrollEvents.every(
       ({ components }) =>
@@ -3642,6 +3646,8 @@ test('keeps the daily card and combination-chart selection contract exact withou
   assert.match(dailySource, /v-if="dailyState\.isPartiallyUnavailable"/)
   assert.match(dailySource, /ROUTE_ANALYTICS_DAILY_FORECAST/)
   assert.match(dailySource, /partialInputCount/)
+  assert.match(dailySource, /Math\.max\(1,\s*unavailableEvidenceSummary\.value\.count/)
+  assert.match(readFileSync(new URL('../../pages/analytics/daily-forecast.vue', import.meta.url), 'utf8'), /Math\.max\(1,\s*analyticsStore\.dailyForecastState\.unavailableEvidenceSummary\.count/)
   assert.doesNotMatch(dailySource, /analytics-daily-forecast-partial-badge/)
   assert.match(chartSource, /series\.barGroups/)
   assert.match(chartSource, /point\?\.showInTooltip !== false/)
@@ -3773,6 +3779,19 @@ test('renders explainable dated events and an explicitly undated non-navigable v
           { id: 'savings:deposit', label: 'analytics.daily_forecast.savings', value: -300 },
           { id: 'available', label: 'analytics.daily_forecast.available_change', value: 1905 },
           { id: 'zero', label: 'zero-component', value: 0 },
+        ],
+      },
+    ],
+    scheduledEventSummaries: [
+      {
+        id: 'scheduled:2026-08-20',
+        label: 'Scheduled transfer',
+        dateLabel: 'Aug 20',
+        availableCashChange: -510,
+        confidence: { level: 'medium' },
+        detailRows: [
+          { id: 'debt', label: 'analytics.daily_forecast.debt', value: -210 },
+          { id: 'savings', label: 'analytics.daily_forecast.savings', value: -300 },
         ],
       },
     ],
@@ -3991,7 +4010,23 @@ test('derives event detail rows from real flow data without guessing semantics f
 
 test('explains payroll impact from store-provided account endpoints and metric contributions', async () => {
   const component = loadAnalyticsDailyDetailsComponent()
-  const forecast = dailyForecastSfcFixture()
+  const forecast = dailyForecastSfcFixture({
+    eventSummaries: [
+      {
+        id: 'payroll:2026-08-14',
+        date: '2026-08-14',
+        sourceKind: 'inferred',
+        bundleId: 'payroll-bundle',
+        bundleLabel: 'Payroll',
+        availableCashChange: 1905,
+        confidence: 'high',
+        sourceIds: ['payroll-bundle'],
+        candidateIds: [],
+        evidenceIds: ['payroll-history'],
+        components: [],
+      },
+    ],
+  })
   const impact = {
     items: [],
     payrollEvents: [
@@ -3999,14 +4034,22 @@ test('explains payroll impact from store-provided account endpoints and metric c
         id: 'payroll:2026-08-14',
         date: '2026-08-14',
         bundleLabel: 'Payroll',
+        confidence: 'high',
         impact: { availableCashChange: 1905, savingsChange: 300, debtChange: -210, netWorthChange: 3150 },
         components: [
           {
             id: 'salary',
             label: 'Base pay',
-            sourceAccountKind: 'outside',
+            sourceAccountKind: 'revenue',
             destinationAccountKind: 'available',
             impact: { availableCashChange: 3150, savingsChange: 0, debtChange: 0, netWorthChange: 3150 },
+          },
+          {
+            id: 'tax',
+            label: 'Payroll taxes',
+            sourceAccountKind: 'available',
+            destinationAccountKind: 'expense',
+            impact: { availableCashChange: -630, savingsChange: 0, debtChange: 0, netWorthChange: -630 },
           },
           {
             id: 'included-savings',
@@ -4020,7 +4063,7 @@ test('explains payroll impact from store-provided account endpoints and metric c
     ],
   }
   const app = createSSRApp(component, { ...dailyDetailsProps({ forecast }), impact })
-  app.config.globalProperties.$t = (key, values = {}) => (values.source ? `${key}:${values.source}->${values.destination}` : key)
+  app.config.globalProperties.$t = (key, values = {}) => (values.source ? `${key}:${values.source}->${values.destination}` : values.level ? `${key}:${values.level}` : key)
   const stub = {
     setup:
       (_, { slots }) =>
@@ -4034,7 +4077,11 @@ test('explains payroll impact from store-provided account endpoints and metric c
   assert.match(html, /Base pay/)
   assert.match(html, /Included savings/)
   assert.match(html, /analytics\.daily_forecast\.account_route:analytics\.daily_forecast\.account_outside-&gt;analytics\.flow\.available_pool/)
+  assert.match(html, /analytics\.daily_forecast\.account_route:analytics\.flow\.available_pool-&gt;analytics\.daily_forecast\.account_outside/)
   assert.match(html, /analytics\.daily_forecast\.account_route:analytics\.flow\.available_pool-&gt;analytics\.daily_forecast\.impact_savings_included/)
+  assert.match(html, /analytics\.daily_forecast\.confidence:analytics\.daily_forecast\.confidence_high/)
+  assert.equal((html.match(/<strong>Payroll<\/strong>/g) ?? []).length, 1)
+  assert.doesNotMatch(html, />\+?0 USD</)
   for (const key of ['impact_available_change', 'savings', 'impact_net_worth_change']) assert.match(html, new RegExp(`analytics\\.daily_forecast\\.${key}`))
 })
 
@@ -4059,11 +4106,11 @@ test('renders human budget evidence and keeps unavailable monthly impact visibly
         },
       ],
     },
-    audit: { aggregateReconciliation: [{ candidateId: 'aggregate-tax', bundleIds: ['payroll-bundle'] }] },
+    audit: { aggregateReconciliation: [{ candidateId: 'aggregate-tax', bundleIds: ['payroll-bundle'], entryIds: ['tax-entry'], transactionIds: ['tax-transaction'] }] },
   })
   const impact = { items: [{ id: 'netWorthChange', actual: 100, remaining: null, final: null, status: 'unavailable' }], payrollEvents: [] }
   const app = createSSRApp(component, { ...dailyDetailsProps({ forecast }), impact })
-  app.config.globalProperties.$t = (key, values = {}) => (values.count ? `${key}:${values.count}` : key)
+  app.config.globalProperties.$t = (key, values = {}) => (values.count ? `${key}:${values.count}` : values.id ? `${key}:${values.id}` : values.ids ? `${key}:${values.ids}` : key)
   app.component('van-button', {
     setup:
       (_, { slots }) =>
@@ -4079,6 +4126,33 @@ test('renders human budget evidence and keeps unavailable monthly impact visibly
   assert.doesNotMatch(html, /raw-budget-id/)
   assert.match(html, /analytics\.daily_forecast\.remaining_activity: —/)
   assert.match(html, /analytics\.daily_forecast\.end_of_month_change: —/)
+  for (const id of ['payroll-bundle', 'tax-entry', 'tax-transaction']) assert.match(html, new RegExp(id))
+})
+
+test('renders distinct category envelope names instead of repeated generic activity labels', async () => {
+  const component = loadAnalyticsDailyDetailsComponent()
+  const forecast = dailyForecastSfcFixture({
+    variableEnvelope: {
+      availableCashChange: -140,
+      items: [
+        { id: 'food', categoryId: 'food', label: 'Groceries', confidence: 'high', expected: 80, remaining: 80, evidenceIds: ['food-history'] },
+        { id: 'transport', categoryId: 'transport', label: 'Transportation', confidence: 'high', expected: 60, remaining: 60, evidenceIds: ['transport-history'] },
+      ],
+    },
+  })
+  const app = createSSRApp(component, dailyDetailsProps({ forecast }))
+  app.config.globalProperties.$t = (key, values = {}) => (values.level ? `${key}:${values.level}` : key)
+  app.component('van-button', {
+    setup:
+      (_, { slots }) =>
+      () =>
+        h('div', slots.default?.()),
+  })
+  const html = await renderToString(app)
+
+  assert.match(html, /Groceries/)
+  assert.match(html, /Transportation/)
+  assert.doesNotMatch(html, /analytics\.daily_forecast\.category_activity/)
 })
 
 test('renders the production string confidence contract for every envelope state', async () => {

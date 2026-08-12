@@ -52,6 +52,7 @@
             <span>
               <strong>{{ event.label }}</strong>
               <small>{{ event.dateLabel }}</small>
+              <small v-if="confidenceLevel(event.confidence)">{{ $t('analytics.daily_forecast.confidence', { level: confidenceLabel(event.confidence) }) }}</small>
             </span>
             <strong>{{ formatSignedCurrency(event.impact.availableCashChange) }}</strong>
           </summary>
@@ -77,11 +78,12 @@
 
     <section class="analytics-daily-forecast-detail-section analytics-daily-forecast-events">
       <h2 class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.scheduled_events') }}</h2>
-      <details v-for="event in eventSummaries" :key="event.id" class="analytics-daily-forecast-disclosure analytics-daily-forecast-event">
+      <details v-for="event in scheduledEventSummaries" :key="event.id" class="analytics-daily-forecast-disclosure analytics-daily-forecast-event">
         <summary>
           <span>
             <strong>{{ event.label }}</strong>
             <small>{{ event.dateLabel }}</small>
+            <small v-if="confidenceLevel(event.confidence)">{{ $t('analytics.daily_forecast.confidence', { level: confidenceLabel(event.confidence) }) }}</small>
           </span>
           <strong>{{ formatSignedCurrency(event.availableCashChange) }}</strong>
         </summary>
@@ -94,7 +96,7 @@
           </div>
         </div>
       </details>
-      <div v-if="eventSummaries.length === 0" class="analytics-assumption-note">{{ $t('analytics.daily_forecast.no_scheduled_events') }}</div>
+      <div v-if="scheduledEventSummaries.length === 0" class="analytics-assumption-note">{{ $t('analytics.daily_forecast.no_scheduled_events') }}</div>
     </section>
 
     <section class="analytics-daily-forecast-detail-section analytics-daily-forecast-envelope">
@@ -131,7 +133,8 @@
           </template>
           <span v-for="item in forecast.audit?.aggregateReconciliation ?? []" :key="item.candidateId">
             {{ $t('analytics.daily_forecast.aggregate_reconciled', { count: item.bundleIds.length }) }}
-            · {{ $t('analytics.daily_forecast.candidate_id', { id: item.candidateId }) }}
+            · {{ $t('analytics.daily_forecast.candidate_id', { id: item.candidateId }) }} · {{ $t('analytics.daily_forecast.source_id', { id: item.bundleIds.join(', ') }) }} ·
+            {{ $t('analytics.daily_forecast.evidence_ids', { ids: [...(item.entryIds ?? []), ...(item.transactionIds ?? [])].join(', ') }) }}
           </span>
           <span v-if="unavailableEvidenceSummary.previewIds.length">{{ unavailableEvidenceSummary.previewIds.join(', ') }}</span>
           <span v-if="unavailableEvidenceSummary.omittedCount">{{ $t('analytics.common.more_items', { count: unavailableEvidenceSummary.omittedCount }) }}</span>
@@ -186,6 +189,7 @@ const eventSummaries = computed(() =>
     detailRows: eventDetailRows(event),
   })),
 )
+const scheduledEventSummaries = computed(() => eventSummaries.value.filter(({ bundleId }) => !bundleId))
 const envelopeRows = (item) =>
   [
     { id: 'actual', label: t('analytics.daily_forecast.actual_variable_activity'), value: item.actual },
@@ -255,6 +259,8 @@ const impactLabelKeys = {
 const impactLabel = (id) => t(`analytics.daily_forecast.${impactLabelKeys[id]}`)
 const accountKindLabelKeys = {
   outside: 'analytics.daily_forecast.account_outside',
+  revenue: 'analytics.daily_forecast.account_outside',
+  expense: 'analytics.daily_forecast.account_outside',
   available: 'analytics.flow.available_pool',
   savingsAccessible: 'analytics.daily_forecast.impact_savings_included',
   savingsRestricted: 'analytics.daily_forecast.impact_savings_excluded',
@@ -262,7 +268,7 @@ const accountKindLabelKeys = {
 }
 const accountKindLabel = (kind) => t(accountKindLabelKeys[kind] ?? 'analytics.daily_forecast.account_unknown')
 const componentImpactRows = (component) =>
-  ['availableCashChange', 'savingsChange', 'debtChange', 'netWorthChange'].map((id) => ({ id, value: component.impact?.[id] })).filter(({ value }) => Number.isFinite(value))
+  ['availableCashChange', 'savingsChange', 'debtChange', 'netWorthChange'].map((id) => ({ id, value: component.impact?.[id] })).filter(({ value }) => Number.isFinite(value) && value !== 0)
 const payrollImpactEvents = computed(() =>
   (props.impact.payrollEvents ?? []).map((event) => ({
     ...event,

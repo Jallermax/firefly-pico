@@ -58,7 +58,7 @@ const monthTitle = computed(() => new Intl.DateTimeFormat(profileStore.language,
 const hasActivity = computed(() => daily.value.barGroups.some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)))
 const hasRetainedData = computed(() => dailyState.value.isStale && daily.value.dateKeys.length > 0)
 const unavailableEvidenceSummary = computed(() => dailyState.value.unavailableEvidenceSummary ?? { count: 0 })
-const partialInputCount = computed(() => unavailableEvidenceSummary.value.count + (dailyState.value.sourceErrors?.length ?? 0))
+const partialInputCount = computed(() => Math.max(1, unavailableEvidenceSummary.value.count + (dailyState.value.sourceErrors?.length ?? 0)))
 const dateFromSelection = (payload) => payload?.x ?? payload?.values?.find(({ point }) => point?.x)?.point?.x ?? null
 const openFullForecast = (date = null) => navigateTo({ path: RouteConstants.ROUTE_ANALYTICS_DAILY_FORECAST, ...(date ? { query: { date } } : {}) })
 const openSelection = (payload) => {

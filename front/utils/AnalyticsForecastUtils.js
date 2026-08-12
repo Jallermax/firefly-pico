@@ -958,14 +958,16 @@ const bundleCandidateMatchesAdmittedComponent = ({ candidate, bundle, amount }) 
   const candidateContext = projectionContext(candidate).context
   const amountRange = authoritativeAmountRange({ candidate, amount })
   const matchesAmount = (value) => !amountRange || !Number.isFinite(value) || (value >= amountRange.min && value <= amountRange.max)
-  return bundle.matchingComponents.some(({ context, samples }) => {
-    if (contextKey(context) !== contextKey(candidateContext)) return false
-    return samples.some(({ id, transactionId, value, transactionEntries }) => {
-      if (!transactionIds.has(String(transactionId)) || !matchesAmount(value)) return false
-      const possibleEntries = transactionEntries.filter((entry) => contextKey(entry.context) === contextKey(candidateContext) && matchesAmount(entry.value))
-      return possibleEntries.length === 1 && possibleEntries[0].id === id
-    })
-  })
+  return [...transactionIds].every((evidenceTransactionId) =>
+    bundle.matchingComponents.some(({ context, samples }) => {
+      if (contextKey(context) !== contextKey(candidateContext)) return false
+      return samples.some(({ id, transactionId, value, transactionEntries }) => {
+        if (String(transactionId) !== evidenceTransactionId || !matchesAmount(value)) return false
+        const possibleEntries = transactionEntries.filter((entry) => contextKey(entry.context) === contextKey(candidateContext) && matchesAmount(entry.value))
+        return possibleEntries.length === 1 && possibleEntries[0].id === id
+      })
+    }),
+  )
 }
 
 const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, today, endDate, currencyDecimalPlaces }) => {
@@ -1296,7 +1298,8 @@ const variableEnvelopeIdentity = (entry) => {
   if (context.direction === 'expense') {
     const budgetId = entry?.budgetId ? String(entry.budgetId) : null
     const categoryId = context.categoryId || ANALYTICS_UNCATEGORIZED_ID
-    return { key: budgetId ? `budget:${budgetId}` : `category:${categoryId}`, budgetId, categoryId, context }
+    const label = String(entry?.categoryLabel ?? '').trim() || null
+    return { key: budgetId ? `budget:${budgetId}` : `category:${categoryId}`, budgetId, categoryId, label, context }
   }
   const flow = primaryFlow(flowAmountsFor(context, amountOf(entry), 2))
   return flow === 'transfer' ? null : { key: `metric:${flow}`, budgetId: null, categoryId: null, context }
@@ -1332,7 +1335,7 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
   const incompleteBudgetIdSet = new Set(incompleteAttributions.flatMap(({ budgetIds }) => budgetIds))
   const hasUnscopedIncompleteAttribution = incompleteAttributions.some(({ budgetIds }) => budgetIds.length === 0)
   const groups = new Map()
-  const ensureGroup = ({ key, budgetId = null, categoryId = null, context = null, budgetAttribution: groupBudgetAttribution = null }) => {
+  const ensureGroup = ({ key, budgetId = null, categoryId = null, label = null, context = null, budgetAttribution: groupBudgetAttribution = null }) => {
     const group = groups.get(key) ?? {
       key,
       budgetId,
@@ -1342,12 +1345,14 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
       actual: 0,
       known: 0,
       evidenceIds: new Set(),
+      labels: new Set(),
       observedMonths: new Set(),
       budgetAttribution: null,
     }
     if (!group.context && context) group.context = context
     if (!group.categoryId && categoryId) group.categoryId = categoryId
     if (!group.budgetAttribution && groupBudgetAttribution) group.budgetAttribution = groupBudgetAttribution
+    if (label) group.labels.add(label)
     groups.set(key, group)
     return group
   }
@@ -1396,7 +1401,7 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
         id: `variable-envelope:${group.key}`,
         budgetId: group.budgetId,
         categoryId: group.categoryId,
-        label: plan?.label ?? null,
+        label: plan?.label ?? [...group.labels].sort()[0] ?? null,
         actual: group.actual,
         known: group.known,
         historical,

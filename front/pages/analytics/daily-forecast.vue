@@ -63,7 +63,7 @@ const { t } = useI18n()
 const periodItems = computed(() => [3, 6, 12].map((value) => ({ label: t('analytics.period.months_short', { count: value }), value })))
 const monthTitle = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(parseISO(`${analyticsStore.dailyForecast.monthKey}-01`)))
 const queryDate = computed(() => (analyticsStore.dailyForecast.dateKeys.includes(String(route.query.date ?? '')) ? String(route.query.date) : null))
-const partialInputCount = computed(() => analyticsStore.dailyForecastState.unavailableEvidenceSummary.count + analyticsStore.dailyForecastState.sourceErrors.length)
+const partialInputCount = computed(() => Math.max(1, analyticsStore.dailyForecastState.unavailableEvidenceSummary.count + analyticsStore.dailyForecastState.sourceErrors.length))
 
 watch(
   [queryDate, () => analyticsStore.dailyForecast.dateKeys],
