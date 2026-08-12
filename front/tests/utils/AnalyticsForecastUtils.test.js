@@ -2852,15 +2852,19 @@ test('canonicalizes distinct yearly window dates to one immutable occurrence', (
   assert.deepEqual(candidate, snapshot)
 })
 
-test('keeps an aggregate authoritative payroll tax definition reconciliation-only when its bundle components are scheduled', () => {
+test('keeps an evidence-covered stale aggregate payroll tax definition reconciliation-only when its bundle components are scheduled', () => {
   const history = payrollHistoryWithIdenticalPhases()
-  const base = definedCandidate({ id: 'monthly-payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-20', amount: 1260 })
+  const base = definedCandidate({ id: 'monthly-payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-20', amount: 1200 })
   const aggregate = {
     ...base,
     identity: { ...base.identity, categoryId: 'taxes', payee: 'payroll taxes' },
     source: { ...base.source, label: 'Monthly payroll taxes' },
-    aggregateEvidence: { entryIds: history.filter(({ categoryId }) => categoryId === 'taxes').map(({ id }) => id) },
+    evidence: {
+      ...base.evidence,
+      transactionIds: history.filter(({ categoryId, date }) => categoryId === 'taxes' && date.startsWith('2026-07')).map(({ transactionId }) => transactionId),
+    },
   }
+  const snapshot = structuredClone(aggregate)
   const contexts = { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }
 
   const result = buildRemainingActivityForecast({
@@ -2883,7 +2887,12 @@ test('keeps an aggregate authoritative payroll tax definition reconciliation-onl
     false,
   )
   assert.ok(result.audit.recurring.suppressedCandidateIds.includes(aggregate.id))
+  assert.deepEqual(
+    result.audit.recurring.aggregateReconciliation.map(({ candidateId, reason }) => ({ candidateId, reason })),
+    [{ candidateId: aggregate.id, reason: 'bundleEvidenceCovered' }],
+  )
   assert.equal(result.audit.unavailable.candidateIds.includes(aggregate.id), false)
+  assert.deepEqual(aggregate, snapshot)
 })
 
 test('keeps an unrelated equal authoritative obligation when bundle evidence does not overlap', () => {

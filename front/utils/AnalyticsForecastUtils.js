@@ -1244,14 +1244,14 @@ const projectRecurringBundles = ({ bundles, currencyDecimalPlaces }) =>
     ),
   )
 
-const aggregateBundleCandidateIds = ({ candidates, bundles, candidateAmounts, accountContexts, currencyDecimalPlaces }) => {
-  const suppressed = []
+const aggregateBundleCandidateReconciliation = ({ candidates, bundles, candidateAmounts, accountContexts }) => {
+  const reconciled = []
   for (const candidate of candidates.filter(({ source }) => source?.authoritative === true)) {
     const input = candidateProjectionInput({ candidate, candidateAmounts, accountContexts })
     if (input.reasons.length > 0 || !Number.isFinite(input.amount)) continue
-    const aggregateEntryIds = new Set((candidate?.aggregateEvidence?.entryIds ?? []).map(String))
-    const aggregateTransactionIds = new Set((candidate?.aggregateEvidence?.transactionIds ?? []).map(String))
-    if (aggregateEntryIds.size === 0 && aggregateTransactionIds.size === 0) continue
+    const aggregateEntryIds = unique([...(candidate?.aggregateEvidence?.entryIds ?? []), ...(candidate?.evidence?.entryIds ?? [])].map(String)).sort()
+    const aggregateTransactionIds = unique([...(candidate?.aggregateEvidence?.transactionIds ?? []), ...(candidate?.evidence?.transactionIds ?? [])].map(String)).sort()
+    if (aggregateEntryIds.length === 0 && aggregateTransactionIds.length === 0) continue
     const expectedMonths = new Set(
       unique(candidate.expectedDates ?? [])
         .map(dateKey)
@@ -1259,23 +1259,36 @@ const aggregateBundleCandidateIds = ({ candidates, bundles, candidateAmounts, ac
         .map((date) => date.slice(0, 7)),
     )
     if (expectedMonths.size === 0) continue
-    const total = bundles.reduce((bundleTotal, bundle) => {
-      const overlaps = bundle.entryIds.some((id) => aggregateEntryIds.has(String(id))) || bundle.transactionIds.some((id) => aggregateTransactionIds.has(String(id)))
-      if (!overlaps) return bundleTotal
-      const matchingComponents = bundle.components.filter(({ context, reconciliationOnly }) => !reconciliationOnly && contextKey(context) === contextKey(input.context))
-      return (
-        bundleTotal +
-        bundle.projectedDates
-          .filter(({ date }) => expectedMonths.has(date.slice(0, 7)))
-          .reduce(
-            (dateTotal, { phase }) => dateTotal + matchingComponents.filter((component) => component.phase === 'both' || component.phase === phase).reduce((sum, { amount }) => sum + amount, 0),
-            0,
-          )
-      )
-    }, 0)
-    if (roundAmount(total, currencyDecimalPlaces) === roundAmount(input.amount, currencyDecimalPlaces) && total > 0) suppressed.push(String(candidate.id))
+    const matchingBundles = bundles.filter((bundle) => bundle.projectedDates.some(({ date }) => expectedMonths.has(date.slice(0, 7))))
+    const matchingComponents = matchingBundles.flatMap((bundle) =>
+      bundle.components.filter(({ context, reconciliationOnly }) => !reconciliationOnly && contextKey(context) === contextKey(input.context)).map((component) => ({ bundle, component })),
+    )
+    if (matchingComponents.length === 0) continue
+    const coveredEntryIds = new Set(matchingComponents.flatMap(({ component }) => component.evidenceEntryIds).map(String))
+    const coveredTransactionIds = new Set(
+      aggregateTransactionIds.filter((transactionId) =>
+        matchingComponents.some(({ bundle }) =>
+          bundle.matchingComponents.some(({ context, samples }) => {
+            if (contextKey(context) !== contextKey(input.context)) return false
+            return samples.some(({ id, transactionId: sampleTransactionId, transactionEntries }) => {
+              if (String(sampleTransactionId) !== transactionId) return false
+              const possibleEntries = transactionEntries.filter((entry) => contextKey(entry.context) === contextKey(input.context))
+              return possibleEntries.length === 1 && possibleEntries[0].id === id
+            })
+          }),
+        ),
+      ),
+    )
+    if (!aggregateEntryIds.every((id) => coveredEntryIds.has(id)) || !aggregateTransactionIds.every((id) => coveredTransactionIds.has(id))) continue
+    reconciled.push({
+      candidateId: String(candidate.id),
+      bundleIds: unique(matchingComponents.map(({ bundle }) => String(bundle.id))).sort(),
+      entryIds: aggregateEntryIds,
+      transactionIds: aggregateTransactionIds,
+      reason: 'bundleEvidenceCovered',
+    })
   }
-  return suppressed.sort()
+  return reconciled.sort((left, right) => left.candidateId.localeCompare(right.candidateId))
 }
 
 const variableEnvelopeIdentity = (entry) => {
@@ -1624,15 +1637,16 @@ export function buildRemainingActivityForecast({
       discoveredBundles.some((bundle) => bundleCandidateMatchesAdmittedComponent({ candidate, bundle, amount: Number(candidateAmounts?.[candidate.id]?.value ?? candidate?.expectedAmount?.value) })),
     )
     .map(({ id }) => String(id))
-  const aggregateSuppressedCandidateIds = aggregateBundleCandidateIds({
-    candidates: preparedProjectionCandidates,
+  const bundleSuppressedCandidateIdSet = new Set(bundleSuppressedCandidateIds)
+  const aggregateReconciliation = aggregateBundleCandidateReconciliation({
+    candidates: preparedProjectionCandidates.filter(({ id }) => !bundleSuppressedCandidateIdSet.has(String(id))),
     bundles: discoveredBundles,
     candidateAmounts,
     accountContexts,
-    currencyDecimalPlaces,
   })
-  const bundleSuppressedCandidateIdSet = new Set([...bundleSuppressedCandidateIds, ...aggregateSuppressedCandidateIds])
-  const projectionCandidates = preparedProjectionCandidates.filter(({ id }) => !bundleSuppressedCandidateIdSet.has(String(id)))
+  const aggregateSuppressedCandidateIds = aggregateReconciliation.map(({ candidateId }) => candidateId)
+  const suppressedBundleCandidateIdSet = new Set([...bundleSuppressedCandidateIds, ...aggregateSuppressedCandidateIds])
+  const projectionCandidates = preparedProjectionCandidates.filter(({ id }) => !suppressedBundleCandidateIdSet.has(String(id)))
   const recurringIds = recurringHistoryIds(projectionCandidates)
   const evidencedHistoryEntryIds = entries
     .filter((entry) => months.includes(entry.monthKey) && (recurringIds.entryIds.has(String(entry.id)) || recurringIds.transactionIds.has(String(entry.transactionId))))
@@ -1918,6 +1932,7 @@ export function buildRemainingActivityForecast({
         candidateConversions: [...candidateConversions.values()].sort((left, right) => left.candidateId.localeCompare(right.candidateId)),
         deduplicatedCandidateIds: canonicalCandidates.deduplicatedCandidateIds,
         conflictingCandidateIds: canonicalCandidates.conflictingCandidateIds,
+        aggregateReconciliation,
         ...(conflictingTransactionIds.length > 0 ? { conflictingTransactionIds } : {}),
       },
       allocation: {
