@@ -20,9 +20,11 @@ const entry = ({
   description = direction === 'income' ? 'Salary' : 'Merchant',
   refund = false,
   missingCurrency = null,
+  transactionId = id,
+  tags = [],
 }) => ({
   id,
-  transactionId: id,
+  transactionId,
   journalId: `${id}-journal`,
   date,
   monthKey: date.slice(0, 7),
@@ -34,6 +36,7 @@ const entry = ({
   destinationAccount: endpoint(destinationId, destinationKind, !['revenue', 'expense', 'savingsRestricted'].includes(destinationKind)),
   categoryId,
   description,
+  tags,
   conversion: missingCurrency ? { mode: 'unavailable', sourceCurrency: missingCurrency, missingCurrency } : { mode: 'exact', sourceCurrency: 'USD' },
   refund: {
     isRefund: refund,
@@ -119,6 +122,65 @@ const inferredSplitCandidate = ({ id, amount, categoryId, transactionIds }) => {
     confidence: { score: 0.9, factors: {}, reasons: ['Recurring split evidence'] },
   }
 }
+
+const payrollAmounts = {
+  old: { salary: 3000, taxes: 600, insurance: 100, debt: 200, savings: 300, employerContribution: 150 },
+  current: { salary: 3150, taxes: 630, insurance: 105, debt: 210, savings: 315, employerContribution: 157.5 },
+}
+
+const payrollOccurrence = ({ date, sequence, regime = 'old', reimbursement = false }) => {
+  const transactionId = `payroll-${sequence}`
+  const values = payrollAmounts[regime]
+  const component = (name, options) => entry({ id: `${transactionId}-${name}`, transactionId, date, tags: ['paystub/payroll'], ...options })
+  return [
+    component('salary', { value: values.salary, direction: 'income', sourceId: 'employer', destinationId: 'checking', categoryId: 'salary', description: 'Base pay' }),
+    component('taxes', { value: values.taxes, sourceId: 'checking', destinationId: 'tax-authority', categoryId: 'taxes', description: 'Payroll taxes' }),
+    component('insurance', { value: values.insurance, sourceId: 'checking', destinationId: 'insurer', categoryId: 'insurance', description: 'Insurance deduction' }),
+    component('debt', { value: values.debt, sourceKind: 'available', destinationKind: 'liability', sourceId: 'checking', destinationId: 'loan', categoryId: 'debt', description: 'Debt deduction' }),
+    component('savings', {
+      value: values.savings,
+      sourceKind: 'available',
+      destinationKind: 'savingsAccessible',
+      sourceId: 'checking',
+      destinationId: 'hysa',
+      categoryId: 'savings',
+      description: 'Savings deduction',
+    }),
+    component('employer-contribution', {
+      value: values.employerContribution,
+      direction: 'income',
+      sourceKind: 'revenue',
+      destinationKind: 'savingsRestricted',
+      sourceId: 'employer',
+      destinationId: 'retirement',
+      categoryId: 'benefits',
+      description: 'Employer contribution',
+    }),
+    component('internal-transfer', {
+      value: 50,
+      sourceKind: 'available',
+      destinationKind: 'available',
+      sourceId: 'checking',
+      destinationId: 'cash',
+      categoryId: 'internal',
+      description: 'Internal allocation',
+    }),
+    ...(reimbursement
+      ? [component('reimbursement', { value: 75, direction: 'income', sourceId: 'employer', destinationId: 'checking', categoryId: 'reimbursement', description: 'Expense reimbursement' })]
+      : []),
+  ]
+}
+
+const payrollHistory = ({ latestRegimes = ['current', 'current'] } = {}) => [
+  ...payrollOccurrence({ date: '2026-05-15', sequence: 'may-mid' }),
+  ...payrollOccurrence({ date: '2026-05-29', sequence: 'may-end', reimbursement: true }),
+  ...payrollOccurrence({ date: '2026-06-15', sequence: 'june-mid' }),
+  ...payrollOccurrence({ date: '2026-06-30', sequence: 'june-end', reimbursement: true }),
+  ...payrollOccurrence({ date: '2026-07-15', sequence: 'july-mid', regime: latestRegimes[0] }),
+  ...payrollOccurrence({ date: '2026-07-31', sequence: 'july-end', regime: latestRegimes[1], reimbursement: true }),
+]
+
+const payrollCandidates = (history) => detectRecurringCandidates({ entries: history, startDate: '2026-05-01', endDate: '2026-08-11' }).candidates
 
 const reorderSemanticValue = (value) => {
   if (Array.isArray(value)) return [...value].reverse().map(reorderSemanticValue)
@@ -386,6 +448,124 @@ test('projects only the second occurrence of twice-monthly salary after the firs
   assert.equal(result.final.income, 6000)
   assert.equal(projectedSalary.length, 1)
   assert.equal(projectedSalary[0].date, '2026-08-31')
+})
+
+test('projects a semimonthly payroll bundle from the newest two-occurrence regime and keeps linked uses on payroll dates', () => {
+  const history = payrollHistory()
+  const candidates = payrollCandidates(history)
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates,
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+  const bundle = result.audit.bundles[0]
+  const projected = result.dailyProjectedEntries.filter(({ bundleId }) => bundleId === bundle.id)
+  const onDate = (date, label) => projected.find((item) => item.date === date && item.bundleLabel === label)
+  const flowTotals = projected.reduce((totals, item) => Object.fromEntries(Object.keys(totals).map((key) => [key, Number((totals[key] + item.flowAmounts[key]).toFixed(2))])), {
+    income: 0,
+    expenses: 0,
+    debtRepayments: 0,
+    savingsDeposits: 0,
+    availableCashChange: 0,
+  })
+
+  assert.deepEqual([...new Set(projected.map(({ date }) => date))], ['2026-08-14', '2026-08-31'])
+  assert.equal(onDate('2026-08-14', 'Base pay').amount, 3150)
+  assert.equal(onDate('2026-08-31', 'Base pay').amount, 3150)
+  assert.equal(onDate('2026-08-14', 'Payroll taxes').amount, 630)
+  assert.equal(onDate('2026-08-31', 'Payroll taxes').amount, 630)
+  assert.equal(onDate('2026-08-14', 'Insurance deduction').amount, 105)
+  assert.equal(onDate('2026-08-31', 'Insurance deduction').amount, 105)
+  assert.equal(onDate('2026-08-14', 'Expense reimbursement'), undefined)
+  assert.equal(onDate('2026-08-31', 'Expense reimbursement').amount, 75)
+  assert.equal(
+    projected.some(({ bundleLabel }) => bundleLabel === 'Internal allocation'),
+    false,
+  )
+  assert.deepEqual(flowTotals, { income: 6690, expenses: 1470, debtRepayments: 420, savingsDeposits: 945, availableCashChange: 3855 })
+  assert.deepEqual(bundle.occurrenceDates, ['2026-05-15', '2026-05-29', '2026-06-15', '2026-06-30', '2026-07-15', '2026-07-31'])
+  assert.deepEqual(bundle.selectedRegimeTransactionIds, ['payroll-july-end', 'payroll-july-mid'])
+  assert.equal(bundle.confidence.level, 'high')
+  assert.equal(bundle.regimePolicy, 'latestEquivalentPairAtLeastTwoPercent')
+  assert.deepEqual(bundle.schedulePolicy, { type: 'semimonthly', middleDay: 15, monthEnd: true, weekendAdjustment: 'previousBusinessDay' })
+  assert.equal(bundle.components.find(({ label }) => label === 'Internal allocation').reconciliationOnly, true)
+  assert.ok(bundle.components.every(({ evidenceEntryIds }) => evidenceEntryIds.length >= 3))
+  assert.ok(projected.every((item) => !('transactionId' in item) && !('actualTransactionIds' in item)))
+
+  const historicalIds = new Set(history.flatMap(({ id, transactionId }) => [id, transactionId]))
+  assert.ok(projected.every(({ evidenceIds }) => evidenceIds.every((id) => !historicalIds.has(id))))
+  assert.equal(
+    result.dailyProjectedEntries.some(({ bundleId, evidenceIds }) => !bundleId && evidenceIds.some((id) => historicalIds.has(id))),
+    false,
+  )
+  const withoutCandidates = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+  assert.equal(
+    withoutCandidates.dailyProjectedEntries.some(({ sourceKind, evidenceIds }) => sourceKind === 'variable' && evidenceIds.some((id) => historicalIds.has(id))),
+    false,
+  )
+})
+
+test('uses a recency-weighted median with medium confidence when only one payroll occurrence changes', () => {
+  const history = payrollHistory({ latestRegimes: ['old', 'current'] })
+  const candidates = payrollCandidates(history)
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates,
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+  const bundle = result.audit.bundles[0]
+  const projected = result.dailyProjectedEntries.filter(({ bundleId }) => bundleId === bundle.id)
+
+  assert.equal(bundle.confidence.level, 'medium')
+  assert.equal(bundle.regimePolicy, 'recencyWeightedMedian')
+  assert.deepEqual(bundle.selectedRegimeTransactionIds, ['payroll-july-end', 'payroll-july-mid'])
+  assert.deepEqual(
+    projected.filter(({ bundleLabel }) => bundleLabel === 'Base pay').map(({ amount }) => amount),
+    [3000, 3000],
+  )
+  assert.deepEqual(
+    projected.filter(({ bundleLabel }) => bundleLabel === 'Payroll taxes').map(({ amount }) => amount),
+    [600, 600],
+  )
+})
+
+test('keeps recurring bundle projection and audit byte-identical under shuffled groups, entries, and candidates without mutating inputs', () => {
+  const history = payrollHistory()
+  const candidates = payrollCandidates(history)
+  const groups = [...history.reduce((grouped, item) => grouped.set(item.transactionId, [...(grouped.get(item.transactionId) ?? []), item]), new Map()).values()]
+  const shuffledHistory = groups.reverse().flatMap((group) => [...group].reverse())
+  const originalHistory = structuredClone(history)
+  const originalCandidates = structuredClone(candidates)
+
+  const ordered = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates,
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+  const shuffled = buildRemainingActivityForecast({
+    ledger: ledger(shuffledHistory, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [...candidates].reverse(),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(ordered.audit.bundles.length, 1)
+  assert.equal(JSON.stringify(shuffled), JSON.stringify(ordered))
+  assert.deepEqual(history, originalHistory)
+  assert.deepEqual(candidates, originalCandidates)
 })
 
 test('removes recurring history before calculating the variable remainder', () => {
