@@ -840,7 +840,10 @@ test('fulfills the current payroll phase when only a reconciliation-only amount 
       transactionIds: actual.map(({ transactionId }) => transactionId).sort(),
     },
   ])
-  assert.equal(result.dailyProjectedEntries.some(({ date, bundleLabel }) => date === '2026-08-14' && bundleLabel === 'Base pay'), false)
+  assert.equal(
+    result.dailyProjectedEntries.some(({ date, bundleLabel }) => date === '2026-08-14' && bundleLabel === 'Base pay'),
+    false,
+  )
 })
 
 test('does not fulfill the current payroll phase when a reconciliation-only component is missing', () => {
