@@ -2528,7 +2528,17 @@ test('uses the seven authoritative flows for precise daily source, use, and cumu
   assert.equal(store.dailyForecast?.monthlyTotals.sources, 161)
   assert.equal(store.dailyForecast?.monthlyTotals.uses, 60.6)
   assert.deepEqual(store.dailyForecast?.summary, {
-    inflow: { actual: 161, projected: 0, final: 161, status: 'ready' },
+    inflow: {
+      actual: 161,
+      projected: 0,
+      final: 161,
+      status: 'ready',
+      components: {
+        actual: { income: 100.1, refunds: 10.2, savingsWithdrawals: 20.3, newDebt: 30.4 },
+        projected: { income: 0, refunds: 0, savingsWithdrawals: 0, newDebt: 0 },
+        final: { income: 100.1, refunds: 10.2, savingsWithdrawals: 20.3, newDebt: 30.4 },
+      },
+    },
     outflow: { actual: 60.6, projected: 0, final: 60.6, status: 'ready' },
     availableChange: { actual: 100.4, projected: 0, final: 100.4, status: 'ready' },
   })
@@ -3675,11 +3685,18 @@ test('renders known gross payroll inflow when another source metric is unavailab
       { id: 'outflow', direction: 'uses', labelKey: 'analytics.daily_forecast.outflow', points: [] },
     ],
     availableLine,
-    monthlyTotals: {
-      components: { income: 6300, refunds: null, expenses: 1260, savingsDeposits: 0, savingsWithdrawals: 0, debtRepayments: 0, newDebt: 0 },
-    },
     summary: {
-      inflow: { actual: null, projected: null, final: null, status: 'unavailable' },
+      inflow: {
+        actual: null,
+        projected: null,
+        final: null,
+        status: 'unavailable',
+        components: {
+          actual: { income: 0, refunds: null, savingsWithdrawals: 0, newDebt: 0 },
+          projected: { income: 6300, refunds: null, savingsWithdrawals: 125, newDebt: 0 },
+          final: { income: 6300, refunds: null, savingsWithdrawals: 125, newDebt: 0 },
+        },
+      },
       outflow: { actual: 0, projected: 1260, final: 1260, status: 'ready' },
       availableChange: { actual: 0, projected: 5040, final: 5040, status: 'ready' },
     },
@@ -3716,8 +3733,35 @@ test('renders known gross payroll inflow when another source metric is unavailab
   for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-tabs', 'analytics-combination-chart']) app.component(name, stub)
   const html = await renderToString(app)
 
-  assert.match(html, /analytics\.daily_forecast\.expected_inflow[\s\S]*?6300 USD/)
+  assert.match(html, /analytics\.daily_forecast\.expected_inflow[\s\S]*?6425 USD/)
+  assert.match(html, /\+6425 USD analytics\.cash_use\.projected_remaining/)
   assert.doesNotMatch(html, /analytics\.daily_forecast\.expected_inflow[\s\S]*?<strong>—<\/strong>/)
+})
+
+test('keeps the Expected inflow summary unavailable when every source component is unavailable', async () => {
+  const unavailableSources = { income: null, refunds: null, savingsWithdrawals: null, newDebt: null }
+  const component = loadAnalyticsDailyComponent({
+    dailyForecast: dailyForecastSfcFixture({
+      summary: {
+        inflow: { actual: null, projected: null, final: null, status: 'unavailable', components: { actual: unavailableSources, projected: unavailableSources, final: unavailableSources } },
+        outflow: { actual: 0, projected: 0, final: 0, status: 'ready' },
+        availableChange: { actual: null, projected: null, final: null, status: 'unavailable' },
+      },
+    }),
+  })
+  const app = createSSRApp(component)
+  app.config.globalProperties.$t = (key, values = {}) => (values.level ? `${key}:${values.level}` : key)
+  const stub = {
+    setup:
+      (_, { slots }) =>
+      () =>
+        h('div', slots.default?.()),
+  }
+  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-tabs', 'analytics-combination-chart']) app.component(name, stub)
+  const html = await renderToString(app)
+
+  assert.match(html, /analytics\.daily_forecast\.expected_inflow<\/span><strong>—<\/strong>/)
+  assert.doesNotMatch(html, /analytics\.daily_forecast\.expected_inflow[\s\S]*?analytics\.cash_use\.projected_remaining/)
 })
 
 test('derives event detail rows from real flow data without guessing semantics from human labels', async () => {
