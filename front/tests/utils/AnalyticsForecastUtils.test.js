@@ -817,6 +817,70 @@ test('ignores reconciliation-only amount variance when selecting the latest payr
   assert.deepEqual(input.entries, snapshot)
 })
 
+test('fulfills the current payroll phase when only a reconciliation-only amount varies', () => {
+  const history = payrollHistoryWithReconciliationVariance()
+  const actual = separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' })).map((item) =>
+    item.description === 'Internal allocation' ? { ...item, value: 744 } : item,
+  )
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-10' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.audit.bundles.length, 1)
+  const bundle = result.audit.bundles[0]
+  assert.deepEqual(bundle.projectedDates, [{ date: '2026-08-31', phase: 'monthEnd' }])
+  assert.deepEqual(bundle.fulfilledPhases, [
+    {
+      phase: 'middle',
+      entryIds: actual.map(({ id }) => id).sort(),
+      transactionIds: actual.map(({ transactionId }) => transactionId).sort(),
+    },
+  ])
+  assert.equal(result.dailyProjectedEntries.some(({ date, bundleLabel }) => date === '2026-08-14' && bundleLabel === 'Base pay'), false)
+})
+
+test('does not fulfill the current payroll phase when a reconciliation-only component is missing', () => {
+  const history = payrollHistoryWithReconciliationVariance()
+  const actual = separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' })).filter(({ description }) => description !== 'Internal allocation')
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-10' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.deepEqual(result.audit.bundles[0].fulfilledPhases, [])
+  assert.deepEqual(result.audit.bundles[0].projectedDates, [
+    { date: '2026-08-14', phase: 'middle' },
+    { date: '2026-08-31', phase: 'monthEnd' },
+  ])
+})
+
+test('does not fulfill the current payroll phase when a material component amount differs', () => {
+  const history = payrollHistoryWithReconciliationVariance()
+  const actual = separatePayrollTransactions(payrollOccurrence({ date: '2026-08-10', sequence: 'august-middle', regime: 'current' })).map((item) =>
+    item.description === 'Payroll taxes' ? { ...item, value: item.value + 12 } : item.description === 'Internal allocation' ? { ...item, value: 744 } : item,
+  )
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-10' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+
+  assert.deepEqual(result.audit.bundles[0].fulfilledPhases, [])
+  assert.deepEqual(result.audit.bundles[0].projectedDates, [
+    { date: '2026-08-14', phase: 'middle' },
+    { date: '2026-08-31', phase: 'monthEnd' },
+  ])
+})
+
 test('fulfills duplicate-context payroll only from a complete current phase', () => {
   const history = duplicateContextPayrollHistory()
   const completeActual = payrollOccurrenceWithDuplicateContexts({ date: '2026-08-13', sequence: 'august-middle', regime: 'current' })
