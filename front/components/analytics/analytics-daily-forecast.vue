@@ -216,8 +216,13 @@ const chartSeries = computed(() => ({
 const hasActivity = computed(() => daily.value.barGroups.some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)))
 const hasRetainedData = computed(() => dailyState.value.isStale && daily.value.dateKeys.length > 0)
 const unavailableEvidenceSummary = computed(() => dailyState.value.unavailableEvidenceSummary ?? { count: 0, previewIds: [], omittedCount: 0 })
+const knownComponentTotal = (components) => {
+  const values = Object.values(components ?? {}).filter(Number.isFinite)
+  return values.length ? Number(values.reduce((total, value) => total + value, 0).toFixed(analyticsStore.displayCurrencyDecimalPlaces ?? 2)) : null
+}
+const inflowSummaryValue = (field) => (Number.isFinite(daily.value.summary.inflow[field]) ? daily.value.summary.inflow[field] : knownComponentTotal(daily.value.summary.inflow.components?.[field]))
 const summaryItems = computed(() => [
-  { id: 'inflow', label: t('analytics.daily_forecast.expected_inflow'), value: daily.value.summary.inflow.final, projected: daily.value.summary.inflow.projected },
+  { id: 'inflow', label: t('analytics.daily_forecast.expected_inflow'), value: inflowSummaryValue('final'), projected: inflowSummaryValue('projected') },
   { id: 'outflow', label: t('analytics.daily_forecast.expected_outflow'), value: daily.value.summary.outflow.final, projected: daily.value.summary.outflow.projected },
   { id: 'available', label: t('analytics.daily_forecast.available_change'), value: daily.value.summary.availableChange.final, projected: daily.value.summary.availableChange.projected },
 ])

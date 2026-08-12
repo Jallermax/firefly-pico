@@ -428,6 +428,14 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     final,
     status: summaryStatus(keys),
   })
+  const inflowSummary = {
+    ...summaryValue(DAILY_SOURCE_KEYS, monthlyTotals.sources),
+    components: {
+      actual: Object.fromEntries(DAILY_SOURCE_KEYS.map((key) => [key, forecast.actualToDate[key]])),
+      projected: Object.fromEntries(DAILY_SOURCE_KEYS.map((key) => [key, forecast.remainingFromToday[key]])),
+      final: Object.fromEntries(DAILY_SOURCE_KEYS.map((key) => [key, monthlyComponents[key]])),
+    },
+  }
   const availableSummary = {
     actual: forecast.actualToDate.availableCashChange,
     projected: forecast.remainingFromToday.availableCashChange,
@@ -444,7 +452,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     barGroups,
     eventSummaries,
     summary: {
-      inflow: summaryValue(DAILY_SOURCE_KEYS, monthlyTotals.sources),
+      inflow: inflowSummary,
       outflow: summaryValue(DAILY_USE_KEYS, monthlyTotals.uses),
       availableChange: availableSummary,
     },
