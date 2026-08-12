@@ -6,6 +6,7 @@ export default {
   ROUTE_EXTRAS: '/extras',
   ROUTE_DASHBOARD: '/dashboard',
   ROUTE_ANALYTICS: '/analytics',
+  ROUTE_ANALYTICS_DAILY_FORECAST: '/analytics/daily-forecast',
 
   ROUTE_SETTINGS: '/settings',
   ROUTE_SETTINGS_SETUP: '/settings/setup',

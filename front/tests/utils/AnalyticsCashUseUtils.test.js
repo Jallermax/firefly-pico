@@ -1672,7 +1672,7 @@ test('Cash Use v2 series-month selection renders only its compact positioned cal
 })
 
 test('cash use consumes the page-level Savings view without rendering a duplicate control', () => {
-  const page = readFileSync(new URL('../../pages/analytics.vue', import.meta.url), 'utf8')
+  const page = readFileSync(new URL('../../pages/analytics/index.vue', import.meta.url), 'utf8')
   const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
 
   assert.equal(page.match(/<analytics-savings-view-control\b/g)?.length ?? 0, 1)

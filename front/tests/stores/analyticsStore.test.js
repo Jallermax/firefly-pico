@@ -10,7 +10,6 @@ import { format, subMonths } from 'date-fns'
 import { createAnalyticsStore, summarizeUnavailableEvidence } from '../../stores/analyticsStoreFactory.js'
 import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
 import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
-import { summarizeProjectedSources } from '../../utils/AnalyticsForecastUtils.js'
 import { projectLineChartSelection } from '../../utils/ChartUtils.js'
 
 const currency = (id, code, decimalPlaces = 2) => ({ id, attributes: { code, decimal_places: decimalPlaces, default: code === 'USD' } })
@@ -353,11 +352,10 @@ const renderAnalyticsCard = async (path, context) => {
   return renderToString(app)
 }
 
-const loadAnalyticsDailyComponent = ({ dailyForecast, navigateTo = async () => {} }) => {
-  const path = new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url)
-  const source = readFileSync(new URL(path, import.meta.url), 'utf8')
+const loadAnalyticsDailyOverviewComponent = () => {
+  const source = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-overview.vue', import.meta.url), 'utf8')
   const compiled = compileScript(parseSfc(source).descriptor, {
-    id: 'daily-real-sfc',
+    id: 'daily-overview-real-sfc',
     inlineTemplate: true,
     templateOptions: { compilerOptions: { isCustomElement: (tag) => tag.includes('-') } },
   }).content
@@ -368,17 +366,33 @@ const loadAnalyticsDailyComponent = ({ dailyForecast, navigateTo = async () => {
         .map(([key, value]) => [`_${key}`, value]),
     ),
     _resolveComponent: (name) => name,
-    _withDirectives: (vnode) => vnode,
+    formatNumberForDashboard: String,
+    useI18n: () => ({ t: (key) => key }),
+    computed: Vue.computed,
+  }
+  const factory = new Function(...Object.keys(scope), compiled.replace(/^import .*$/gm, '').replace('export default', 'return'))
+  return factory(...Object.values(scope))
+}
+const loadAnalyticsDailyDetailsComponent = ({ navigateTo = async () => {} } = {}) => {
+  const source = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
+  const compiled = compileScript(parseSfc(source).descriptor, {
+    id: 'daily-details-real-sfc',
+    inlineTemplate: true,
+    templateOptions: { compilerOptions: { isCustomElement: (tag) => tag.includes('-') } },
+  }).content
+  const scope = {
+    ...Object.fromEntries(
+      Object.entries(Vue)
+        .filter(([key]) => /^[$A-Z_a-z][$\w]*$/.test(key))
+        .map(([key, value]) => [`_${key}`, value]),
+    ),
+    _resolveComponent: (name) => name,
     parseISO: (value) => new Date(`${value}T00:00:00`),
     RouteConstants: { ROUTE_TRANSACTION_LIST: '/transactions/list' },
-    useAnalyticsStore: () => ({ dailyForecastMonths: 6, dailyForecast, dailyForecastState: dailyForecast.state, displayCurrencyCode: 'USD', retryDailyForecast: () => {} }),
-    useProfileStore: () => ({ language: 'en' }),
-    summarizeProjectedSources,
     projectLineChartSelection,
     formatNumberForDashboard: String,
     TransactionFilterUtils: { filters: { id: { toUrl: (ids) => `id=${ids}` } } },
     useI18n: () => ({ t: (key, values = {}) => (values.level ? `${key}:${values.level}` : key) }),
-    ref: Vue.ref,
     computed: Vue.computed,
     navigateTo,
   }
@@ -2453,12 +2467,12 @@ test('analytics warnings summarize projected audit evidence without rendering ev
     onSelectPoint: () => {},
   })
 
-  for (const html of [cashUseHtml, dailyHtml]) {
-    assert.match(html, /analytics\.common\.unavailable_evidence_count/)
-    assert.match(html, /<details[^>]+analytics-warning-details/)
-    assert.match(html, /defined:subscription:rent/)
-    assert.doesNotMatch(html, /projected:variable:/)
-  }
+  assert.match(cashUseHtml, /analytics\.common\.unavailable_evidence_count/)
+  assert.match(cashUseHtml, /<details[^>]+analytics-warning-details/)
+  assert.match(cashUseHtml, /defined:subscription:rent/)
+  assert.doesNotMatch(cashUseHtml, /projected:variable:/)
+  assert.match(dailyHtml, /analytics\.daily_forecast\.inputs_need_review:1/)
+  assert.doesNotMatch(dailyHtml, /defined:subscription:rent|projected:variable:/)
 
   for (const locale of localeNames) {
     const common = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.common
@@ -3545,31 +3559,24 @@ test('normalizes active JSON API budget plans for forecast envelopes without cha
 test('keeps the daily card and combination-chart selection contract exact without inventing projected transaction routes', () => {
   const dailyPath = new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url)
   const dailySource = existsSync(dailyPath) ? readFileSync(dailyPath, 'utf8') : ''
+  const overviewSource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-overview.vue', import.meta.url), 'utf8')
+  const detailsSource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
   const chartSource = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
 
-  assert.match(dailySource, /TransactionFilterUtils\.filters\.id\.toUrl/)
-  assert.match(dailySource, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
-  assert.match(dailySource, /projectLineChartSelection/)
-  assert.match(dailySource, /kind:\s*point\?\.kind/)
-  assert.match(dailySource, /daily\.value\.barGroups\.some/)
-  assert.match(dailySource, /selectedPayload\.value = payload/)
-  assert.match(dailySource, /selectedPayload\.value = \{ xLabel: point\.xLabel \?\? point\.x, values: \[\{ point \}\] \}/)
-  assert.match(dailySource, /summarizeProjectedSources/)
-  assert.match(dailySource, /evidenceOmittedCount/)
-  assert.match(dailySource, /analytics-daily-forecast-summary/)
-  assert.match(dailySource, /analytics\.daily_forecast\.expected_inflow/)
-  assert.match(dailySource, /analytics\.daily_forecast\.expected_outflow/)
-  assert.match(dailySource, /analytics\.daily_forecast\.scheduled_and_estimated/)
-  assert.match(dailySource, /selectedDayEntries/)
-  assert.match(dailySource, /min-height:\s*44px/)
-  assert.match(dailySource, /id: 'inflow',[^\n]+analytics\.daily_forecast\.inflow[^\n]+var\(--income2\)/)
-  assert.match(dailySource, /id: 'outflow',[^\n]+analytics\.daily_forecast\.outflow[^\n]+var\(--expense2\)/)
-  assert.match(dailySource, /id: 'available',[^\n]+analytics\.daily_forecast\.available_change[^\n]+var\(--transfer2\)/)
-  assert.match(dailySource, /entry\.sourceKind === 'actual'/)
-  assert.match(dailySource, /projectLineChartSelection/)
+  assert.match(detailsSource, /TransactionFilterUtils\.filters\.id\.toUrl/)
+  assert.match(detailsSource, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
+  assert.match(detailsSource, /projectLineChartSelection/)
+  assert.match(detailsSource, /entry\.sourceKind === 'actual'/)
+  assert.match(detailsSource, /selectedDayEntries/)
+  assert.match(overviewSource, /analytics-daily-forecast-summary/)
+  assert.match(overviewSource, /analytics\.daily_forecast\.expected_inflow/)
+  assert.match(overviewSource, /analytics\.daily_forecast\.expected_outflow/)
+  assert.match(overviewSource, /id: 'inflow',[^\n]+analytics\.daily_forecast\.inflow[^\n]+var\(--income2\)/)
+  assert.match(overviewSource, /id: 'outflow',[^\n]+analytics\.daily_forecast\.outflow[^\n]+var\(--expense2\)/)
+  assert.match(overviewSource, /id: 'available',[^\n]+analytics\.daily_forecast\.available_change[^\n]+var\(--transfer2\)/)
   assert.match(dailySource, /v-else-if="dailyState\.isBlockingUnavailable"/)
   assert.match(dailySource, /v-if="dailyState\.isPartiallyUnavailable"/)
-  assert.match(dailySource, /v-if="dailyState\.sourceErrors\.length"[\s\S]*?<van-button[^>]+@click="analyticsStore\.retryDailyForecast"/)
+  assert.match(dailySource, /ROUTE_ANALYTICS_DAILY_FORECAST/)
   assert.match(chartSource, /series\.barGroups/)
   assert.match(chartSource, /point\?\.showInTooltip !== false/)
   assert.match(chartSource, /reduceCombinationChartInteraction/)
@@ -3586,8 +3593,27 @@ test('keeps the daily card and combination-chart selection contract exact withou
   }
 })
 
+test('keeps Analytics compact and routes Daily Forecast details to its own page', () => {
+  const compactPath = new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url)
+  const overviewPath = new URL('../../components/analytics/analytics-daily-forecast-overview.vue', import.meta.url)
+  const analyticsIndexPath = new URL('../../pages/analytics/index.vue', import.meta.url)
+  const detailPagePath = new URL('../../pages/analytics/daily-forecast.vue', import.meta.url)
+  const compactSource = readFileSync(compactPath, 'utf8')
+  const routeSource = readFileSync(new URL('../../constants/RouteConstants.js', import.meta.url), 'utf8')
+
+  assert.equal(existsSync(overviewPath), true)
+  assert.equal(existsSync(analyticsIndexPath), true)
+  assert.equal(existsSync(detailPagePath), true)
+  assert.match(routeSource, /ROUTE_ANALYTICS_DAILY_FORECAST:\s*'\/analytics\/daily-forecast'/)
+  assert.match(compactSource, /analytics-daily-forecast-overview/)
+  assert.match(compactSource, /ROUTE_ANALYTICS_DAILY_FORECAST/)
+  assert.match(compactSource, /open_full_forecast/)
+  assert.doesNotMatch(compactSource, /analytics-daily-forecast-disclosures|bundle_details|variable_envelope|analytics-daily-forecast-details/)
+  assert.match(readFileSync(detailPagePath, 'utf8'), /dailyForecast\.dateKeys\.includes/)
+})
+
 test('renders explainable dated events and an explicitly undated non-navigable variable envelope', async () => {
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-daily-forecast.vue', {
+  const html = await renderAnalyticsCard('../../components/analytics/analytics-daily-forecast-details.vue', {
     analyticsStore: { dailyForecastMonths: 6, retryDailyForecast: () => {} },
     monthTitle: 'August 2026',
     periodItems: [],
@@ -3602,6 +3628,9 @@ test('renders explainable dated events and an explicitly undated non-navigable v
       sourceErrors: [],
     },
     unavailableEvidenceSummary: { count: 0, previewIds: [], omittedCount: 0 },
+    state: { isPartiallyUnavailable: false, isBlockingUnavailable: false, sourceErrors: [] },
+    impact: { items: [] },
+    selectedDay: null,
     hasRetainedData: false,
     hasActivity: true,
     summaryItems: [],
@@ -3659,23 +3688,10 @@ test('renders explainable dated events and an explicitly undated non-navigable v
     onDetailEntry: () => {},
   })
 
-  assert.equal((html.match(/VISIBLE INFLOW LEGEND/g) ?? []).length, 1)
-  assert.equal((html.match(/VISIBLE OUTFLOW LEGEND/g) ?? []).length, 1)
-  assert.equal((html.match(/VISIBLE AVAILABLE LINE/g) ?? []).length, 1)
-  for (const key of [
-    'variable_envelope',
-    'expected_range',
-    'plan',
-    'history',
-    'undated_estimate',
-    'projected_non_navigable',
-    'gross_inflow',
-    'taxes',
-    'insurance',
-    'debt',
-    'savings',
-    'available_change',
-  ]) {
+  assert.ok(html.indexOf('analytics.daily_forecast.day_details') < html.indexOf('analytics.daily_forecast.monthly_impact'))
+  assert.ok(html.indexOf('analytics.daily_forecast.monthly_impact') < html.indexOf('analytics.daily_forecast.scheduled_events'))
+  assert.ok(html.indexOf('analytics.daily_forecast.scheduled_events') < html.indexOf('analytics.daily_forecast.variable_envelope'))
+  for (const key of ['variable_envelope', 'expected_range', 'plan', 'history', 'undated_estimate', 'debt', 'savings', 'evidence_and_issues', 'technical_evidence']) {
     assert.match(html, new RegExp(`analytics\\.daily_forecast\\.${key}`), key)
   }
   assert.doesNotMatch(html, /zero-component/)
@@ -3693,6 +3709,7 @@ const dailyForecastSfcFixture = (overrides = {}) => ({
   },
   variableEnvelope: { items: [], availableCashChange: 0 },
   eventSummaries: [],
+  days: [],
   state: {
     status: 'ready',
     forecastStatus: 'ready',
@@ -3705,6 +3722,14 @@ const dailyForecastSfcFixture = (overrides = {}) => ({
     unavailableEvidenceSummary: { count: 0, previewIds: [], omittedCount: 0 },
   },
   ...overrides,
+})
+const dailyDetailsProps = ({ forecast = dailyForecastSfcFixture(), state = forecast.state, selectedDate = null } = {}) => ({
+  forecast,
+  state,
+  impact: { items: [], payrollEvents: [] },
+  selectedDate,
+  displayCurrencyCode: 'USD',
+  language: 'en',
 })
 
 test('renders known gross payroll inflow when another source metric is unavailable without changing the Available chart path', async () => {
@@ -3772,8 +3797,9 @@ test('renders known gross payroll inflow when another source metric is unavailab
       unavailableEvidenceSummary: { count: 1, previewIds: ['unavailable:refund'], omittedCount: 0 },
     },
   })
-  const component = loadAnalyticsDailyComponent({ dailyForecast })
-  const render = component.setup({}, { expose: () => {} })
+  const component = loadAnalyticsDailyOverviewComponent()
+  const overviewProps = { forecast: dailyForecast, displayCurrencyCode: 'USD', displayCurrencyDecimalPlaces: 2 }
+  const render = component.setup(overviewProps, { expose: () => {}, emit: () => {} })
   const tree = render({ $t: (key, values = {}) => (values.level ? `${key}:${values.level}` : key) }, [])
   const chart = findVNodes(tree, (node) => node.props?.onSelect)[0]
 
@@ -3781,7 +3807,7 @@ test('renders known gross payroll inflow when another source metric is unavailab
   assert.equal(chart.props.series.availableLine.openingValue, 0)
   assert.equal(chart.props.series.availableLine.excludesVariableEnvelope, true)
 
-  const app = createSSRApp(component)
+  const app = createSSRApp(component, overviewProps)
   app.config.globalProperties.$t = (key, values = {}) => (values.level ? `${key}:${values.level}` : key)
   const stub = {
     setup:
@@ -3789,7 +3815,7 @@ test('renders known gross payroll inflow when another source metric is unavailab
       () =>
         h('div', slots.default?.()),
   }
-  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-tabs', 'analytics-combination-chart']) app.component(name, stub)
+  app.component('analytics-combination-chart', stub)
   const html = await renderToString(app)
 
   assert.match(html, /analytics\.daily_forecast\.expected_inflow[\s\S]*?6425 USD/)
@@ -3799,16 +3825,15 @@ test('renders known gross payroll inflow when another source metric is unavailab
 
 test('keeps the Expected inflow summary unavailable when every source component is unavailable', async () => {
   const unavailableSources = { income: null, refunds: null, savingsWithdrawals: null, newDebt: null }
-  const component = loadAnalyticsDailyComponent({
-    dailyForecast: dailyForecastSfcFixture({
-      summary: {
-        inflow: { actual: null, projected: null, final: null, status: 'unavailable', components: { actual: unavailableSources, projected: unavailableSources, final: unavailableSources } },
-        outflow: { actual: 0, projected: 0, final: 0, status: 'ready' },
-        availableChange: { actual: null, projected: null, final: null, status: 'unavailable' },
-      },
-    }),
+  const component = loadAnalyticsDailyOverviewComponent()
+  const forecast = dailyForecastSfcFixture({
+    summary: {
+      inflow: { actual: null, projected: null, final: null, status: 'unavailable', components: { actual: unavailableSources, projected: unavailableSources, final: unavailableSources } },
+      outflow: { actual: 0, projected: 0, final: 0, status: 'ready' },
+      availableChange: { actual: null, projected: null, final: null, status: 'unavailable' },
+    },
   })
-  const app = createSSRApp(component)
+  const app = createSSRApp(component, { forecast, displayCurrencyCode: 'USD', displayCurrencyDecimalPlaces: 2 })
   app.config.globalProperties.$t = (key, values = {}) => (values.level ? `${key}:${values.level}` : key)
   const stub = {
     setup:
@@ -3816,7 +3841,7 @@ test('keeps the Expected inflow summary unavailable when every source component 
       () =>
         h('div', slots.default?.()),
   }
-  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-tabs', 'analytics-combination-chart']) app.component(name, stub)
+  app.component('analytics-combination-chart', stub)
   const html = await renderToString(app)
 
   assert.match(html, /analytics\.daily_forecast\.expected_inflow<\/span><strong>—<\/strong>/)
@@ -3824,33 +3849,32 @@ test('keeps the Expected inflow summary unavailable when every source component 
 })
 
 test('derives event detail rows from real flow data without guessing semantics from human labels', async () => {
-  const component = loadAnalyticsDailyComponent({
-    dailyForecast: dailyForecastSfcFixture({
-      barGroups: [{ id: 'inflow', direction: 'sources', labelKey: 'analytics.daily_forecast.inflow', points: [{ value: 3150 }] }],
-      eventSummaries: [
-        {
-          id: 'payroll:2026-08-14',
-          date: '2026-08-14',
-          sourceKind: 'inferred',
-          bundleLabel: 'Payroll',
-          availableCashChange: 1905,
-          confidence: { level: 'medium' },
-          sourceIds: [],
-          candidateIds: [],
-          evidenceIds: [],
-          components: [
-            { id: 'gross', bundleLabel: 'Base pay', flowAmounts: { income: 3150 } },
-            { id: 'taxicab', bundleLabel: 'Taxicab ride', flowAmounts: { expenses: 25 } },
-            { id: 'tax', bundleLabel: 'Payroll taxes', semanticKind: 'tax', flowAmounts: { expenses: 605 } },
-            { id: 'insurance', bundleLabel: 'Health deduction', semanticKind: 'insurance', flowAmounts: { expenses: 105 } },
-            { id: 'debt', bundleLabel: 'Debt payment', flowAmounts: { debtRepayments: 210 } },
-            { id: 'savings', bundleLabel: 'Savings transfer', flowAmounts: { savingsDeposits: 300 } },
-          ],
-        },
-      ],
-    }),
+  const component = loadAnalyticsDailyDetailsComponent()
+  const forecast = dailyForecastSfcFixture({
+    barGroups: [{ id: 'inflow', direction: 'sources', labelKey: 'analytics.daily_forecast.inflow', points: [{ value: 3150 }] }],
+    eventSummaries: [
+      {
+        id: 'payroll:2026-08-14',
+        date: '2026-08-14',
+        sourceKind: 'inferred',
+        bundleLabel: 'Payroll',
+        availableCashChange: 1905,
+        confidence: { level: 'medium' },
+        sourceIds: [],
+        candidateIds: [],
+        evidenceIds: [],
+        components: [
+          { id: 'gross', bundleLabel: 'Base pay', flowAmounts: { income: 3150 } },
+          { id: 'taxicab', bundleLabel: 'Taxicab ride', flowAmounts: { expenses: 25 } },
+          { id: 'tax', bundleLabel: 'Payroll taxes', semanticKind: 'tax', flowAmounts: { expenses: 605 } },
+          { id: 'insurance', bundleLabel: 'Health deduction', semanticKind: 'insurance', flowAmounts: { expenses: 105 } },
+          { id: 'debt', bundleLabel: 'Debt payment', flowAmounts: { debtRepayments: 210 } },
+          { id: 'savings', bundleLabel: 'Savings transfer', flowAmounts: { savingsDeposits: 300 } },
+        ],
+      },
+    ],
   })
-  const app = createSSRApp(component)
+  const app = createSSRApp(component, dailyDetailsProps({ forecast }))
   app.config.globalProperties.$t = (key, values = {}) => (values.level ? `${key}:${values.level}` : key)
   const stub = {
     setup:
@@ -3858,26 +3882,25 @@ test('derives event detail rows from real flow data without guessing semantics f
       () =>
         h('div', slots.default?.()),
   }
-  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-tabs', 'analytics-combination-chart']) app.component(name, stub)
+  app.component('van-button', stub)
   const html = await renderToString(app)
 
   assert.match(html, /Taxicab ride/)
   assert.match(html, /Payroll taxes/)
   assert.match(html, /Health deduction/)
-  for (const key of ['gross_inflow', 'debt', 'savings', 'available_change']) assert.match(html, new RegExp(`analytics\\.daily_forecast\\.${key}`))
+  for (const key of ['debt', 'savings', 'available_change']) assert.match(html, new RegExp(`analytics\\.daily_forecast\\.${key}`))
   assert.match(html, /\+1905 USD/)
 })
 
 test('renders the production string confidence contract for every envelope state', async () => {
-  const component = loadAnalyticsDailyComponent({
-    dailyForecast: dailyForecastSfcFixture({
-      variableEnvelope: {
-        availableCashChange: -90,
-        items: ['high', 'low', 'insufficient'].map((confidence) => ({ id: confidence, categoryId: confidence, confidence, expected: 10, evidenceIds: [] })),
-      },
-    }),
+  const component = loadAnalyticsDailyDetailsComponent()
+  const forecast = dailyForecastSfcFixture({
+    variableEnvelope: {
+      availableCashChange: -90,
+      items: ['high', 'low', 'insufficient'].map((confidence) => ({ id: confidence, categoryId: confidence, confidence, expected: 10, evidenceIds: [] })),
+    },
   })
-  const app = createSSRApp(component)
+  const app = createSSRApp(component, dailyDetailsProps({ forecast }))
   app.config.globalProperties.$t = (key, values = {}) => (values.level ? `${key}:${values.level}` : key)
   const stub = {
     setup:
@@ -3885,7 +3908,7 @@ test('renders the production string confidence contract for every envelope state
       () =>
         h('div', slots.default?.()),
   }
-  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-tabs', 'analytics-combination-chart']) app.component(name, stub)
+  app.component('van-button', stub)
   const html = await renderToString(app)
   for (const level of ['high', 'low', 'insufficient']) assert.match(html, new RegExp(`analytics\\.daily_forecast\\.confidence:analytics\\.daily_forecast\\.confidence_${level}`))
 })
@@ -3905,8 +3928,7 @@ test('localizes the confidence template and every confidence level natively', ()
 
 test('enables exact actual evidence only when one or more transaction IDs exist', async () => {
   const navigated = []
-  const component = loadAnalyticsDailyComponent({ dailyForecast: dailyForecastSfcFixture(), navigateTo: (route) => navigated.push(route) })
-  const render = component.setup({}, { expose: () => {} })
+  const component = loadAnalyticsDailyDetailsComponent({ navigateTo: (route) => navigated.push(route) })
   const renderContext = { $t: (key, values = {}) => (values.level ? `${key}:${values.level}` : key) }
   const entries = [
     { id: 'one', sourceKind: 'actual', sourceLabel: 'One', transactionIds: ['tx-1'], flowAmounts: { income: 1 } },
@@ -3914,8 +3936,11 @@ test('enables exact actual evidence only when one or more transaction IDs exist'
     { id: 'none', sourceKind: 'actual', sourceLabel: 'None', transactionIds: [], flowAmounts: { income: 3 } },
     { id: 'projected', sourceKind: 'defined', sourceLabel: 'Projected', transactionIds: ['evidence-only'], flowAmounts: { income: 4 } },
   ]
-  const chart = findVNodes(render(renderContext, []), (node) => node.props?.onSelect)[0]
-  chart.props.onSelect({ xLabel: 'Aug 12', values: [{ seriesId: 'inflow', point: { direction: 'sources', entries } }] })
+  const forecast = dailyForecastSfcFixture({
+    dateKeys: ['2026-08-12'],
+    days: [{ date: '2026-08-12', isToday: true, sources: 10, uses: 0, availableCashChange: 10, actual: { entries }, projected: null }],
+  })
+  const render = component.setup(dailyDetailsProps({ forecast, selectedDate: '2026-08-12' }), { expose: () => {}, emit: () => {} })
   const vnodes = render(renderContext, [])
   const buttons = findVNodes(vnodes, (node) => node.type === 'button' && node.props?.class === 'analytics-daily-forecast-detail-row')
   assert.deepEqual(
@@ -3934,20 +3959,19 @@ test('enables exact actual evidence only when one or more transaction IDs exist'
 })
 
 test('keeps the explainable Daily Forecast source contract material, expandable, routable, and retryable', () => {
-  const dailySource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url), 'utf8')
+  const dailySource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
 
-  assert.match(dailySource, /daily\.value\.eventSummaries/)
-  assert.match(dailySource, /daily\.value\.variableEnvelope\.items/)
+  assert.match(dailySource, /props\.forecast\.eventSummaries/)
+  assert.match(dailySource, /props\.forecast\.variableEnvelope\.items/)
   assert.match(dailySource, /eventDetailRows/)
   assert.match(dailySource, /Number\.isFinite\(value\) && value !== 0/)
-  assert.match(dailySource, /analytics\.daily_forecast\.projected_non_navigable/)
   assert.match(dailySource, /analytics\.daily_forecast\.undated_estimate/)
   assert.match(dailySource, /entry\.sourceKind === 'actual'/)
   assert.match(dailySource, /TransactionFilterUtils\.filters\.id\.toUrl/)
-  assert.match(dailySource, /v-if="dailyState\.sourceErrors\.length"[\s\S]*?<van-button[^>]+@click="analyticsStore\.retryDailyForecast"/)
+  assert.match(dailySource, /v-if="state\.sourceErrors\?\.length"[\s\S]*?<van-button[^>]+@click="\$emit\('retry'\)"/)
 
   const requiredKeys = [
-    'bundle_details',
+    'scheduled_events',
     'gross_inflow',
     'taxes',
     'insurance',
@@ -3959,8 +3983,20 @@ test('keeps the explainable Daily Forecast source contract material, expandable,
     'history',
     'undated_estimate',
     'confidence',
-    'event_evidence',
+    'technical_evidence',
     'projected_non_navigable',
+    'open_full_forecast',
+    'monthly_impact',
+    'evidence_and_issues',
+    'inputs_need_review',
+    'actual_through_today',
+    'remaining_activity',
+    'end_of_month_change',
+    'impact_available_change',
+    'impact_savings_included',
+    'impact_savings_excluded',
+    'impact_debt_change',
+    'impact_net_worth_change',
   ]
   for (const locale of localeNames) {
     const dailyForecast = JSON.parse(readFileSync(new URL(`../../i18n/locales/${locale}.json`, import.meta.url), 'utf8')).analytics.daily_forecast
