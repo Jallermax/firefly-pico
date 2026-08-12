@@ -128,7 +128,7 @@ const payrollAmounts = {
   current: { salary: 3150, taxes: 630, insurance: 105, debt: 210, savings: 315, employerContribution: 157.5 },
 }
 
-const payrollOccurrence = ({ date, sequence, regime = 'old', reimbursement = false }) => {
+const payrollOccurrence = ({ date, sequence, regime = 'old', reimbursement = false, omittedComponents = [], oneOff = false }) => {
   const transactionId = `payroll-${sequence}`
   const values = payrollAmounts[regime]
   const component = (name, options) => entry({ id: `${transactionId}-${name}`, transactionId, date, tags: ['paystub/payroll'], ...options })
@@ -168,7 +168,8 @@ const payrollOccurrence = ({ date, sequence, regime = 'old', reimbursement = fal
     ...(reimbursement
       ? [component('reimbursement', { value: 75, direction: 'income', sourceId: 'employer', destinationId: 'checking', categoryId: 'reimbursement', description: 'Expense reimbursement' })]
       : []),
-  ]
+    ...(oneOff ? [component('one-off', { value: 777, sourceId: 'checking', destinationId: 'specialist', categoryId: 'one-off', description: 'One-off adjustment' })] : []),
+  ].filter(({ id }) => !omittedComponents.some((componentName) => id.endsWith(`-${componentName}`)))
 }
 
 const payrollHistory = ({ latestRegimes = ['current', 'current'] } = {}) => [
@@ -566,6 +567,129 @@ test('keeps recurring bundle projection and audit byte-identical under shuffled 
   assert.equal(JSON.stringify(shuffled), JSON.stringify(ordered))
   assert.deepEqual(history, originalHistory)
   assert.deepEqual(candidates, originalCandidates)
+})
+
+test('suppresses an early fulfilled month-end payroll phase without projecting its salary or linked deductions again', () => {
+  const history = payrollHistory()
+  const actual = payrollOccurrence({ date: '2026-08-20', sequence: 'august-end-early', regime: 'current', reimbursement: true })
+  const candidates = payrollCandidates(history)
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-20' }),
+    candidates,
+    historyMonths: 3,
+    today: '2026-08-20',
+    endDate: '2026-08-31',
+  })
+
+  assert.deepEqual(
+    result.dailyProjectedEntries.filter(({ bundleId }) => bundleId).map(({ bundleLabel }) => bundleLabel),
+    [],
+  )
+  assert.equal(result.actualToDate.income, 3382.5)
+  assert.equal(result.actualToDate.expenses, 735)
+  assert.deepEqual(result.audit.bundles[0].projectedDates, [])
+  assert.deepEqual(result.audit.bundles[0].fulfilledPhases, [
+    {
+      phase: 'monthEnd',
+      entryIds: actual.map(({ id }) => id).sort(),
+      transactionIds: ['payroll-august-end-early'],
+    },
+  ])
+})
+
+test('suppresses only a fulfilled middle payroll phase and keeps the unpaid month-end bundle projected', () => {
+  const history = payrollHistory()
+  const actual = payrollOccurrence({ date: '2026-08-13', sequence: 'august-mid-early', regime: 'current' })
+  const candidates = payrollCandidates(history)
+  const orderedLedger = ledger([...history, ...actual], { startMonth: '2026-05', endDate: '2026-08-13' })
+  const originalEntries = structuredClone(orderedLedger.entries)
+  const ordered = buildRemainingActivityForecast({ ledger: orderedLedger, candidates, historyMonths: 3, today: '2026-08-13', endDate: '2026-08-31' })
+  const shuffled = buildRemainingActivityForecast({
+    ledger: { ...orderedLedger, entries: [...orderedLedger.entries].reverse() },
+    candidates: [...candidates].reverse(),
+    historyMonths: 3,
+    today: '2026-08-13',
+    endDate: '2026-08-31',
+  })
+  const bundle = ordered.audit.bundles[0]
+  const projected = ordered.dailyProjectedEntries.filter(({ bundleId }) => bundleId === bundle.id)
+
+  assert.deepEqual([...new Set(projected.map(({ date }) => date))], ['2026-08-31'])
+  assert.equal(projected.find(({ bundleLabel }) => bundleLabel === 'Base pay').amount, 3150)
+  assert.equal(projected.find(({ bundleLabel }) => bundleLabel === 'Payroll taxes').amount, 630)
+  assert.deepEqual(bundle.fulfilledPhases, [
+    {
+      phase: 'middle',
+      entryIds: actual.map(({ id }) => id).sort(),
+      transactionIds: ['payroll-august-mid-early'],
+    },
+  ])
+  assert.equal(JSON.stringify(shuffled), JSON.stringify(ordered))
+  assert.deepEqual(orderedLedger.entries, originalEntries)
+  assert.deepEqual(candidates, payrollCandidates(history))
+})
+
+test('falls back when the latest payroll signatures differ and keeps inconsistent deductions available to variable modeling', () => {
+  const history = [
+    ...payrollOccurrence({ date: '2026-05-15', sequence: 'may-mid' }),
+    ...payrollOccurrence({ date: '2026-05-29', sequence: 'may-end' }),
+    ...payrollOccurrence({ date: '2026-06-15', sequence: 'june-mid' }),
+    ...payrollOccurrence({ date: '2026-06-30', sequence: 'june-end' }),
+    ...payrollOccurrence({ date: '2026-07-15', sequence: 'july-mid', regime: 'current' }),
+    ...payrollOccurrence({ date: '2026-07-31', sequence: 'july-end', regime: 'current', omittedComponents: ['taxes'] }),
+  ]
+  const candidates = payrollCandidates(history)
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates,
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+  const bundle = result.audit.bundles[0]
+  const taxIds = history.filter(({ description }) => description === 'Payroll taxes').map(({ id }) => id)
+  const projectedTaxes = result.dailyProjectedEntries.filter(({ bundleLabel }) => bundleLabel === 'Payroll taxes')
+  const variableTaxEvidence = result.dailyProjectedEntries.filter(({ sourceKind, evidenceIds }) => sourceKind === 'variable' && evidenceIds.some((id) => taxIds.includes(id)))
+
+  assert.equal(bundle.regimePolicy, 'recencyWeightedMedian')
+  assert.equal(bundle.confidence.level, 'medium')
+  assert.equal(
+    bundle.components.some(({ label, phase }) => label === 'Payroll taxes' && phase === 'middle'),
+    false,
+  )
+  assert.deepEqual(projectedTaxes, [])
+  assert.ok(variableTaxEvidence.length > 0)
+  assert.ok(taxIds.every((id) => !bundle.entryIds.includes(id)))
+  assert.ok(taxIds.every((id) => !result.audit.recurring.removedHistoryEntryIds.includes(id)))
+  assert.ok(bundle.inconsistentComponentKeys.length > 0)
+})
+
+test('keeps a one-off split outside bundle components, suppression audit, and variable-history removal', () => {
+  const history = [
+    ...payrollOccurrence({ date: '2026-05-15', sequence: 'may-mid', oneOff: true }),
+    ...payrollOccurrence({ date: '2026-05-29', sequence: 'may-end' }),
+    ...payrollOccurrence({ date: '2026-06-15', sequence: 'june-mid' }),
+    ...payrollOccurrence({ date: '2026-06-30', sequence: 'june-end' }),
+    ...payrollOccurrence({ date: '2026-07-15', sequence: 'july-mid', regime: 'current' }),
+    ...payrollOccurrence({ date: '2026-07-31', sequence: 'july-end', regime: 'current' }),
+  ]
+  const oneOff = history.find(({ description }) => description === 'One-off adjustment')
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: payrollCandidates(history),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+  const bundle = result.audit.bundles[0]
+
+  assert.equal(
+    bundle.components.some(({ label }) => label === 'One-off adjustment'),
+    false,
+  )
+  assert.equal(bundle.entryIds.includes(oneOff.id), false)
+  assert.equal(result.audit.recurring.removedHistoryEntryIds.includes(oneOff.id), false)
+  assert.ok(result.dailyProjectedEntries.some(({ sourceKind, evidenceIds }) => sourceKind === 'variable' && evidenceIds.includes(oneOff.id)))
 })
 
 test('removes recurring history before calculating the variable remainder', () => {
