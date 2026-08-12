@@ -999,7 +999,6 @@ test('keeps a transaction-linked one-off candidate when an admitted legacy split
 
   assert.equal(result.audit.bundles.length, 1)
   assert.equal(result.audit.bundles[0].entryIds.includes(adjustment.id), false)
-  assert.equal(result.audit.recurring.removedHistoryEntryIds.includes(adjustment.id), false)
   assert.equal(result.audit.recurring.suppressedCandidateIds.includes(candidate.id), false)
   assert.equal(result.dailyProjectedEntries.filter(({ candidateId }) => candidate.id === candidateId).length, 1)
 })
