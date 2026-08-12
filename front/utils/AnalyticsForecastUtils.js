@@ -20,6 +20,41 @@ const stableHash = (value) => {
   return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
+const stableValue = (value) => {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!value || typeof value !== 'object') return value
+  if (value instanceof Date) return value.toISOString()
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stableValue(value[key])]),
+  )
+}
+
+const canonicalizeLedgerEntries = (entries) => {
+  const byId = new Map()
+  const anonymous = []
+  for (const entry of entries) {
+    if (entry.id === null || entry.id === undefined || entry.id === '') {
+      anonymous.push(entry)
+      continue
+    }
+    const id = String(entry.id)
+    const variants = byId.get(id) ?? new Map()
+    variants.set(JSON.stringify(stableValue(entry)), entry)
+    byId.set(id, variants)
+  }
+  const canonical = [...anonymous]
+  const conflicts = []
+  for (const [id, variants] of [...byId.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    if (variants.size === 1) canonical.push([...variants.values()][0])
+    else conflicts.push({ id, entries: [...variants.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, entry]) => entry) })
+  }
+  return { entries: canonical, conflicts }
+}
+
+const usableLedgerValue = (entry) => Number.isFinite(entry?.value) && entry?.conversion?.mode !== 'unavailable' && !entry?.conversion?.missingCurrency
+
 const median = (values) => {
   const sorted = values.filter(Number.isFinite).sort((left, right) => left - right)
   if (sorted.length === 0) return null
@@ -140,6 +175,23 @@ const contextKey = (context) =>
     Number(context.sourceIncluded),
     Number(context.destinationIncluded),
   ].join('|')
+
+const conflictingRecurringTransactionIds = (entries) => {
+  const groups = new Map()
+  for (const entry of entries) {
+    if (!entry.transactionId || !entry.date || !usableLedgerValue(entry)) continue
+    const transactionId = String(entry.transactionId)
+    const dates = groups.get(transactionId) ?? new Map()
+    const contexts = dates.get(entry.date) ?? []
+    contexts.push(contextKey(projectionContext(entry).context))
+    dates.set(entry.date, contexts)
+    groups.set(transactionId, dates)
+  }
+  return [...groups.entries()]
+    .filter(([, dates]) => dates.size > 1 || [...dates.values()].some((contexts) => new Set(contexts).size !== contexts.length))
+    .map(([transactionId]) => transactionId)
+    .sort()
+}
 
 const flowAmountsFor = (context, amount, currencyDecimalPlaces) => {
   const values = emptyTotals()
@@ -739,11 +791,20 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
   }
 }
 
-const discoverRecurringBundles = ({ entries, months, excludedEntryIds, today, endDate, currencyDecimalPlaces }) => {
+const discoverRecurringBundles = ({ entries, months, excludedEntryIds, conflictingTransactionIds, today, endDate, currencyDecimalPlaces }) => {
   const excluded = new Set(excludedEntryIds)
+  const conflictingTransactions = new Set(conflictingTransactionIds)
   const grouped = new Map()
   for (const entry of entries) {
-    if (!months.includes(entry.monthKey) || excluded.has(String(entry.id)) || !Number.isFinite(entry.value) || !entry.transactionId || !entry.date) continue
+    if (
+      !months.includes(entry.monthKey) ||
+      excluded.has(String(entry.id)) ||
+      !usableLedgerValue(entry) ||
+      !entry.transactionId ||
+      conflictingTransactions.has(String(entry.transactionId)) ||
+      !entry.date
+    )
+      continue
     const key = `${entry.date}|${entry.transactionId}`
     grouped.set(key, [...(grouped.get(key) ?? []), entry])
   }
@@ -751,6 +812,8 @@ const discoverRecurringBundles = ({ entries, months, excludedEntryIds, today, en
   const families = new Map()
   for (const group of [...grouped.values()]) {
     const sortedEntries = group.sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    const currencies = unique(sortedEntries.map(({ conversion }) => conversion?.displayCurrency ?? conversion?.sourceCurrency)).sort()
+    if (currencies.length > 1) continue
     const components = new Map()
     let duplicateComponent = false
     for (const entry of sortedEntries) {
@@ -772,7 +835,7 @@ const discoverRecurringBundles = ({ entries, months, excludedEntryIds, today, en
   const discovered = []
   for (const [anchorKey, family] of [...families.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const occurrences = family.sort((left, right) => left.date.localeCompare(right.date) || left.transactionId.localeCompare(right.transactionId))
-    if (occurrences.length < 3 || new Set(occurrences.map(({ monthKey }) => monthKey)).size < 2) continue
+    if (occurrences.length < 3 || new Set(occurrences.map(({ transactionId }) => transactionId)).size < 3 || new Set(occurrences.map(({ monthKey }) => monthKey)).size < 2) continue
     const middleOccurrences = occurrences.filter(({ date }) => dateParts(date).day <= 20)
     const monthEndOccurrences = occurrences.filter(({ date }) => dateParts(date).day > 20)
     if (
@@ -837,10 +900,17 @@ const discoverRecurringBundles = ({ entries, months, excludedEntryIds, today, en
     const middleDay = Math.round(median(middleOccurrences.map(({ date }) => dateParts(date).day)))
     const middleDate = precedingBusinessDay(`${target.year}-${String(target.month).padStart(2, '0')}-${String(Math.min(middleDay, daysInMonth(target.year, target.month))).padStart(2, '0')}`)
     const endOfMonthDate = precedingBusinessDay(`${target.year}-${String(target.month).padStart(2, '0')}-${String(daysInMonth(target.year, target.month)).padStart(2, '0')}`)
-    const projectedDates = [
-      ...(middleDate > today && middleDate <= endDate ? [{ date: middleDate, phase: 'middle' }] : []),
-      ...(endOfMonthDate > today && endOfMonthDate <= endDate ? [{ date: endOfMonthDate, phase: 'monthEnd' }] : []),
+    const phaseWindowDays = 4
+    const phaseDates = [
+      {
+        date: middleDate,
+        phase: 'middle',
+        windowStart: formatDate(addDays(dateParts(middleDate).date, -phaseWindowDays)),
+        windowEnd: formatDate(addDays(dateParts(middleDate).date, phaseWindowDays)),
+      },
+      { date: endOfMonthDate, phase: 'monthEnd', windowStart: formatDate(addDays(dateParts(middleDate).date, phaseWindowDays + 1)), windowEnd: endOfMonthDate },
     ]
+    const projectedDates = phaseDates.filter(({ date }) => date > today && date <= endDate).map(({ date, phase }) => ({ date, phase }))
     if (projectedDates.length === 0) continue
     discovered.push({
       id,
@@ -856,6 +926,7 @@ const discoverRecurringBundles = ({ entries, months, excludedEntryIds, today, en
       confidence,
       regimePolicy,
       schedulePolicy: { type: 'semimonthly', middleDay, monthEnd: true, weekendAdjustment: 'previousBusinessDay' },
+      phaseDates,
       projectedDates,
       components,
       matchingEntryIds: unique(occurrences.flatMap(({ components }) => [...components.values()].map(({ id }) => String(id)))).sort(),
@@ -864,16 +935,19 @@ const discoverRecurringBundles = ({ entries, months, excludedEntryIds, today, en
   return discovered.sort((left, right) => left.id.localeCompare(right.id))
 }
 
-const fulfillRecurringBundles = ({ bundles, currentEntries, currencyDecimalPlaces }) => {
+const fulfillRecurringBundles = ({ bundles, currentEntries, conflictingTransactionIds, currencyDecimalPlaces }) => {
+  const conflictingTransactions = new Set(conflictingTransactionIds)
   const groups = new Map()
   for (const entry of currentEntries) {
-    if (!Number.isFinite(entry.value) || !entry.transactionId || !entry.date) continue
+    if (!usableLedgerValue(entry) || !entry.transactionId || conflictingTransactions.has(String(entry.transactionId)) || !entry.date) continue
     const key = `${entry.date}|${entry.transactionId}`
     groups.set(key, [...(groups.get(key) ?? []), entry])
   }
   const occurrences = [...groups.values()]
     .map((entries) => {
       const sortedEntries = entries.sort((left, right) => String(left.id).localeCompare(String(right.id)))
+      const currencies = unique(sortedEntries.map(({ conversion }) => conversion?.displayCurrency ?? conversion?.sourceCurrency)).sort()
+      if (currencies.length > 1) return null
       const components = new Map()
       for (const entry of sortedEntries) {
         const key = contextKey(projectionContext(entry).context)
@@ -891,7 +965,8 @@ const fulfillRecurringBundles = ({ bundles, currentEntries, currencyDecimalPlace
     const knownKeys = new Set(bundle.components.map(({ key }) => key))
     for (const occurrence of occurrences.filter(({ components }) => components.has(bundle.anchorKey))) {
       const recognizedKeys = [...occurrence.components.keys()].filter((key) => knownKeys.has(key)).sort()
-      const matchingPhases = remainingDates
+      const matchingPhases = bundle.phaseDates
+        .filter(({ phase }) => !fulfilledPhases.some((fulfilled) => fulfilled.phase === phase))
         .filter(({ phase }) => {
           const expected = bundle.components.filter((component) => component.phase === 'both' || component.phase === phase)
           const expectedKeys = expected.map(({ key }) => key).sort()
@@ -900,13 +975,14 @@ const fulfillRecurringBundles = ({ bundles, currentEntries, currencyDecimalPlace
             expected.every(({ key, amount }) => roundAmount(amountOf(occurrence.components.get(key)), currencyDecimalPlaces) === roundAmount(amount, currencyDecimalPlaces))
           )
         })
-        .sort((left, right) => calendarDayDistance(occurrence.date, left.date) - calendarDayDistance(occurrence.date, right.date) || left.phase.localeCompare(right.phase))
-      const matched = matchingPhases[0]
+      const explicitMatches = matchingPhases.filter(({ phase }) => bundle.components.some((component) => component.phase === phase))
+      const classifiedPhases = (
+        explicitMatches.length > 0 ? explicitMatches : matchingPhases.filter(({ windowStart, windowEnd }) => occurrence.date >= windowStart && occurrence.date <= windowEnd)
+      ).sort((left, right) => calendarDayDistance(occurrence.date, left.date) - calendarDayDistance(occurrence.date, right.date) || left.phase.localeCompare(right.phase))
+      const matched = classifiedPhases[0]
       if (!matched) continue
-      remainingDates.splice(
-        remainingDates.findIndex(({ phase }) => phase === matched.phase),
-        1,
-      )
+      const projectedIndex = remainingDates.findIndex(({ phase }) => phase === matched.phase)
+      if (projectedIndex >= 0) remainingDates.splice(projectedIndex, 1)
       fulfilledPhases.push({
         phase: matched.phase,
         entryIds: occurrence.entries.map(({ id }) => String(id)).sort(),
@@ -921,6 +997,7 @@ const recurringBundleAudit = (bundles) =>
   bundles.map((bundle) => {
     const audit = structuredClone(bundle)
     delete audit.matchingEntryIds
+    delete audit.phaseDates
     return audit
   })
 
@@ -1099,12 +1176,18 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
   const endKey = dateKey(endDate)
   const months = completedMonths(todayKey, Number(historyMonths))
   const invalidInput = !todayKey || !endKey || endKey < todayKey || !validDecimalPlaces(currencyDecimalPlaces)
-  const entries = [...(ledger?.entries ?? [])]
+  const normalizedEntries = [...(ledger?.entries ?? [])]
     .map((entry) => ({ ...entry, date: dateKey(entry?.date), monthKey: dateKey(entry?.date)?.slice(0, 7) ?? entry?.monthKey ?? null }))
     .sort((left, right) => String(left.date ?? '').localeCompare(String(right.date ?? '')) || String(left.id ?? '').localeCompare(String(right.id ?? '')))
+  const canonicalLedger = canonicalizeLedgerEntries(normalizedEntries)
+  const entries = canonicalLedger.entries.map((entry) => (usableLedgerValue(entry) ? entry : { ...entry, value: null }))
   const currentMonthKey = todayKey?.slice(0, 7)
   const relevantEntries = entries.filter((entry) => months.includes(entry.monthKey) || (entry.monthKey === currentMonthKey && entry.date <= todayKey))
-  const unavailableEntries = relevantEntries.filter((entry) => !Number.isFinite(entry.value))
+  const conflictingRelevantEntries = canonicalLedger.conflicts
+    .flatMap(({ entries }) => entries)
+    .filter((entry) => months.includes(entry.monthKey) || (entry.monthKey === currentMonthKey && entry.date <= todayKey))
+  const conflictingEntryIds = unique(conflictingRelevantEntries.map(({ id }) => String(id))).sort()
+  const unavailableEntries = [...relevantEntries.filter((entry) => !Number.isFinite(entry.value)), ...conflictingRelevantEntries]
   if (invalidInput) {
     const values = emptyTotals(null)
     return {
@@ -1135,7 +1218,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
           conflictingCandidateIds: [],
         },
         allocation: { targetsByDimension: {}, allocatedByDimension: {}, suppressedProjectionIds: [], cappedProjectionIds: [] },
-        unavailable: { affectedMetricIds: [...FLOW_KEYS], missingCurrencies: [], entryIds: [], candidateIds: [] },
+        unavailable: { affectedMetricIds: [...FLOW_KEYS], missingCurrencies: [], entryIds: conflictingEntryIds, candidateIds: [], ...(conflictingEntryIds.length > 0 ? { conflictingEntryIds } : {}) },
         missingCurrencies: [],
         unavailableEntryIds: [],
       },
@@ -1153,6 +1236,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     ...canonicalCandidates.candidates.filter((candidate) => !candidateEligible(candidate)).map(({ id }) => String(id)),
     ...canonicalCandidates.candidates.flatMap((candidate) => candidate.suppressedCandidateIds ?? []).map(String),
   ]).sort()
+  const conflictingTransactionIds = conflictingRecurringTransactionIds(relevantEntries)
   const authoritativeRecurringIds = recurringHistoryIds(eligibleCandidates.filter(({ source }) => source?.authoritative === true))
   const authoritativeEvidencedHistoryEntryIds = entries
     .filter((entry) => months.includes(entry.monthKey) && (authoritativeRecurringIds.entryIds.has(String(entry.id)) || authoritativeRecurringIds.transactionIds.has(String(entry.transactionId))))
@@ -1172,6 +1256,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     entries,
     months,
     excludedEntryIds: [...authoritativeEvidencedHistoryEntryIds, ...matchedHistory.entryIds],
+    conflictingTransactionIds,
     today: todayKey,
     endDate: endKey,
     currencyDecimalPlaces,
@@ -1188,7 +1273,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
     .map(({ id }) => String(id))
     .sort()
   const currentEntries = entries.filter(({ date }) => date?.startsWith(todayKey.slice(0, 7)) && date <= todayKey)
-  const bundles = fulfillRecurringBundles({ bundles: discoveredBundles, currentEntries, currencyDecimalPlaces })
+  const bundles = fulfillRecurringBundles({ bundles: discoveredBundles, currentEntries, conflictingTransactionIds, currencyDecimalPlaces })
   const bundleEntryIds = new Set(bundles.flatMap(({ entryIds }) => entryIds))
   const recurring = matchRecurringOccurrences({ candidates: occurrenceMatchingCandidates(projectionCandidates), actualEntries: currentEntries, today: todayKey })
   const candidateById = new Map(projectionCandidates.map((candidate) => [candidate.id, candidate]))
@@ -1471,6 +1556,7 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
         candidateConversions: [...candidateConversions.values()].sort((left, right) => left.candidateId.localeCompare(right.candidateId)),
         deduplicatedCandidateIds: canonicalCandidates.deduplicatedCandidateIds,
         conflictingCandidateIds: canonicalCandidates.conflictingCandidateIds,
+        ...(conflictingTransactionIds.length > 0 ? { conflictingTransactionIds } : {}),
       },
       allocation: {
         targetsByDimension: allocation.targetsByDimension,
@@ -1481,11 +1567,12 @@ export function buildRemainingActivityForecast({ ledger, candidates = [], candid
       unavailable: {
         affectedMetricIds: orderedAffectedMetricIds,
         missingCurrencies: [...missingCurrencies].sort(),
-        entryIds: unavailableEntryIds.sort(),
+        entryIds: unique(unavailableEntryIds).sort(),
         candidateIds: [...unavailableCandidateIds].sort(),
+        ...(conflictingEntryIds.length > 0 ? { conflictingEntryIds } : {}),
       },
       missingCurrencies: [...missingCurrencies].sort(),
-      unavailableEntryIds: unavailableEntryIds.sort(),
+      unavailableEntryIds: unique(unavailableEntryIds).sort(),
     },
   }
 }
