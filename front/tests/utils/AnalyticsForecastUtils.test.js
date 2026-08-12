@@ -230,6 +230,15 @@ const payrollHistoryWithExpandedCurrentRegime = () => {
   return [...history, ...newDeductions]
 }
 
+const payrollHistoryWithReconciliationVariance = () =>
+  separatePayrollHistory().map((item) =>
+    item.description === 'Internal allocation' && item.date === '2026-07-15'
+      ? { ...item, value: 726 }
+      : item.description === 'Internal allocation' && item.date === '2026-07-31'
+        ? { ...item, value: 735 }
+        : item,
+  )
+
 const payrollOccurrenceWithDuplicateContexts = ({ date, sequence, regime = 'old', reimbursement = false, omitTax = null }) => {
   const values = payrollAmounts[regime]
   const base = payrollOccurrence({ date, sequence, regime, reimbursement })
@@ -772,6 +781,33 @@ test('uses an expanded equivalent latest payroll pair as the current regime', ()
     ordered.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => newDeductionIds.includes(id))),
     false,
   )
+  assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+  assert.deepEqual(input.entries, snapshot)
+})
+
+test('ignores reconciliation-only amount variance when selecting the latest payroll regime', () => {
+  const history = payrollHistoryWithReconciliationVariance()
+  const input = ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' })
+  const snapshot = structuredClone(input.entries)
+  const ordered = buildRemainingActivityForecast({ ledger: input, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+  const reversed = buildRemainingActivityForecast({ ledger: { ...input, entries: [...input.entries].reverse() }, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+
+  assert.equal(ordered.audit.bundles.length, 1)
+  const bundle = ordered.audit.bundles[0]
+  const projected = ordered.dailyProjectedEntries.filter(({ bundleId }) => bundleId === bundle.id)
+  const amounts = (label) => projected.filter(({ bundleLabel }) => bundleLabel === label).map(({ amount }) => amount)
+  const internalIds = history.filter(({ description }) => description === 'Internal allocation').map(({ id }) => id)
+
+  assert.equal(bundle.regimePolicy, 'latestEquivalentPairAtLeastTwoPercent')
+  assert.equal(bundle.confidence.level, 'high')
+  assert.deepEqual(amounts('Base pay'), [3150, 3150])
+  assert.deepEqual(amounts('Payroll taxes'), [630, 630])
+  assert.deepEqual(amounts('Insurance deduction'), [105, 105])
+  assert.equal(bundle.components.find(({ label }) => label === 'Internal allocation').reconciliationOnly, true)
+  assert.deepEqual(amounts('Internal allocation'), [])
+  assert.ok(internalIds.every((id) => bundle.entryIds.includes(id)))
+  assert.ok(internalIds.every((id) => ordered.audit.recurring.removedHistoryEntryIds.includes(id)))
+  assert.equal(ordered.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => internalIds.includes(id))), false)
   assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
   assert.deepEqual(input.entries, snapshot)
 })
