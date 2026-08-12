@@ -212,6 +212,24 @@ const separatePayrollHistory = ({ latestRegimes = ['current', 'current'], ambigu
     ]
   })
 
+const payrollHistoryWithExpandedCurrentRegime = () => {
+  const history = separatePayrollHistory()
+  const newDeductions = ['2026-07-15', '2026-07-31'].map((date) =>
+    entry({
+      id: `new-current-deduction-${date}`,
+      transactionId: `new-current-deduction-${date}-group`,
+      date,
+      value: 126,
+      sourceId: 'checking',
+      destinationId: 'insurer',
+      categoryId: 'new-benefit',
+      description: 'New current deduction',
+      tags: ['paystub/payroll'],
+    }),
+  )
+  return [...history, ...newDeductions]
+}
+
 const payrollOccurrenceWithDuplicateContexts = ({ date, sequence, regime = 'old', reimbursement = false, omitTax = null }) => {
   const values = payrollAmounts[regime]
   const base = payrollOccurrence({ date, sequence, regime, reimbursement })
@@ -725,6 +743,32 @@ test('keeps stable duplicate-context payroll components distinct across the curr
   assert.deepEqual(amounts('Expense reimbursement'), [75])
   assert.equal(projected.find(({ bundleLabel }) => bundleLabel === 'Expense reimbursement').date, '2026-08-31')
   assert.equal(bundle.regimePolicy, 'latestEquivalentPairAtLeastTwoPercent')
+  assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+  assert.deepEqual(input.entries, snapshot)
+})
+
+test('uses an expanded equivalent latest payroll pair as the current regime', () => {
+  const history = payrollHistoryWithExpandedCurrentRegime()
+  const input = ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' })
+  const snapshot = structuredClone(input.entries)
+  const ordered = buildRemainingActivityForecast({ ledger: input, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+  const reversed = buildRemainingActivityForecast({ ledger: { ...input, entries: [...input.entries].reverse() }, candidates: [], historyMonths: 3, today: '2026-08-11', endDate: '2026-08-31' })
+
+  assert.equal(ordered.audit.bundles.length, 1)
+  const bundle = ordered.audit.bundles[0]
+  const projected = ordered.dailyProjectedEntries.filter(({ bundleId }) => bundleId === bundle.id)
+  const amounts = (label) => projected.filter(({ bundleLabel }) => bundleLabel === label).map(({ amount }) => amount)
+  const newDeductionIds = history.filter(({ description }) => description === 'New current deduction').map(({ id }) => id)
+
+  assert.equal(bundle.regimePolicy, 'latestEquivalentPairAtLeastTwoPercent')
+  assert.equal(bundle.confidence.level, 'high')
+  assert.deepEqual(amounts('Base pay'), [3150, 3150])
+  assert.deepEqual(amounts('Payroll taxes'), [630, 630])
+  assert.deepEqual(amounts('Insurance deduction'), [105, 105])
+  assert.deepEqual(amounts('New current deduction'), [126, 126])
+  assert.ok(newDeductionIds.every((id) => bundle.entryIds.includes(id)))
+  assert.ok(newDeductionIds.every((id) => ordered.audit.recurring.removedHistoryEntryIds.includes(id)))
+  assert.equal(ordered.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => newDeductionIds.includes(id))), false)
   assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
   assert.deepEqual(input.entries, snapshot)
 })
