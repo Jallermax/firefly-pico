@@ -952,7 +952,7 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
 const bundleCandidateMatchesAdmittedComponent = ({ candidate, bundle, amount }) => {
   const explicitEntryIds = new Set((candidate?.evidence?.entryIds ?? []).map(String))
   const matchingEntryIds = candidate?.source?.authoritative === true ? bundle.matchingEntryIds : bundle.candidateMatchingEntryIds
-  if (matchingEntryIds.some((id) => explicitEntryIds.has(String(id)))) return true
+  if (explicitEntryIds.size > 0) return [...explicitEntryIds].every((id) => matchingEntryIds.includes(id))
   const transactionIds = new Set((candidate?.evidence?.transactionIds ?? []).map(String))
   if (transactionIds.size === 0) return false
   const candidateContext = projectionContext(candidate).context
@@ -1305,7 +1305,7 @@ const variableEnvelopeIdentity = (entry) => {
 const normalizedBudgetPlans = (plans) => {
   const groups = new Map()
   for (const plan of plans.filter(({ id, type, period, amount }) => id && ['reset', 'rollover', 'adjusted'].includes(type) && period === 'monthly' && Number.isFinite(amount) && amount > 0)) {
-    const normalized = { id: String(plan.id), type: plan.type, period: plan.period, amount: Number(plan.amount) }
+    const normalized = { id: String(plan.id), type: plan.type, period: plan.period, amount: Number(plan.amount), label: String(plan.label ?? '').trim() || null }
     groups.set(normalized.id, [...(groups.get(normalized.id) ?? []), normalized])
   }
   const normalized = []
@@ -1313,7 +1313,7 @@ const normalizedBudgetPlans = (plans) => {
   for (const [id, candidates] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const variants = unique(candidates.map(({ type, period, amount }) => JSON.stringify({ type, period, amount })))
     if (variants.length > 1) conflictingPlanIds.push(id)
-    else normalized.push(candidates[0])
+    else normalized.push({ ...candidates[0], label: unique(candidates.map(({ label }) => label).filter(Boolean)).sort()[0] ?? null })
   }
   return { plans: normalized, conflictingPlanIds }
 }
@@ -1396,6 +1396,7 @@ const buildVariableEnvelopes = ({ entries, currentEntries, projectedEntries, rem
         id: `variable-envelope:${group.key}`,
         budgetId: group.budgetId,
         categoryId: group.categoryId,
+        label: plan?.label ?? null,
         actual: group.actual,
         known: group.known,
         historical,

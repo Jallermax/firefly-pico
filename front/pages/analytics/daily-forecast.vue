@@ -22,7 +22,7 @@
         </div>
         <template v-else>
           <div v-if="analyticsStore.dailyForecastState.isPartiallyUnavailable" class="analytics-daily-forecast-partial-note" role="status">
-            {{ $t('analytics.daily_forecast.inputs_need_review', { count: analyticsStore.dailyForecastState.unavailableEvidenceSummary.count }) }}
+            {{ $t('analytics.daily_forecast.inputs_need_review', { count: partialInputCount }) }}
           </div>
           <div v-if="analyticsStore.dailyForecastState.isBlockingUnavailable" class="analytics-warning" role="alert">{{ $t('analytics.daily_forecast.unavailable') }}</div>
           <analytics-daily-forecast-overview
@@ -63,20 +63,22 @@ const { t } = useI18n()
 const periodItems = computed(() => [3, 6, 12].map((value) => ({ label: t('analytics.period.months_short', { count: value }), value })))
 const monthTitle = computed(() => new Intl.DateTimeFormat(profileStore.language, { month: 'long', year: 'numeric' }).format(parseISO(`${analyticsStore.dailyForecast.monthKey}-01`)))
 const queryDate = computed(() => (analyticsStore.dailyForecast.dateKeys.includes(String(route.query.date ?? '')) ? String(route.query.date) : null))
+const partialInputCount = computed(() => analyticsStore.dailyForecastState.unavailableEvidenceSummary.count + analyticsStore.dailyForecastState.sourceErrors.length)
 
 watch(
   [queryDate, () => analyticsStore.dailyForecast.dateKeys],
   ([value]) => {
-    if (value) selectedDate.value = value
-    else if (!analyticsStore.dailyForecast.dateKeys.includes(selectedDate.value))
-      selectedDate.value = analyticsStore.dailyForecast.days.find(({ isToday }) => isToday)?.date ?? analyticsStore.dailyForecast.dateKeys[0] ?? null
+    selectedDate.value = value
   },
   { immediate: true },
 )
-const onSelect = (payload) => {
-  selectedDate.value = payload?.x ?? payload?.values?.find(({ point }) => point?.x)?.point?.x ?? null
+const selectDate = async (date) => {
+  if (!analyticsStore.dailyForecast.dateKeys.includes(date)) return
+  selectedDate.value = date
+  await navigateTo({ path: RouteConstants.ROUTE_ANALYTICS_DAILY_FORECAST, query: { ...route.query, date } }, { replace: true })
 }
-const onSelectPoint = ({ point }) => (selectedDate.value = point?.x ?? null)
+const onSelect = (payload) => selectDate(payload?.x ?? payload?.values?.find(({ point }) => point?.x)?.point?.x ?? null)
+const onSelectPoint = ({ point }) => selectDate(point?.x ?? null)
 const onRefresh = async () => {
   isRefreshing.value = true
   await analyticsStore.refresh()

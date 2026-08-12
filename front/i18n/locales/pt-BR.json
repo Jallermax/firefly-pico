@@ -147,7 +147,15 @@
       "impact_savings_included": "Poupança incluída no patrimônio líquido",
       "impact_savings_excluded": "Poupança excluída do patrimônio líquido",
       "impact_debt_change": "Mudança da dívida",
-      "impact_net_worth_change": "Mudança do patrimônio líquido"
+      "impact_net_worth_change": "Mudança do patrimônio líquido",
+      "account_route": "Caminho da conta: {source} → {destination}",
+      "account_outside": "Externa",
+      "account_unknown": "Desconhecida",
+      "actual_variable_activity": "Atividade variável real",
+      "known_scheduled_activity": "Atividade programada conhecida",
+      "budget_activity": "Atividade do orçamento",
+      "category_activity": "Atividade da categoria",
+      "aggregate_reconciled": "Um total da folha foi excluído porque sua evidência já está representada por {count} pacote(s) programado(s)."
     },
     "balance": {
       "title": "Tendências financeiras",

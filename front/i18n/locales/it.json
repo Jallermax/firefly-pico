@@ -147,7 +147,15 @@
       "impact_savings_included": "Risparmi inclusi nel patrimonio netto",
       "impact_savings_excluded": "Risparmi esclusi dal patrimonio netto",
       "impact_debt_change": "Variazione del debito",
-      "impact_net_worth_change": "Variazione del patrimonio netto"
+      "impact_net_worth_change": "Variazione del patrimonio netto",
+      "account_route": "Percorso del conto: {source} → {destination}",
+      "account_outside": "Esterno",
+      "account_unknown": "Sconosciuto",
+      "actual_variable_activity": "Attività variabile effettiva",
+      "known_scheduled_activity": "Attività pianificata nota",
+      "budget_activity": "Attività del budget",
+      "category_activity": "Attività della categoria",
+      "aggregate_reconciled": "Un totale delle retribuzioni è stato escluso perché le sue prove sono già rappresentate da {count} gruppo/i pianificato/i."
     },
     "balance": {
       "title": "Andamento finanziario",

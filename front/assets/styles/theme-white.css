@@ -3336,6 +3336,7 @@ body {
 
 .analytics-daily-forecast-detail-row {
     width: 100%;
+    min-height: 44px;
     border: 0;
     border-bottom: 1px solid var(--van-border-color);
     background: transparent;
@@ -3439,6 +3440,23 @@ body {
 
 .analytics-daily-forecast-impact-row span {
   color: var(--van-text-color-2);
+}
+
+.analytics-daily-forecast-impact-row small {
+  color: #9a6700;
+}
+
+.analytics-daily-forecast-payroll-impact {
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-daily-forecast-payroll-component {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--white);
 }
 
 .analytics-daily-forecast-full-details .analytics-daily-forecast-section-title {

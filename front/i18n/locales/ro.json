@@ -147,7 +147,15 @@
       "impact_savings_included": "Economii incluse în valoarea netă",
       "impact_savings_excluded": "Economii excluse din valoarea netă",
       "impact_debt_change": "Schimbarea datoriei",
-      "impact_net_worth_change": "Schimbarea valorii nete"
+      "impact_net_worth_change": "Schimbarea valorii nete",
+      "account_route": "Traseul contului: {source} → {destination}",
+      "account_outside": "Extern",
+      "account_unknown": "Necunoscut",
+      "actual_variable_activity": "Activitate variabilă efectivă",
+      "known_scheduled_activity": "Activitate planificată cunoscută",
+      "budget_activity": "Activitate de buget",
+      "category_activity": "Activitate de categorie",
+      "aggregate_reconciled": "Un total salarial a fost exclus deoarece dovezile sale sunt deja reprezentate de {count} pachet(e) planificat(e)."
     },
     "balance": {
       "title": "Tendințe financiare",

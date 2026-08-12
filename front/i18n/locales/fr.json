@@ -147,7 +147,15 @@
       "impact_savings_included": "Épargne incluse dans la valeur nette",
       "impact_savings_excluded": "Épargne exclue de la valeur nette",
       "impact_debt_change": "Variation de la dette",
-      "impact_net_worth_change": "Variation de la valeur nette"
+      "impact_net_worth_change": "Variation de la valeur nette",
+      "account_route": "Parcours du compte : {source} → {destination}",
+      "account_outside": "Externe",
+      "account_unknown": "Inconnu",
+      "actual_variable_activity": "Activité variable réelle",
+      "known_scheduled_activity": "Activité planifiée connue",
+      "budget_activity": "Activité du budget",
+      "category_activity": "Activité de la catégorie",
+      "aggregate_reconciled": "Un total de paie a été exclu car ses preuves sont déjà représentées par {count} lot(s) planifié(s)."
     },
     "balance": {
       "title": "Tendances financières",

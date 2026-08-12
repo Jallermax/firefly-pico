@@ -147,7 +147,15 @@
       "impact_savings_included": "Накопления, включённые в капитал",
       "impact_savings_excluded": "Накопления, исключённые из капитала",
       "impact_debt_change": "Изменение долга",
-      "impact_net_worth_change": "Изменение капитала"
+      "impact_net_worth_change": "Изменение капитала",
+      "account_route": "Маршрут счёта: {source} → {destination}",
+      "account_outside": "Внешний",
+      "account_unknown": "Неизвестный",
+      "actual_variable_activity": "Фактическая переменная активность",
+      "known_scheduled_activity": "Известная запланированная активность",
+      "budget_activity": "Активность бюджета",
+      "category_activity": "Активность категории",
+      "aggregate_reconciled": "Сводная сумма по зарплате исключена, поскольку её подтверждения уже представлены в {count} запланированном пакете/пакетах."
     },
     "balance": {
       "title": "Финансовая динамика",

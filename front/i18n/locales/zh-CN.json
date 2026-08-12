@@ -147,7 +147,15 @@
       "impact_savings_included": "计入净资产的储蓄",
       "impact_savings_excluded": "不计入净资产的储蓄",
       "impact_debt_change": "债务变化",
-      "impact_net_worth_change": "净资产变化"
+      "impact_net_worth_change": "净资产变化",
+      "account_route": "账户路径：{source} → {destination}",
+      "account_outside": "外部",
+      "account_unknown": "未知",
+      "actual_variable_activity": "实际可变活动",
+      "known_scheduled_activity": "已知计划活动",
+      "budget_activity": "预算活动",
+      "category_activity": "类别活动",
+      "aggregate_reconciled": "由于相关证据已包含在 {count} 个计划组合中，已排除该工资汇总项。"
     },
     "balance": {
       "title": "财务趋势",

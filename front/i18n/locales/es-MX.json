@@ -147,7 +147,15 @@
       "impact_savings_included": "Ahorros incluidos en el patrimonio neto",
       "impact_savings_excluded": "Ahorros excluidos del patrimonio neto",
       "impact_debt_change": "Cambio de deuda",
-      "impact_net_worth_change": "Cambio del patrimonio neto"
+      "impact_net_worth_change": "Cambio del patrimonio neto",
+      "account_route": "Ruta de la cuenta: {source} → {destination}",
+      "account_outside": "Externa",
+      "account_unknown": "Desconocida",
+      "actual_variable_activity": "Actividad variable real",
+      "known_scheduled_activity": "Actividad programada conocida",
+      "budget_activity": "Actividad del presupuesto",
+      "category_activity": "Actividad de la categoría",
+      "aggregate_reconciled": "Se excluyó un total de nómina porque su evidencia ya está representada por {count} paquete(s) programado(s)."
     },
     "balance": {
       "title": "Tendencias financieras",

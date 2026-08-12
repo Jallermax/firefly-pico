@@ -47,9 +47,10 @@ const normalizeBudgetPlans = (budgets) =>
       type: budgetCode(get(budget, 'attributes.auto_budget_type')),
       period: budgetCode(get(budget, 'attributes.auto_budget_period')),
       amount: Number(get(budget, 'attributes.amount', get(budget, 'attributes.auto_budget_amount'))),
+      label: String(get(budget, 'attributes.name', '')).trim() || null,
     }))
     .filter(({ id, active, type, amount }) => id && active && BUDGET_PLAN_TYPES.has(type) && Number.isFinite(amount) && amount > 0)
-    .map(({ id, type, period, amount }) => ({ id, type, period, amount }))
+    .map(({ id, type, period, amount, label }) => ({ id, type, period, amount, label }))
     .sort((left, right) => left.id.localeCompare(right.id))
 
 const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
@@ -96,6 +97,15 @@ const defensibleVariableEnvelope = (envelope) =>
   !['conflicting', 'attributionIncomplete'].includes(envelope.planStatus) &&
   (Number.isFinite(envelope.expected) || DAILY_FLOW_KEYS.some((key) => Number.isFinite(envelope.flowAmounts?.[key]) && envelope.flowAmounts[key] !== 0))
 const dailyEntryValue = (entry, keys, decimalPlaces) => dailyTotal(entry.flowAmounts ?? {}, keys, decimalPlaces)
+const dailyEntryImpact = (entry, decimalPlaces) => {
+  const flowAmounts = entry.flowAmounts ?? {}
+  const sources = dailyTotal(flowAmounts, DAILY_SOURCE_KEYS, decimalPlaces)
+  const uses = dailyTotal(flowAmounts, DAILY_USE_KEYS, decimalPlaces)
+  return {
+    ...Object.fromEntries(DAILY_IMPACT_KEYS.map((key) => [key, Number.isFinite(flowAmounts[key]) ? roundDaily(flowAmounts[key], decimalPlaces) : null])),
+    availableCashChange: Number.isFinite(sources) && Number.isFinite(uses) ? roundDaily(sources - uses, decimalPlaces) : null,
+  }
+}
 const sortDailyEntries = (entries, keys, decimalPlaces) =>
   [...entries].sort((left, right) => {
     const leftValue = dailyEntryValue(left, keys, decimalPlaces)
@@ -168,7 +178,7 @@ const buildDailyEventSummaries = (days, decimalPlaces) => {
         reasons: [...new Set(entries.flatMap(({ reasons = [] }) => reasons))].sort(),
         evidenceIds,
         transactionIds: [],
-        components: entries.map((entry) => ({ ...entry, transactionIds: [], evidenceIds: [...(entry.evidenceIds ?? [])].map(String).sort() })),
+        components: entries.map((entry) => ({ ...entry, impact: dailyEntryImpact(entry, decimalPlaces), transactionIds: [], evidenceIds: [...(entry.evidenceIds ?? [])].map(String).sort() })),
         flowAmounts: components,
         sources,
         uses,
@@ -372,14 +382,17 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
       entries.reduce((total, entry) => total + (entry.destinationAccountKind === kind ? entry.amount : 0) - (entry.sourceAccountKind === kind ? entry.amount : 0), 0),
       currencyDecimalPlaces,
     )
-  const impactItem = ({ id, actual, remaining, status, projectedSources }) => ({
-    id,
-    actual,
-    remaining,
-    final: Number.isFinite(actual) && Number.isFinite(remaining) ? roundDaily(actual + remaining, currencyDecimalPlaces) : null,
-    status,
-    projectedSources,
-  })
+  const impactItem = ({ id, actual, remaining, status, projectedSources }) => {
+    const defensibleRemaining = ['unavailable', 'insufficientHistory'].includes(status) ? null : remaining
+    return {
+      id,
+      actual,
+      remaining: defensibleRemaining,
+      final: Number.isFinite(actual) && Number.isFinite(defensibleRemaining) ? roundDaily(actual + defensibleRemaining, currencyDecimalPlaces) : null,
+      status,
+      projectedSources,
+    }
+  }
   const impactItems = [
     impactItem({
       id: 'availableCashChange',
@@ -554,6 +567,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
         (left, right) => left.date.localeCompare(right.date) || left.sourceKind.localeCompare(right.sourceKind) || left.candidateId.localeCompare(right.candidateId),
       ),
       missingCurrencies: forecast.audit.unavailable.missingCurrencies,
+      aggregateReconciliation: structuredClone(forecast.audit.recurring.aggregateReconciliation ?? []),
       unclassifiedValue: hasUnclassifiedActivity ? unclassifiedValue : 0,
       unclassifiedTransactionIds,
     },
@@ -1257,7 +1271,22 @@ export function createAnalyticsStore(id, useDependencies) {
     })
     const dailyForecastImpact = computed(() => ({
       items: dailyForecast.value.impactItems,
-      payrollEvents: dailyForecast.value.eventSummaries.filter(({ bundleId }) => bundleId).map(({ id, date, bundleId, impact }) => ({ id, date, bundleId, impact })),
+      payrollEvents: dailyForecast.value.eventSummaries
+        .filter(({ bundleId }) => bundleId)
+        .map(({ id, date, bundleId, bundleLabel, impact, components }) => ({
+          id,
+          date,
+          bundleId,
+          bundleLabel,
+          impact,
+          components: components.map(({ id: componentId, bundleLabel: componentLabel, sourceLabel, sourceAccountKind, destinationAccountKind, impact: componentImpact }) => ({
+            id: componentId,
+            label: componentLabel || sourceLabel || componentId,
+            sourceAccountKind: sourceAccountKind ?? 'unknown',
+            destinationAccountKind: destinationAccountKind ?? 'unknown',
+            impact: componentImpact,
+          })),
+        })),
     }))
     const dailyForecastSourceErrors = computed(() =>
       ['recurringTransactions', 'subscriptions'].filter((source) => ancillaryState[source].status === 'error').map((source) => ({ source, message: ancillaryState[source].error?.message ?? '' })),

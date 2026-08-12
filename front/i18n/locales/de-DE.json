@@ -147,7 +147,15 @@
       "impact_savings_included": "Im Nettovermögen enthaltene Ersparnisse",
       "impact_savings_excluded": "Vom Nettovermögen ausgeschlossene Ersparnisse",
       "impact_debt_change": "Schuldenänderung",
-      "impact_net_worth_change": "Nettovermögensänderung"
+      "impact_net_worth_change": "Nettovermögensänderung",
+      "account_route": "Kontoweg: {source} → {destination}",
+      "account_outside": "Extern",
+      "account_unknown": "Unbekannt",
+      "actual_variable_activity": "Tatsächliche variable Aktivität",
+      "known_scheduled_activity": "Bekannte geplante Aktivität",
+      "budget_activity": "Budgetaktivität",
+      "category_activity": "Kategorieaktivität",
+      "aggregate_reconciled": "Ein Lohnsummenwert wurde ausgeschlossen, weil seine Belege bereits durch {count} geplante(s) Bündel dargestellt werden."
     },
     "balance": {
       "title": "Finanztrends",

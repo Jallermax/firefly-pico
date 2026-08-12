@@ -2915,6 +2915,80 @@ test('keeps an unrelated equal authoritative obligation when bundle evidence doe
   assert.deepEqual(reversed, ordered)
 })
 
+test('keeps an aggregate payroll candidate when its evidence is only partly covered by admitted bundle components', () => {
+  const history = payrollHistoryWithIdenticalPhases()
+  const coveredTax = history.find(({ categoryId, date }) => categoryId === 'taxes' && date === '2026-07-15')
+  const independentTax = entry({
+    id: 'independent-tax-payment',
+    transactionId: 'independent-tax-payment-group',
+    date: '2026-07-20',
+    value: 42,
+    sourceId: 'checking',
+    destinationId: 'tax-authority',
+    categoryId: 'taxes',
+    description: 'Independent tax payment',
+  })
+  const base = definedCandidate({ id: 'partly-covered-payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-20', amount: 1200 })
+  const aggregate = {
+    ...base,
+    identity: { ...base.identity, categoryId: 'taxes', payee: 'payroll taxes' },
+    evidence: { ...base.evidence, entryIds: [coveredTax.id, independentTax.id], transactionIds: [] },
+  }
+  const contexts = { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, independentTax], { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [aggregate],
+    ...normalizedCandidateInputs([aggregate], contexts),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.dailyProjectedEntries.filter(({ candidateId }) => candidateId === aggregate.id).length, 1)
+  assert.equal(result.audit.recurring.suppressedCandidateIds.includes(aggregate.id), false)
+  assert.equal(
+    result.audit.recurring.aggregateReconciliation.some(({ candidateId }) => candidateId === aggregate.id),
+    false,
+  )
+})
+
+test('keeps an aggregate payroll candidate when shared transaction evidence is ambiguous', () => {
+  const history = payrollHistoryWithIdenticalPhases()
+  const coveredTax = history.find(({ categoryId, date }) => categoryId === 'taxes' && date === '2026-07-15')
+  const ambiguousTax = entry({
+    id: 'ambiguous-tax-adjustment',
+    transactionId: coveredTax.transactionId,
+    date: coveredTax.date,
+    value: coveredTax.value,
+    sourceId: 'checking',
+    destinationId: 'tax-authority',
+    categoryId: 'taxes',
+    description: 'Independent tax adjustment',
+  })
+  const base = definedCandidate({ id: 'ambiguous-payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-20', amount: 1200 })
+  const aggregate = {
+    ...base,
+    identity: { ...base.identity, categoryId: 'taxes', payee: 'payroll taxes' },
+    evidence: { ...base.evidence, entryIds: [], transactionIds: [coveredTax.transactionId] },
+  }
+  const contexts = { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, ambiguousTax], { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [aggregate],
+    ...normalizedCandidateInputs([aggregate], contexts),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.dailyProjectedEntries.filter(({ candidateId }) => candidateId === aggregate.id).length, 1)
+  assert.equal(result.audit.recurring.suppressedCandidateIds.includes(aggregate.id), false)
+  assert.equal(
+    result.audit.recurring.aggregateReconciliation.some(({ candidateId }) => candidateId === aggregate.id),
+    false,
+  )
+})
+
 test('builds robust undated budget envelopes after removing known evidence and keeps adjusted plans comparison-only', () => {
   const months = ['2026-05', '2026-06', '2026-07']
   const known = expensesForMonths(months, 20, 20, { destinationId: 'merchant', categoryId: 'groceries', description: 'Grocery delivery', idPrefix: 'known-groceries' }).map((item) => ({

@@ -147,7 +147,15 @@
       "impact_savings_included": "Savings included in net worth",
       "impact_savings_excluded": "Savings excluded from net worth",
       "impact_debt_change": "Debt change",
-      "impact_net_worth_change": "Net-worth change"
+      "impact_net_worth_change": "Net-worth change",
+      "account_route": "Account path: {source} → {destination}",
+      "account_outside": "Outside",
+      "account_unknown": "Unknown",
+      "actual_variable_activity": "Actual variable activity",
+      "known_scheduled_activity": "Known scheduled activity",
+      "budget_activity": "Budget activity",
+      "category_activity": "Category activity",
+      "aggregate_reconciled": "A payroll aggregate was excluded because its evidence is already represented by {count} scheduled bundle(s)."
     },
     "balance": {
       "title": "Financial trends",

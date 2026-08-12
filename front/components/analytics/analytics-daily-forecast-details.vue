@@ -1,7 +1,7 @@
 <template>
   <div class="analytics-daily-forecast-full-details">
     <section class="analytics-daily-forecast-detail-section analytics-daily-forecast-day-details">
-      <div class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.day_details') }}</div>
+      <h2 class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.day_details') }}</h2>
       <div v-if="selectedDay" class="analytics-calculation-details" aria-live="polite">
         <div class="analytics-daily-forecast-details-heading">
           <strong>{{ selectedDayLabel }}</strong>
@@ -36,19 +36,47 @@
     </section>
 
     <section class="analytics-daily-forecast-detail-section analytics-daily-forecast-monthly-impact">
-      <div class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.monthly_impact') }}</div>
+      <h2 class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.monthly_impact') }}</h2>
       <div class="analytics-daily-forecast-impact-grid">
         <div v-for="item in impact.items" :key="item.id" class="analytics-daily-forecast-impact-row">
           <strong>{{ impactLabel(item.id) }}</strong>
           <span>{{ $t('analytics.daily_forecast.actual_through_today') }}: {{ formatSignedCurrency(item.actual) }}</span>
           <span>{{ $t('analytics.daily_forecast.remaining_activity') }}: {{ formatSignedCurrency(item.remaining) }}</span>
           <span>{{ $t('analytics.daily_forecast.end_of_month_change') }}: {{ formatSignedCurrency(item.final) }}</span>
+          <small v-if="item.status && item.status !== 'ready'">{{ $t(`analytics.daily_forecast.${item.status}`) }}</small>
         </div>
+      </div>
+      <div v-if="payrollImpactEvents.length" class="analytics-daily-forecast-payroll-impact">
+        <details v-for="event in payrollImpactEvents" :key="event.id" class="analytics-daily-forecast-disclosure">
+          <summary>
+            <span>
+              <strong>{{ event.label }}</strong>
+              <small>{{ event.dateLabel }}</small>
+            </span>
+            <strong>{{ formatSignedCurrency(event.impact.availableCashChange) }}</strong>
+          </summary>
+          <div class="analytics-daily-forecast-disclosure-body">
+            <div v-for="component in event.components" :key="component.id" class="analytics-daily-forecast-payroll-component">
+              <div class="analytics-daily-forecast-evidence-heading">
+                <strong>{{ component.label }}</strong>
+                <small>{{
+                  $t('analytics.daily_forecast.account_route', { source: accountKindLabel(component.sourceAccountKind), destination: accountKindLabel(component.destinationAccountKind) })
+                }}</small>
+              </div>
+              <div class="analytics-daily-forecast-evidence-grid">
+                <div v-for="row in componentImpactRows(component)" :key="row.id">
+                  <span>{{ impactLabel(row.id) }}</span>
+                  <strong>{{ formatSignedCurrency(row.value) }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
     </section>
 
     <section class="analytics-daily-forecast-detail-section analytics-daily-forecast-events">
-      <div class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.scheduled_events') }}</div>
+      <h2 class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.scheduled_events') }}</h2>
       <details v-for="event in eventSummaries" :key="event.id" class="analytics-daily-forecast-disclosure analytics-daily-forecast-event">
         <summary>
           <span>
@@ -70,7 +98,7 @@
     </section>
 
     <section class="analytics-daily-forecast-detail-section analytics-daily-forecast-envelope">
-      <div class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.variable_envelope') }}</div>
+      <h2 class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.variable_envelope') }}</h2>
       <div class="analytics-assumption-note">{{ $t('analytics.daily_forecast.undated_estimate') }}</div>
       <div v-for="item in variableEnvelopeItems" :key="item.id" class="analytics-daily-forecast-evidence-item">
         <div class="analytics-daily-forecast-evidence-heading">
@@ -88,7 +116,7 @@
     </section>
 
     <section class="analytics-daily-forecast-detail-section analytics-daily-forecast-evidence-issues">
-      <div class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.evidence_and_issues') }}</div>
+      <h2 class="analytics-daily-forecast-section-title">{{ $t('analytics.daily_forecast.evidence_and_issues') }}</h2>
       <div v-if="state.sourceErrors?.length" class="analytics-daily-forecast-source-errors">
         <div v-for="error in state.sourceErrors" :key="error.source">{{ $t('analytics.daily_forecast.error') }} ({{ error.source }})</div>
         <van-button class="analytics-daily-forecast-retry" size="small" @click="$emit('retry')">{{ $t('analytics.common.retry') }}</van-button>
@@ -101,6 +129,10 @@
             <span v-if="event.candidateIds.length">{{ $t('analytics.daily_forecast.candidate_id', { id: event.candidateIds.join(', ') }) }}</span>
             <span v-if="event.evidenceIds.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: event.evidenceIds.join(', ') }) }}</span>
           </template>
+          <span v-for="item in forecast.audit?.aggregateReconciliation ?? []" :key="item.candidateId">
+            {{ $t('analytics.daily_forecast.aggregate_reconciled', { count: item.bundleIds.length }) }}
+            · {{ $t('analytics.daily_forecast.candidate_id', { id: item.candidateId }) }}
+          </span>
           <span v-if="unavailableEvidenceSummary.previewIds.length">{{ unavailableEvidenceSummary.previewIds.join(', ') }}</span>
           <span v-if="unavailableEvidenceSummary.omittedCount">{{ $t('analytics.common.more_items', { count: unavailableEvidenceSummary.omittedCount }) }}</span>
         </div>
@@ -156,6 +188,9 @@ const eventSummaries = computed(() =>
 )
 const envelopeRows = (item) =>
   [
+    { id: 'actual', label: t('analytics.daily_forecast.actual_variable_activity'), value: item.actual },
+    { id: 'known', label: t('analytics.daily_forecast.known_scheduled_activity'), value: item.known },
+    { id: 'remaining', label: t('analytics.daily_forecast.remaining_activity'), value: item.remaining },
     { id: 'expected', label: t('analytics.daily_forecast.expected_range'), value: item.expected },
     { id: 'plan', label: t('analytics.daily_forecast.plan'), value: item.plan },
     { id: 'history', label: t('analytics.daily_forecast.history'), value: item.historical },
@@ -168,7 +203,12 @@ const variableEnvelopeItems = computed(() =>
         item.evidenceIds?.length ||
         (item.planStatus && item.planStatus !== 'ready'),
     )
-    .map((item) => ({ ...item, label: item.budgetId || item.categoryId || item.id, rows: envelopeRows(item) })),
+    .map((item) => ({
+      ...item,
+      label:
+        item.label || t(item.budgetId ? 'analytics.daily_forecast.budget_activity' : item.categoryId ? 'analytics.daily_forecast.category_activity' : 'analytics.daily_forecast.variable_envelope'),
+      rows: envelopeRows(item),
+    })),
 )
 const selectedDay = computed(() => props.forecast.days.find(({ date }) => date === props.selectedDate) ?? null)
 const selectedDayLabel = computed(() => (selectedDay.value ? new Intl.DateTimeFormat(props.language, { month: 'long', day: 'numeric' }).format(parseISO(selectedDay.value.date)) : ''))
@@ -206,11 +246,29 @@ const onEntry = async (entry, activation) => {
 }
 const impactLabelKeys = {
   availableCashChange: 'impact_available_change',
+  savingsChange: 'savings',
   savingsIncluded: 'impact_savings_included',
   savingsExcluded: 'impact_savings_excluded',
   debtChange: 'impact_debt_change',
   netWorthChange: 'impact_net_worth_change',
 }
 const impactLabel = (id) => t(`analytics.daily_forecast.${impactLabelKeys[id]}`)
+const accountKindLabelKeys = {
+  outside: 'analytics.daily_forecast.account_outside',
+  available: 'analytics.flow.available_pool',
+  savingsAccessible: 'analytics.daily_forecast.impact_savings_included',
+  savingsRestricted: 'analytics.daily_forecast.impact_savings_excluded',
+  liability: 'analytics.daily_forecast.debt',
+}
+const accountKindLabel = (kind) => t(accountKindLabelKeys[kind] ?? 'analytics.daily_forecast.account_unknown')
+const componentImpactRows = (component) =>
+  ['availableCashChange', 'savingsChange', 'debtChange', 'netWorthChange'].map((id) => ({ id, value: component.impact?.[id] })).filter(({ value }) => Number.isFinite(value))
+const payrollImpactEvents = computed(() =>
+  (props.impact.payrollEvents ?? []).map((event) => ({
+    ...event,
+    label: event.bundleLabel || sourceLabel('inferred'),
+    dateLabel: new Intl.DateTimeFormat(props.language, { month: 'short', day: 'numeric' }).format(parseISO(event.date)),
+  })),
+)
 const unavailableEvidenceSummary = computed(() => props.state.unavailableEvidenceSummary ?? { count: 0, previewIds: [], omittedCount: 0 })
 </script>

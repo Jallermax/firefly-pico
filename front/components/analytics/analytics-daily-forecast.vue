@@ -4,7 +4,6 @@
       <div class="flex-1">
         <div class="flex-center-vertical gap-2">
           <span>{{ $t('analytics.daily_forecast.title') }}</span>
-          <span v-if="dailyState.isPartiallyUnavailable" class="analytics-daily-forecast-partial-badge">{{ $t('analytics.common.partial') }}</span>
         </div>
         <div class="analytics-card-subtitle">{{ monthTitle }}</div>
       </div>
@@ -28,7 +27,7 @@
     </div>
     <template v-else>
       <div v-if="dailyState.isPartiallyUnavailable" class="analytics-daily-forecast-partial-note" role="status">
-        {{ $t('analytics.daily_forecast.inputs_need_review', { count: unavailableEvidenceSummary.count }) }}
+        {{ $t('analytics.daily_forecast.inputs_need_review', { count: partialInputCount }) }}
       </div>
       <analytics-daily-forecast-overview
         :forecast="daily"
@@ -59,6 +58,7 @@ const monthTitle = computed(() => new Intl.DateTimeFormat(profileStore.language,
 const hasActivity = computed(() => daily.value.barGroups.some(({ points }) => points.some(({ value }) => Number.isFinite(value) && value !== 0)))
 const hasRetainedData = computed(() => dailyState.value.isStale && daily.value.dateKeys.length > 0)
 const unavailableEvidenceSummary = computed(() => dailyState.value.unavailableEvidenceSummary ?? { count: 0 })
+const partialInputCount = computed(() => unavailableEvidenceSummary.value.count + (dailyState.value.sourceErrors?.length ?? 0))
 const dateFromSelection = (payload) => payload?.x ?? payload?.values?.find(({ point }) => point?.x)?.point?.x ?? null
 const openFullForecast = (date = null) => navigateTo({ path: RouteConstants.ROUTE_ANALYTICS_DAILY_FORECAST, ...(date ? { query: { date } } : {}) })
 const openSelection = (payload) => {

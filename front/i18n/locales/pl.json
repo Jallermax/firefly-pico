@@ -147,7 +147,15 @@
       "impact_savings_included": "Oszczędności wliczone do wartości netto",
       "impact_savings_excluded": "Oszczędności wyłączone z wartości netto",
       "impact_debt_change": "Zmiana zadłużenia",
-      "impact_net_worth_change": "Zmiana wartości netto"
+      "impact_net_worth_change": "Zmiana wartości netto",
+      "account_route": "Ścieżka konta: {source} → {destination}",
+      "account_outside": "Zewnętrzne",
+      "account_unknown": "Nieznane",
+      "actual_variable_activity": "Rzeczywista aktywność zmienna",
+      "known_scheduled_activity": "Znana zaplanowana aktywność",
+      "budget_activity": "Aktywność budżetu",
+      "category_activity": "Aktywność kategorii",
+      "aggregate_reconciled": "Łączna pozycja płacowa została wykluczona, ponieważ jej dowody są już ujęte w {count} zaplanowanym pakiecie/pakietach."
     },
     "balance": {
       "title": "Trendy finansowe",
