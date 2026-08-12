@@ -803,11 +803,16 @@ test('ignores reconciliation-only amount variance when selecting the latest payr
   assert.deepEqual(amounts('Base pay'), [3150, 3150])
   assert.deepEqual(amounts('Payroll taxes'), [630, 630])
   assert.deepEqual(amounts('Insurance deduction'), [105, 105])
-  assert.equal(bundle.components.find(({ label }) => label === 'Internal allocation').reconciliationOnly, true)
+  const internalComponent = bundle.components.find(({ label }) => label === 'Internal allocation')
+  assert.equal(internalComponent.reconciliationOnly, true)
+  assert.equal(internalComponent.amount, 726)
   assert.deepEqual(amounts('Internal allocation'), [])
   assert.ok(internalIds.every((id) => bundle.entryIds.includes(id)))
   assert.ok(internalIds.every((id) => ordered.audit.recurring.removedHistoryEntryIds.includes(id)))
-  assert.equal(ordered.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => internalIds.includes(id))), false)
+  assert.equal(
+    ordered.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.some((id) => internalIds.includes(id))),
+    false,
+  )
   assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
   assert.deepEqual(input.entries, snapshot)
 })

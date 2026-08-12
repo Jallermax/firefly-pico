@@ -805,6 +805,8 @@ const precedingBusinessDay = (value) => {
 
 const bundleEntryCurrency = (entry) => String(entry?.conversion?.displayCurrency ?? entry?.conversion?.sourceCurrency ?? '')
 
+const bundleComponentIsFlowMaterial = (entry, currencyDecimalPlaces) => FLOW_KEYS.some((metric) => flowAmountsFor(projectionContext(entry).context, 1, currencyDecimalPlaces)[metric] !== 0)
+
 const bundleComponentDescription = (entry) =>
   String(entry?.description ?? '')
     .normalize('NFKD')
@@ -1011,14 +1013,14 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
     const phaseOnlyKeys = new Set([...phaseComponents.middle, ...phaseComponents.monthEnd])
     const eligibleSignature = ({ components }) =>
       [...components.keys()]
-        .filter((key) => !phaseOnlyKeys.has(key))
+        .filter((key) => !phaseOnlyKeys.has(key) && bundleComponentIsFlowMaterial(components.get(key), currencyDecimalPlaces))
         .sort()
         .join('||')
-    const latestPairStableKeys = unique(latestPair.flatMap(({ components }) => [...components.keys()]))
-      .filter((key) => !phaseOnlyKeys.has(key) && latestPair.every(({ components }) => components.has(key)))
+    const latestPairStableMaterialKeys = unique(latestPair.flatMap(({ components }) => [...components.keys()]))
+      .filter((key) => !phaseOnlyKeys.has(key) && latestPair.every(({ components }) => components.has(key)) && bundleComponentIsFlowMaterial(latestPair[0].components.get(key), currencyDecimalPlaces))
       .sort()
     const pairSignaturesAgree = eligibleSignature(latestPair[0]) === eligibleSignature(latestPair[1])
-    const pairAmountsAgree = latestPairStableKeys.every(
+    const pairAmountsAgree = latestPairStableMaterialKeys.every(
       (key) => roundAmount(amountOf(latestPair[0].components.get(key)), currencyDecimalPlaces) === roundAmount(amountOf(latestPair[1].components.get(key)), currencyDecimalPlaces),
     )
     const olderAnchorMedian = median(older.map(({ components }) => amountOf(components.get(anchorKey))))
@@ -1031,7 +1033,7 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
       level: regimeChanged ? 'high' : 'medium',
       reasons: [regimeChanged ? 'Latest two equivalent occurrences establish a new regime' : 'No two-occurrence regime change; uses a recency-weighted median'],
     }
-    const regimeComponentKeys = regimeChanged ? unique([...commonKeys, ...latestPairStableKeys]).sort() : commonKeys
+    const regimeComponentKeys = regimeChanged ? unique([...commonKeys, ...latestPairStableMaterialKeys]).sort() : commonKeys
     const signature = regimeComponentKeys.join('||')
     const components = [
       ...regimeComponentKeys.map((key) => recurringBundleComponent({ key, occurrences, bundleId: id, anchorKey, currencyDecimalPlaces })),
@@ -1048,7 +1050,10 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
       })),
     }))
     for (const component of components) {
-      component.amount = roundAmount(regimeChanged && component.phase === 'both' ? latestPair[1].components.get(component.key).value : recencyWeightedMedian(component.samples), currencyDecimalPlaces)
+      component.amount = roundAmount(
+        regimeChanged && component.phase === 'both' && !component.reconciliationOnly ? latestPair[1].components.get(component.key).value : recencyWeightedMedian(component.samples),
+        currencyDecimalPlaces,
+      )
       delete component.samples
     }
     const admittedComponentKeys = new Set(components.map(({ key }) => key))
