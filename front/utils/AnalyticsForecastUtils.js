@@ -1122,7 +1122,10 @@ const fulfillRecurringBundles = ({ bundles, currentEntries, conflictingTransacti
           const expectedKeys = expected.map(({ key }) => key).sort()
           return (
             JSON.stringify(recognizedKeys) === JSON.stringify(expectedKeys) &&
-            expected.every(({ key, amount }) => roundAmount(amountOf(occurrence.components.get(key)), currencyDecimalPlaces) === roundAmount(amount, currencyDecimalPlaces))
+            expected.every(
+              ({ key, amount, reconciliationOnly }) =>
+                reconciliationOnly || roundAmount(amountOf(occurrence.components.get(key)), currencyDecimalPlaces) === roundAmount(amount, currencyDecimalPlaces),
+            )
           )
         })
       const explicitMatches = matchingPhases.filter(({ phase }) => bundle.components.some((component) => component.phase === phase))
