@@ -153,6 +153,42 @@ test('keeps paid subscription dates as evidence instead of scheduled occurrences
   assert.deepEqual(candidate.evidence.dates, ['2026-08-03'])
 })
 
+test('uses paid subscription history to recover omitted endpoints without scheduling it', () => {
+  const candidates = buildDefinedOccurrences({
+    subscriptions: [
+      {
+        id: 'subscription-rent-without-endpoints',
+        attributes: {
+          active: true,
+          name: 'Rent',
+          repeat_freq: 'monthly',
+          amount_avg: '60',
+          pay_dates: ['2026-08-20'],
+          paid_dates: [
+            { date: '2026-02-20', transaction_group_id: 'paid-rent-1' },
+            { date: '2026-03-20', transaction_group_id: 'paid-rent-2' },
+          ],
+          next_expected_match: '2026-08-20',
+        },
+      },
+    ],
+    startDate: '2026-02-01',
+    endDate: '2026-08-31',
+  })
+  const entries = [
+    entry({ id: 'paid-rent-1', date: '2026-02-20', value: 60, sourceId: 'checking', destinationId: 'landlord', categoryId: 'housing', description: 'Landlord' }),
+    entry({ id: 'paid-rent-2', date: '2026-03-20', value: 60, sourceId: 'checking', destinationId: 'landlord', categoryId: 'housing', description: 'Landlord' }),
+  ]
+  const [candidate] = enrichRecurringCandidatesFromEvidence({ candidates, entries })
+
+  assert.deepEqual(candidate.expectedDates, ['2026-08-20'])
+  assert.deepEqual(candidate.evidence.transactionIds, ['paid-rent-1', 'paid-rent-2'])
+  assert.deepEqual(candidate.evidence.dates, ['2026-02-20', '2026-03-20'])
+  assert.equal(candidate.identity.sourceAccountId, 'checking')
+  assert.equal(candidate.identity.destinationAccountId, 'landlord')
+  assert.equal(candidate.identity.categoryId, 'housing')
+})
+
 test('suppresses an unpaid current-cycle subscription occurrence after an early paid date', () => {
   const candidates = buildDefinedOccurrences({
     subscriptions: [
@@ -213,6 +249,43 @@ test('fulfills a paid multi-split subscription from its linked transaction group
   assert.equal(result.fulfilled.length, 1)
   assert.deepEqual(result.fulfilled[0].actualEntryIds, ['rent-split', 'water-split'])
   assert.deepEqual(result.fulfilled[0].actualTransactionIds, ['paid-rent-water'])
+  assert.deepEqual(result.remaining, [])
+})
+
+test('does not leave a later scheduled occurrence after one linked current-cycle multi-split payment', () => {
+  const candidates = buildDefinedOccurrences({
+    subscriptions: [
+      {
+        id: 'subscription-rent-water-multiple',
+        attributes: {
+          active: true,
+          name: 'Rent',
+          repeat_freq: 'monthly',
+          amount_avg: '2321',
+          pay_dates: ['2026-08-02', '2026-08-25'],
+          paid_dates: [{ date: '2026-08-03', transaction_group_id: 'paid-rent-water-multiple' }],
+        },
+      },
+    ],
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+  })
+  const actualEntries = [
+    {
+      ...entry({ id: 'rent-multiple-split', date: '2026-08-03', value: 2000, destinationId: 'landlord', categoryId: 'housing', description: 'Building payment' }),
+      transactionId: 'paid-rent-water-multiple',
+    },
+    {
+      ...entry({ id: 'water-multiple-split', date: '2026-08-03', value: 321, destinationId: 'water-utility', categoryId: 'utilities', description: 'Municipal supply' }),
+      transactionId: 'paid-rent-water-multiple',
+    },
+  ]
+  const [candidate] = enrichRecurringCandidatesFromEvidence({ candidates, entries: actualEntries })
+
+  const result = matchRecurringOccurrences({ candidates: [candidate], actualEntries, today: '2026-08-25' })
+
+  assert.equal(result.fulfilled.length, 1)
+  assert.deepEqual(result.fulfilled[0].actualEntryIds, ['rent-multiple-split', 'water-multiple-split'])
   assert.deepEqual(result.remaining, [])
 })
 

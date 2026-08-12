@@ -453,7 +453,7 @@ const cadenceFromDefinition = ({ attributes, repetition = {}, dates, sourceType 
   return null
 }
 
-const subscriptionScheduleDates = (attributes) => [...(attributes.pay_dates ?? []), attributes.next_expected_match]
+const subscriptionScheduleDates = (attributes) => [...(attributes.pay_dates ?? []).map((item) => item?.date ?? item), attributes.next_expected_match]
 const subscriptionPaidEvidence = (attributes) => [...(attributes.paid_dates ?? [])]
 
 const datesFromDefinition = ({ attributes, repetition = null, sourceType }) => {
@@ -958,7 +958,22 @@ export function matchRecurringOccurrences({ candidates = [], actualEntries = [],
     .map((candidate) => {
       const evidenceTransactionIds = new Set(unique(candidate.evidence?.transactionIds ?? []))
       const linkedEntries = () => actual.filter((entry) => !usedEntries.has(entry.id) && evidenceTransactionIds.has(idOf(entry.transactionId)))
-      const expectedDates = linkedEntries().length || !hasCurrentCyclePaidEvidence(candidate, todayKey) ? currentExpectedDates(candidate, todayKey) : []
+      const candidateExpectedDates = currentExpectedDates(candidate, todayKey)
+      const linked = linkedEntries()
+      const expectedDates =
+        linked.length > 0
+          ? [
+              candidateExpectedDates
+                .sort(
+                  (left, right) =>
+                    Math.min(...linked.map((entry) => Math.abs(daysBetween(left, entry.date)))) - Math.min(...linked.map((entry) => Math.abs(daysBetween(right, entry.date)))) ||
+                    left.localeCompare(right),
+                )
+                .at(0),
+            ].filter(Boolean)
+          : hasCurrentCyclePaidEvidence(candidate, todayKey)
+            ? []
+            : candidateExpectedDates
       const occurrences = expectedDates.map((expectedDate) => {
         const linkedMatches = linkedEntries()
         const exactMatch = linkedMatches.filter((entry) => entryMatches(candidate, entry))
