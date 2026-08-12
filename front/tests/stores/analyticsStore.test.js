@@ -19,6 +19,7 @@ const dashboardStore = reactive({
   },
 })
 const accountStore = reactive({ accountList: [] })
+const budgetStore = reactive({ budgetList: [] })
 const currencyStore = reactive({ defaultCurrency: usd, exchangeRates: { rates: { USD: 1, EUR: 0.9 } } })
 const transactionRequests = []
 const snapshotRequests = []
@@ -159,6 +160,7 @@ class Currency {
 const useAnalyticsStore = createAnalyticsStore('analytics-test', () => ({
   dashboardStore,
   accountStore,
+  budgetStore,
   currencyStore,
   useStoredValue: (key, initialValue) => {
     const storedValue = ref(structuredClone(storageOverrides.has(key) ? storageOverrides.get(key) : initialValue))
@@ -240,7 +242,7 @@ const analyticsAccount = (id, type, role = null, includeNetWorth = false) => ({
     current_balance: type === 'asset' ? '0' : null,
   },
 })
-const dailyTransaction = ({ id, date, amount, source, destination, categoryId = null, tags = [], currencyCode = 'USD' }) => ({
+const dailyTransaction = ({ id, date, amount, source, destination, categoryId = null, budgetId = null, tags = [], currencyCode = 'USD' }) => ({
   id,
   attributes: {
     transactions: [
@@ -250,6 +252,7 @@ const dailyTransaction = ({ id, date, amount, source, destination, categoryId = 
         currency_code: currencyCode,
         date,
         category_id: categoryId,
+        budget_id: budgetId,
         source_id: source.id,
         destination_id: destination.id,
         accountSource: source,
@@ -333,6 +336,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   dashboardStore.dashboardCurrency = usd
   accountStore.accountList = [activeAsset(), activeExpense()]
+  budgetStore.budgetList = []
   currencyStore.defaultCurrency = usd
   currencyStore.exchangeRates = { rates: { USD: 1, EUR: 0.9 } }
   transactionRequests.length = 0
@@ -1185,7 +1189,7 @@ test('derives financial trends from the shared ledger and reconstructed balances
     expense('last-month', 30, new Date(today.getFullYear(), today.getMonth() - 1, 20), 'food'),
     expense('current', 10, new Date(today.getFullYear(), today.getMonth(), 1), 'food'),
   ]
-  const expectedForecast = 50
+  const expectedForecast = 30
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
@@ -2544,7 +2548,7 @@ test('keeps projected source and use evidence direction-specific on a mixed defi
   assert.equal(usePoint.evidenceIds.includes('defined-income'), false)
 })
 
-test('keeps actual rows through today and deterministic defined, inferred, and variable evidence strictly after today', async () => {
+test('keeps actual rows through today, dated known evidence after today, and variable evidence undated', async () => {
   now = new Date(2026, 7, 10, 12)
   const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
   const revenue = analyticsAccount('revenue', 'revenue')
@@ -2593,7 +2597,12 @@ test('keeps actual rows through today and deterministic defined, inferred, and v
     projectedEntries.some(({ transactionId }) => transactionId === 'future-ledger-row'),
     false,
   )
-  assert.deepEqual([...new Set(projectedEntries.map(({ sourceKind }) => sourceKind))].sort(), ['defined', 'inferred', 'variable'])
+  assert.deepEqual([...new Set(projectedEntries.map(({ sourceKind }) => sourceKind))].sort(), ['defined', 'inferred'])
+  assert.equal(
+    store.financialTrend.forecast.dailyProjectedEntries.some(({ sourceKind }) => sourceKind === 'variable'),
+    false,
+  )
+  assert.equal(store.financialTrend.forecast.variableEnvelopes.length > 0, true)
   const defined = projectedEntries.find(({ sourceKind }) => sourceKind === 'defined')
   assert.equal(defined?.sourceId, 'defined-rent')
   assert.equal(typeof defined?.candidateId, 'string')
@@ -2863,7 +2872,7 @@ test('applies per-metric unavailability to future daily components without blank
   assert.equal(store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-20').value, null)
   const variableUse = store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-21').value
   assert.equal(Number.isFinite(variableUse), true)
-  assert.equal(variableUse < 0, true)
+  assert.equal(variableUse, 0)
   assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
   assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
   assert.equal(store.dailyForecastState.isUnavailable, false)
@@ -3046,6 +3055,57 @@ test('shows insufficient future history as unknown instead of a zero daily proje
   assert.equal(store.dailyForecast?.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-11').value, null)
   assert.equal(store.dailyForecastState?.isPartial, true)
   assert.equal(store.dailyForecastState?.isUnavailable, false)
+})
+
+test('normalizes active JSON API budget plans for forecast envelopes without changing unrelated selectors', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, expense]
+  budgetStore.budgetList = [
+    { id: 'groceries', attributes: { active: true, auto_budget_type: { fireflyCode: 'reset' }, auto_budget_period: { fireflyCode: 'monthly' }, amount: '110' } },
+    { id: 'travel', attributes: { active: true, auto_budget_type: 'adjusted', auto_budget_period: 'monthly', amount: '200' } },
+    { id: 'reserve', attributes: { active: true, auto_budget_type: { fireflyCode: 'rollover' }, auto_budget_period: { fireflyCode: 'monthly' }, amount: '300' } },
+    { id: 'inactive', attributes: { active: false, auto_budget_type: 'reset', auto_budget_period: 'monthly', amount: '999' } },
+    { id: 'corrupt', attributes: { active: true, auto_budget_type: 'reset', auto_budget_period: 'monthly', amount: 'not-a-number' } },
+    { id: 'unknown', attributes: { active: true, auto_budget_type: 'manual', auto_budget_period: 'monthly', amount: '400' } },
+  ]
+  const months = ['2026-05', '2026-06', '2026-07']
+  transactionResult = months.map((month, index) =>
+    dailyTransaction({
+      id: `groceries-${index + 1}`,
+      date: `${month}-${[5, 14, 27][index]}`,
+      amount: [80, 100, 80][index],
+      source: checking,
+      destination: expense,
+      categoryId: 'groceries',
+      budgetId: 'groceries',
+    }),
+  )
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  const baseline = JSON.stringify({ ledger: store.ledger, balances: store.balanceSeries, flow: store.selectedFlow, category: store.categorySummary, cashUse: store.cashUseSeries })
+  const envelopes = store.financialTrend.forecast.variableEnvelopes
+  assert.deepEqual(
+    envelopes.map(({ budgetId, plan, expected }) => ({ budgetId, plan, expected })),
+    [
+      { budgetId: 'groceries', plan: 110, expected: 80 },
+      { budgetId: 'reserve', plan: 300, expected: null },
+      { budgetId: 'travel', plan: 200, expected: null },
+    ],
+  )
+  assert.equal(
+    store.financialTrend.forecast.dailyProjectedEntries.some(({ sourceKind }) => sourceKind === 'variable'),
+    false,
+  )
+
+  budgetStore.budgetList = [{ id: 'groceries', attributes: { active: true, auto_budget_type: { fireflyCode: 'reset' }, auto_budget_period: { fireflyCode: 'monthly' }, amount: '120' } }]
+  await nextTick()
+
+  assert.equal(store.financialTrend.forecast.variableEnvelopes.find(({ budgetId }) => budgetId === 'groceries').plan, 120)
+  assert.equal(JSON.stringify({ ledger: store.ledger, balances: store.balanceSeries, flow: store.selectedFlow, category: store.categorySummary, cashUse: store.cashUseSeries }), baseline)
 })
 
 test('keeps the daily card and combination-chart selection contract exact without inventing projected transaction routes', () => {

@@ -1,6 +1,7 @@
 import { useLocalStorage } from '@vueuse/core'
 import { useAppStore } from '~/stores/appStore.js'
 import { useDashboardStore } from '~/stores/dashboardStore.js'
+import { useBudgetStore } from '~/stores/budgetStore.js'
 import { useCurrencyStore } from '~/stores/currencyStore.js'
 import AccountRepository from '~/repository/AccountRepository.js'
 import TransactionRepository from '~/repository/TransactionRepository.js'
@@ -17,6 +18,7 @@ import { createAnalyticsStore } from '~/stores/analyticsStoreFactory.js'
 export const useAnalyticsStore = createAnalyticsStore('analytics', () => ({
   appStore: useAppStore(),
   dashboardStore: useDashboardStore(),
+  budgetStore: useBudgetStore(),
   currencyStore: useCurrencyStore(),
   useStoredValue: useLocalStorage,
   accountRepository: new AccountRepository(),

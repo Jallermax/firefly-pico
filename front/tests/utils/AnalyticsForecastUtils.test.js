@@ -21,6 +21,7 @@ const entry = ({
   refund = false,
   missingCurrency = null,
   transactionId = id,
+  budgetId = null,
   tags = [],
 }) => ({
   id,
@@ -35,6 +36,7 @@ const entry = ({
   sourceAccount: endpoint(sourceId, sourceKind, !['revenue', 'expense', 'savingsRestricted'].includes(sourceKind)),
   destinationAccount: endpoint(destinationId, destinationKind, !['revenue', 'expense', 'savingsRestricted'].includes(destinationKind)),
   categoryId,
+  budgetId,
   description,
   tags,
   conversion: missingCurrency ? { mode: 'unavailable', sourceCurrency: missingCurrency, missingCurrency } : { mode: 'exact', sourceCurrency: 'USD' },
@@ -324,7 +326,7 @@ test('excludes the unfinished current month from a six-completed-month historica
   assert.equal(result.actualToDate.expenses, 9999)
 })
 
-test('keeps covered zero months in the completed-month sample', () => {
+test('keeps covered zero months in the completed-month sample for the robust median', () => {
   const result = buildRemainingActivityForecast({
     ledger: ledger([entry({ id: 'only-february', date: '2026-02-20', value: 600 })]),
     candidates: [],
@@ -333,7 +335,7 @@ test('keeps covered zero months in the completed-month sample', () => {
     endDate: '2026-08-31',
   })
 
-  assert.equal(result.historicalBaseline.expenses, 100)
+  assert.equal(result.historicalBaseline.expenses, 0)
   assert.deepEqual(result.audit.history.months, ['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'])
   assert.deepEqual(result.audit.history.samples.expenses, [600, 0, 0, 0, 0, 0])
 })
@@ -658,7 +660,7 @@ test('falls back when the latest payroll signatures differ and keeps inconsisten
   const bundle = result.audit.bundles[0]
   const taxIds = history.filter(({ description }) => description === 'Payroll taxes').map(({ id }) => id)
   const projectedTaxes = result.dailyProjectedEntries.filter(({ bundleLabel }) => bundleLabel === 'Payroll taxes')
-  const variableTaxEvidence = result.dailyProjectedEntries.filter(({ sourceKind, evidenceIds }) => sourceKind === 'variable' && evidenceIds.some((id) => taxIds.includes(id)))
+  const variableTaxEvidence = result.variableEnvelopes.filter(({ evidenceIds }) => evidenceIds.some((id) => taxIds.includes(id)))
 
   assert.equal(bundle.regimePolicy, 'recencyWeightedMedian')
   assert.equal(bundle.confidence.level, 'medium')
@@ -698,7 +700,7 @@ test('keeps a one-off split outside bundle components, suppression audit, and va
   )
   assert.equal(bundle.entryIds.includes(oneOff.id), false)
   assert.equal(result.audit.recurring.removedHistoryEntryIds.includes(oneOff.id), false)
-  assert.ok(result.dailyProjectedEntries.some(({ sourceKind, evidenceIds }) => sourceKind === 'variable' && evidenceIds.includes(oneOff.id)))
+  assert.ok(result.variableEnvelopes.some(({ evidenceIds }) => evidenceIds.includes(oneOff.id)))
 })
 
 test('classifies a paid middle bundle from the complete phase schedule after its date has passed', () => {
@@ -1026,10 +1028,7 @@ test('keeps categorized production-ledger activity out of an uncategorized autho
 
   assert.equal(result.remainingFromToday.expenses, 200)
   assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, [])
-  assert.deepEqual(
-    [...new Set(result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable').flatMap(({ evidenceIds }) => evidenceIds))].sort(),
-    productionLedger.entries.flatMap(({ id, transactionId }) => [id, transactionId]).sort(),
-  )
+  assert.deepEqual([...new Set(result.variableEnvelopes.flatMap(({ evidenceIds }) => evidenceIds))].sort(), productionLedger.entries.flatMap(({ id, transactionId }) => [id, transactionId]).sort())
 })
 
 test('does not restore authoritative history to the variable remainder after the current occurrence is fulfilled', () => {
@@ -1069,7 +1068,7 @@ test('keeps unrelated same-payee activity in the variable baseline when removing
     today: '2026-08-10',
     endDate: '2026-08-31',
   })
-  const variable = result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable')
+  const variable = result.variableEnvelopes
 
   assert.equal(result.remainingFromToday.expenses, 220)
   assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, rent.map(({ id }) => id).sort())
@@ -1114,7 +1113,7 @@ test('floors cumulative expense at actual and exposes above-average and empty st
   assert.equal(projectMetricForecast({ metric: 'expenses', actual: 0, historicalAverage: 0, remainingActivity: 0 }).progressState, 'noExpectedActivity')
 })
 
-test('caps explicit and historical expense allocation at the completed-month category target', () => {
+test('adds explicit due activity after the variable completed-month category target', () => {
   const history = expensesForMonths(['2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'], 7500)
   const actual = entry({ id: 'august-actual', date: '2026-08-05', value: 140 })
   const rent = definedCandidate({ id: 'rent', sourceAccountId: 'checking', destinationAccountId: 'landlord', amount: 2321 })
@@ -1130,14 +1129,18 @@ test('caps explicit and historical expense allocation at the completed-month cat
 
   assert.equal(result.actualToDate.expenses, 140)
   assert.equal(result.historicalBaseline.expenses, 7500)
-  assert.equal(result.final.expenses, 7500)
-  assert.equal(result.remainingFromToday.expenses, 7360)
+  assert.equal(result.final.expenses, 9821)
+  assert.equal(result.remainingFromToday.expenses, 9681)
   assert.equal(
     result.dailyProjectedEntries.reduce((total, item) => Number((total + item.flowAmounts.expenses).toFixed(2)), 0),
+    2321,
+  )
+  assert.equal(
+    result.variableEnvelopes.reduce((total, item) => Number((total + item.flowAmounts.expenses).toFixed(2)), 0),
     7360,
   )
   assert.deepEqual(result.audit.allocation.targetsByDimension, { 'category:general': 7500 })
-  assert.equal(result.audit.allocation.cappedProjectionIds.length > 0, true)
+  assert.deepEqual(result.audit.allocation.cappedProjectionIds, [])
 })
 
 test('lets unfulfilled explicit activity raise an above-average final without adding historical remainder', () => {
@@ -1178,8 +1181,8 @@ test('expands a cumulative target only for explicit due activity and remains det
   const ordered = buildRemainingActivityForecast({ ...options, ledger: ledger([...history, actual]) })
   const shuffled = buildRemainingActivityForecast({ ...options, ledger: ledger([actual, ...history].reverse()) })
 
-  assert.equal(ordered.final.expenses, 8140)
-  assert.equal(ordered.remainingFromToday.expenses, 8000)
+  assert.equal(ordered.final.expenses, 15500)
+  assert.equal(ordered.remainingFromToday.expenses, 15360)
   assert.deepEqual(shuffled, ordered)
 })
 
@@ -1295,7 +1298,7 @@ test('shows signed progress only for matching nonzero directions', () => {
   assert.equal(zeroToNonzero.progressState, 'notApplicable')
 })
 
-test('distributes variable activity over future days with an exact rounding residual', () => {
+test('keeps variable activity in one undated envelope with exact rounding', () => {
   const history = [
     entry({ id: 'may-variable', date: '2026-05-29', value: 10 }),
     entry({ id: 'june-variable', date: '2026-06-30', value: 10 }),
@@ -1309,14 +1312,11 @@ test('distributes variable activity over future days with an exact rounding resi
     today: '2026-08-28',
     endDate: '2026-08-31',
   })
-  const variable = result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable')
+  const variable = result.variableEnvelopes
 
-  assert.deepEqual(
-    variable.map(({ date }) => date),
-    ['2026-08-29', '2026-08-30', '2026-08-31'],
-  )
+  assert.deepEqual(result.dailyProjectedEntries, [])
   assert.equal(
-    variable.reduce((total, { amount }) => Number((total + amount).toFixed(2)), 0),
+    variable.reduce((total, { remaining }) => Number((total + remaining).toFixed(2)), 0),
     result.remainingFromToday.expenses,
   )
   assert.equal(result.remainingFromToday.expenses, 10)
@@ -1370,13 +1370,14 @@ test('uses explicit currency precision for projected amounts and exact residual 
     })
     const scale = 10 ** decimalPlaces
     assert.equal(
-      variableResult.dailyProjectedEntries.reduce((total, item) => total + Math.round(item.amount * scale), 0),
+      variableResult.variableEnvelopes.reduce((total, item) => total + Math.round(item.flowAmounts.expenses * scale), 0),
       Math.round(variableResult.remainingFromToday.expenses * scale),
     )
+    assert.deepEqual(variableResult.dailyProjectedEntries, [])
   }
 })
 
-test('labels zero-weight timing fallback as even and low confidence', () => {
+test('keeps variable timing undated with completed-month confidence', () => {
   const history = [entry({ id: 'may-even', date: '2026-05-25', value: 9 }), entry({ id: 'june-even', date: '2026-06-25', value: 9 }), entry({ id: 'july-even', date: '2026-07-25', value: 9 })]
 
   const result = buildRemainingActivityForecast({
@@ -1386,14 +1387,11 @@ test('labels zero-weight timing fallback as even and low confidence', () => {
     today: '2026-08-10',
     endDate: '2026-08-12',
   })
-  const variable = result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable')
-
+  assert.deepEqual(result.dailyProjectedEntries, [])
   assert.deepEqual(
-    variable.map(({ profile }) => profile),
-    ['even', 'even'],
+    result.variableEnvelopes.map(({ expected, remaining, confidence }) => ({ expected, remaining, confidence })),
+    [{ expected: 9, remaining: 9, confidence: 'high' }],
   )
-  assert.ok(variable.every(({ confidence }) => confidence.level === 'low'))
-  assert.ok(variable.every(({ reasons }) => reasons.includes('Even fallback because the timing profile is insufficient')))
 })
 
 test('keeps missing-FX input unavailable instead of coercing it to zero', () => {
@@ -1927,7 +1925,8 @@ test('does not guess an endpoint-free subscription route when repeated matches a
 
   assert.deepEqual(result.audit.recurring.removedHistoryEntryIds, [])
   assert.equal(result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'defined').length, 1)
-  assert.equal(result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable').length > 0, true)
+  assert.equal(result.dailyProjectedEntries.filter(({ sourceKind }) => sourceKind === 'variable').length, 0)
+  assert.equal(result.variableEnvelopes.length > 0, true)
   assert.equal(result.statusByMetric.netWorthChange, 'unavailable')
 })
 
@@ -2101,6 +2100,178 @@ test('returns byte-for-byte deterministic forecasts for shuffled input without m
   assert.deepEqual(originalLedger.entries, history)
   assert.deepEqual(candidates, originalCandidates)
   assert.ok(ordered.dailyProjectedEntries.every((item) => item.id && item.sourceId && Array.isArray(item.evidenceIds) && !('transactionId' in item)))
+})
+
+test('uses the recent linked median inside an authoritative amount envelope', () => {
+  const history = [
+    entry({ id: 'utility-may', date: '2026-05-20', value: 70, destinationId: 'utility', categoryId: 'utilities' }),
+    entry({ id: 'utility-june', date: '2026-06-20', value: 200, destinationId: 'utility', categoryId: 'utilities' }),
+    entry({ id: 'utility-july', date: '2026-07-20', value: 80, destinationId: 'utility', categoryId: 'utilities' }),
+  ]
+  const base = definedCandidate({ id: 'utility', sourceAccountId: 'checking', destinationAccountId: 'utility', date: '2026-08-20', amount: 125 })
+  const candidate = {
+    ...base,
+    identity: { ...base.identity, categoryId: 'utilities' },
+    expectedAmount: { value: 125, min: 40, max: 220 },
+    matching: { ...base.matching, amountEnvelope: { min: 40, max: 220 } },
+  }
+  const contexts = { ...accountContexts, utility: { kind: 'expense', includeNetWorth: false } }
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-10' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate], contexts),
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+  const projected = result.dailyProjectedEntries.find(({ candidateId }) => candidateId === candidate.id)
+
+  assert.equal(projected.amount, 80)
+  assert.equal(projected.sourceId, 'utility')
+  assert.equal(projected.candidateId, candidate.id)
+  assert.ok(history.every(({ id, transactionId }) => projected.evidenceIds.includes(id) && projected.evidenceIds.includes(transactionId)))
+  assert.equal(result.remainingFromToday.expenses, 80)
+})
+
+test('projects one corroborated yearly event with separate source, candidate, and evidence identifiers', () => {
+  const base = definedCandidate({ id: 'annual-membership', sourceAccountId: 'checking', destinationAccountId: 'merchant', date: '2026-08-25', amount: 240 })
+  const candidate = {
+    ...base,
+    cadence: { type: 'yearly', month: 8, day: 25 },
+    expectedDates: ['2026-08-25', '2026-08-25'],
+    evidence: { entryIds: ['annual-2025-entry'], transactionIds: ['annual-2025'], dates: ['2025-08-24'] },
+  }
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([], { startMonth: '2025-08', endDate: '2026-08-10' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 12,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+  const yearly = result.dailyProjectedEntries.filter(({ candidateId }) => candidateId === candidate.id)
+
+  assert.equal(yearly.length, 1)
+  assert.equal(yearly[0].sourceId, 'annual-membership')
+  assert.equal(yearly[0].candidateId, candidate.id)
+  assert.ok(['annual-2025', 'annual-2025-entry'].every((id) => yearly[0].evidenceIds.includes(id)))
+})
+
+test('keeps an aggregate authoritative payroll tax definition reconciliation-only when its bundle components are scheduled', () => {
+  const history = payrollHistoryWithIdenticalPhases()
+  const base = definedCandidate({ id: 'monthly-payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-20', amount: 1260 })
+  const aggregate = {
+    ...base,
+    identity: { ...base.identity, categoryId: 'taxes', payee: 'payroll taxes' },
+    source: { ...base.source, label: 'Monthly payroll taxes' },
+  }
+  const contexts = { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [aggregate],
+    ...normalizedCandidateInputs([aggregate], contexts),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+  const bundleTax = result.dailyProjectedEntries.filter(({ bundleId, categoryId }) => bundleId && categoryId === 'taxes')
+
+  assert.equal(bundleTax.length, 2)
+  assert.equal(
+    bundleTax.reduce((total, item) => total + item.amount, 0),
+    1260,
+  )
+  assert.equal(
+    result.dailyProjectedEntries.some(({ candidateId }) => candidateId === aggregate.id),
+    false,
+  )
+  assert.ok(result.audit.recurring.suppressedCandidateIds.includes(aggregate.id))
+  assert.equal(result.audit.unavailable.candidateIds.includes(aggregate.id), false)
+})
+
+test('builds robust undated budget envelopes after removing known evidence and keeps adjusted plans comparison-only', () => {
+  const months = ['2026-05', '2026-06', '2026-07']
+  const known = expensesForMonths(months, 20, 20, { destinationId: 'merchant', categoryId: 'groceries', description: 'Grocery delivery', idPrefix: 'known-groceries' }).map((item) => ({
+    ...item,
+    budgetId: 'groceries',
+  }))
+  const variable = [80, 100, 80].map((value, index) =>
+    entry({ id: `variable-groceries-${index + 1}`, date: `${months[index]}-10`, value, destinationId: 'merchant', categoryId: 'groceries', budgetId: 'groceries' }),
+  )
+  const travelOutlier = entry({ id: 'one-off-travel', date: '2026-06-12', value: 900, destinationId: 'merchant', categoryId: 'travel', budgetId: 'travel' })
+  const current = entry({ id: 'current-groceries', date: '2026-08-05', value: 10, destinationId: 'merchant', categoryId: 'groceries', budgetId: 'groceries' })
+  const candidate = definedCandidate({ id: 'grocery-delivery', sourceAccountId: 'checking', destinationAccountId: 'merchant', date: '2026-08-20', amount: 20 })
+  candidate.identity.categoryId = 'groceries'
+
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...known, ...variable, travelOutlier, current], { startMonth: '2026-05', endDate: '2026-08-10' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    budgetPlans: [
+      { id: 'groceries', type: 'reset', period: 'monthly', amount: 110 },
+      { id: 'travel', type: 'adjusted', period: 'monthly', amount: 200 },
+    ],
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+  const groceries = result.variableEnvelopes.find(({ budgetId }) => budgetId === 'groceries')
+  const travel = result.variableEnvelopes.find(({ budgetId }) => budgetId === 'travel')
+
+  assert.deepEqual(
+    {
+      actual: groceries.actual,
+      known: groceries.known,
+      historical: groceries.historical,
+      plan: groceries.plan,
+      expected: groceries.expected,
+      remaining: groceries.remaining,
+      confidence: groceries.confidence,
+    },
+    { actual: 10, known: 20, historical: 80, plan: 110, expected: 80, remaining: 90, confidence: 'high' },
+  )
+  assert.ok(known.every(({ id }) => !groceries.evidenceIds.includes(id)))
+  assert.deepEqual(
+    { actual: travel.actual, known: travel.known, historical: travel.historical, plan: travel.plan, expected: travel.expected, remaining: travel.remaining },
+    { actual: 0, known: 0, historical: 0, plan: 200, expected: 0, remaining: 0 },
+  )
+  assert.ok(travel.evidenceIds.includes('one-off-travel'))
+  assert.equal(
+    result.dailyProjectedEntries.some(({ sourceKind }) => sourceKind === 'variable'),
+    false,
+  )
+  assert.equal(
+    result.dailyProjectedEntries.some(({ evidenceIds }) => evidenceIds?.includes('one-off-travel')),
+    false,
+  )
+  assert.equal(result.remainingFromToday.expenses, 90)
+  assert.equal(result.final.expenses, 100)
+})
+
+test('uses a reset plan only when completed history is insufficient and keeps rollover reserves plan-only', () => {
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([], { startMonth: null, endDate: '2026-08-10', fetchStartMonth: null }),
+    candidates: [],
+    budgetPlans: [
+      { id: 'groceries', type: 'reset', period: 'monthly', amount: 110 },
+      { id: 'reserve', type: 'rollover', period: 'monthly', amount: 500 },
+      { id: 'travel', type: 'adjusted', period: 'monthly', amount: 250 },
+    ],
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  })
+  const groceries = result.variableEnvelopes.find(({ budgetId }) => budgetId === 'groceries')
+  const reserve = result.variableEnvelopes.find(({ budgetId }) => budgetId === 'reserve')
+  const travel = result.variableEnvelopes.find(({ budgetId }) => budgetId === 'travel')
+
+  assert.deepEqual({ expected: groceries.expected, remaining: groceries.remaining, confidence: groceries.confidence }, { expected: 110, remaining: 110, confidence: 'low' })
+  assert.deepEqual({ plan: reserve.plan, expected: reserve.expected, remaining: reserve.remaining }, { plan: 500, expected: null, remaining: 0 })
+  assert.deepEqual({ plan: travel.plan, expected: travel.expected, remaining: travel.remaining }, { plan: 250, expected: null, remaining: 0 })
+  assert.equal(result.dailyProjectedEntries.length, 0)
 })
 
 test('exports the normalized actual-flow classifier used by daily projections', async () => {

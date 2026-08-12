@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { addMonths, format, parseISO, startOfMonth, subMonths } from 'date-fns'
+import { get } from 'lodash-es'
 import DateUtils from '../utils/DateUtils.js'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
@@ -34,6 +35,21 @@ const DAILY_USE_KEYS = ['expenses', 'savingsDeposits', 'debtRepayments']
 const DAILY_SOURCE_KINDS = ['actual', 'defined', 'inferred', 'variable']
 const CATEGORY_SERIES_LIMIT = 6
 const UNAVAILABLE_EVIDENCE_PREVIEW_LIMIT = 20
+const BUDGET_PLAN_TYPES = new Set(['reset', 'rollover', 'adjusted'])
+
+const budgetCode = (value) => (typeof value === 'object' ? get(value, 'fireflyCode') : value)
+const normalizeBudgetPlans = (budgets) =>
+  budgets
+    .map((budget) => ({
+      id: String(budget?.id ?? ''),
+      active: get(budget, 'attributes.active') === true,
+      type: budgetCode(get(budget, 'attributes.auto_budget_type')),
+      period: budgetCode(get(budget, 'attributes.auto_budget_period')),
+      amount: Number(get(budget, 'attributes.amount', get(budget, 'attributes.auto_budget_amount'))),
+    }))
+    .filter(({ id, active, type, amount }) => id && active && BUDGET_PLAN_TYPES.has(type) && Number.isFinite(amount) && amount > 0)
+    .map(({ id, type, period, amount }) => ({ id, type, period, amount }))
+    .sort((left, right) => left.id.localeCompare(right.id))
 
 const balanceMetricIdsForSavingsView = (view) => (view === 'split' ? ['netWorth', 'savingsIncluded', 'savingsExcluded', 'debt'] : ['netWorth', 'savings', 'debt'])
 const financialMetricIdsForSavingsView = (view) => [...balanceMetricIdsForSavingsView(view), 'expenses']
@@ -247,6 +263,8 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     }),
   })
   const barGroups = [buildDirectionGroup('inflow', 'sources', DAILY_SOURCE_KEYS, 1), buildDirectionGroup('outflow', 'uses', DAILY_USE_KEYS, -1)]
+  const envelopeComponents = emptyDailyComponents()
+  for (const envelope of forecast.variableEnvelopes ?? []) addDailyComponents(envelopeComponents, envelope.flowAmounts ?? emptyDailyComponents(), currencyDecimalPlaces)
 
   const unavailableTransactionIds = [
     ...new Set(days.flatMap(({ actual }) => (actual?.entries ?? []).filter(({ status }) => status === 'unavailable').flatMap(({ transactionIds }) => transactionIds))),
@@ -264,7 +282,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
       const actual = days.some(({ components }) => components[key] === null)
         ? null
         : roundDaily(
-            days.reduce((total, day) => total + day.components[key], 0),
+            days.reduce((total, day) => total + day.components[key], envelopeComponents[key]),
             currencyDecimalPlaces,
           )
       return [key, expected === null || actual === null ? null : roundDaily(actual - expected, currencyDecimalPlaces)]
@@ -273,7 +291,9 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
   const expectedAvailable = ['unavailable', 'insufficientHistory'].includes(forecast.statusByMetric.availableCashChange)
     ? null
     : roundDaily(forecast.actualToDate.availableCashChange + forecast.remainingFromToday.availableCashChange, currencyDecimalPlaces)
-  const actualAvailable = days.at(-1)?.cumulativeAvailableCashChange ?? 0
+  const actualAvailable = Number.isFinite(days.at(-1)?.cumulativeAvailableCashChange)
+    ? roundDaily(days.at(-1).cumulativeAvailableCashChange + (envelopeComponents.availableCashChange ?? 0), currencyDecimalPlaces)
+    : null
   const availableCashDelta = expectedAvailable === null || actualAvailable === null ? null : roundDaily(actualAvailable - expectedAvailable, currencyDecimalPlaces)
   const relevantUnclassifiedMonths = new Set([monthKey, ...(forecast.audit.history.months ?? [])])
   const relevantUnclassifiedEntries = ledger.entries.filter(
@@ -362,6 +382,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     status: forecast.status,
     statusByMetric: forecast.statusByMetric,
     monthlyTotals,
+    variableEnvelopes: forecast.variableEnvelopes ?? [],
     reconciliation: { status: reconciliationStatus, componentDeltas, availableCashDelta },
     audit: {
       fulfilledExpectedIds: forecast.audit.recurring.fulfilledExpectedIds,
@@ -380,6 +401,7 @@ export function createAnalyticsStore(id, useDependencies) {
   return defineStore(id, () => {
     const {
       dashboardStore,
+      budgetStore,
       currencyStore,
       useStoredValue,
       accountRepository,
@@ -565,6 +587,21 @@ export function createAnalyticsStore(id, useDependencies) {
         rates: rates.value,
       }),
     )
+    const forecastLedger = computed(() => {
+      const budgetIds = new Map()
+      for (const transaction of transactions.value) {
+        const transactionId = String(transaction?.id ?? '')
+        for (const [splitIndex, split] of (get(transaction, 'attributes.transactions', []) ?? []).entries()) {
+          const budgetId = split?.budget_id ?? split?.budget?.id
+          if (transactionId && budgetId) budgetIds.set(`${transactionId}:${splitIndex}`, String(budgetId))
+        }
+      }
+      return {
+        ...ledger.value,
+        entries: ledger.value.entries.map((entry) => ({ ...entry, budgetId: budgetIds.get(`${entry.transactionId}:${entry.splitIndex}`) ?? entry.budgetId ?? null })),
+      }
+    })
+    const budgetPlans = computed(() => normalizeBudgetPlans(budgetStore?.budgetList ?? []))
     const categoryLedger = computed(() => buildGrossCategoryLedger({ ledger: ledger.value, coverage: rawSnapshot.value.transactionCoverage }))
     const categoryWindowMonthKeys = computed(() => {
       const currentMonth = startOfMonth(getNow())
@@ -693,10 +730,11 @@ export function createAnalyticsStore(id, useDependencies) {
     const forecastCandidateAmounts = computed(() => candidateAmountsFor(forecastCandidates.value))
     const buildForecast = (historyMonths, candidates = forecastCandidates.value) =>
       buildRemainingActivityForecast({
-        ledger: ledger.value,
+        ledger: forecastLedger.value,
         candidates,
         candidateAmounts: candidates === forecastCandidates.value ? forecastCandidateAmounts.value : candidateAmountsFor(candidates),
         accountContexts: forecastAccountContexts.value,
+        budgetPlans: budgetPlans.value,
         fetchCoverage: rawSnapshot.value.transactionCoverage,
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
         historyMonths: Number(historyMonths),
@@ -715,6 +753,10 @@ export function createAnalyticsStore(id, useDependencies) {
         if (!Number.isFinite(entry.flowAmounts?.expenses) || entry.flowAmounts.expenses === 0) continue
         const categoryId = entry.categoryId ?? ANALYTICS_UNCATEGORIZED_ID
         projectedByCategory.set(categoryId, (projectedByCategory.get(categoryId) ?? 0) + entry.flowAmounts.expenses)
+      }
+      for (const envelope of forecast.variableEnvelopes ?? []) {
+        if (!envelope.categoryId || !Number.isFinite(envelope.flowAmounts?.expenses) || envelope.flowAmounts.expenses === 0) continue
+        projectedByCategory.set(envelope.categoryId, (projectedByCategory.get(envelope.categoryId) ?? 0) + envelope.flowAmounts.expenses)
       }
       return {
         ...categorySummaryBase.value,
@@ -979,16 +1021,30 @@ export function createAnalyticsStore(id, useDependencies) {
     const cashUseSeries = computed(() => {
       const currentMonthKey = format(getNow(), 'yyyy-MM')
       const forecast = financialForecast.value
+      const envelopeEntries = (forecast.variableEnvelopes ?? [])
+        .filter(({ flowAmounts }) => DAILY_FLOW_KEYS.some((key) => Number.isFinite(flowAmounts?.[key]) && flowAmounts[key] !== 0))
+        .map((envelope) => ({
+          id: envelope.id,
+          date: forecastEndDate.value,
+          amount: Math.max(...DAILY_FLOW_KEYS.map((key) => Math.abs(envelope.flowAmounts?.[key] ?? 0))),
+          categoryId: envelope.categoryId,
+          sourceKind: 'envelope',
+          evidenceIds: envelope.evidenceIds,
+          flowAmounts: envelope.flowAmounts,
+        }))
       return buildCashUseSeries({
         ledger: ledger.value,
         remainingActivity: {
           ...forecast,
           currentMonthKey,
-          dailyProjectedEntries: forecast.dailyProjectedEntries.map((entry) => ({
-            ...entry,
-            sourceAccountKind: forecastAccountContexts.value[entry.sourceAccountId]?.kind ?? null,
-            destinationAccountKind: forecastAccountContexts.value[entry.destinationAccountId]?.kind ?? null,
-          })),
+          dailyProjectedEntries: [
+            ...forecast.dailyProjectedEntries.map((entry) => ({
+              ...entry,
+              sourceAccountKind: forecastAccountContexts.value[entry.sourceAccountId]?.kind ?? null,
+              destinationAccountKind: forecastAccountContexts.value[entry.destinationAccountId]?.kind ?? null,
+            })),
+            ...envelopeEntries,
+          ],
         },
         months: cashUseCompletedMonthKeys.value,
         mode: cashUseMode.value,
