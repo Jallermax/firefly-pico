@@ -83,7 +83,7 @@
             <div v-for="item in variableEnvelopeItems" :key="item.id" class="analytics-daily-forecast-evidence-item">
               <div class="analytics-daily-forecast-evidence-heading">
                 <strong>{{ item.label }}</strong>
-                <small v-if="item.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: item.confidence.level }) }}</small>
+                <small v-if="confidenceLevel(item.confidence)">{{ $t('analytics.daily_forecast.confidence', { level: confidenceLabel(item.confidence) }) }}</small>
               </div>
               <div class="analytics-daily-forecast-evidence-grid">
                 <div v-for="row in item.rows" :key="row.id">
@@ -116,7 +116,7 @@
               <div class="analytics-daily-forecast-evidence">
                 <strong>{{ $t('analytics.daily_forecast.event_evidence') }}</strong>
                 <span>{{ $t('analytics.daily_forecast.projected_non_navigable') }}</span>
-                <span v-if="event.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: event.confidence.level }) }}</span>
+                <span v-if="confidenceLevel(event.confidence)">{{ $t('analytics.daily_forecast.confidence', { level: confidenceLabel(event.confidence) }) }}</span>
                 <span v-if="event.sourceIds.length">{{ $t('analytics.daily_forecast.source_id', { id: event.sourceIds.join(', ') }) }}</span>
                 <span v-if="event.candidateIds.length">{{ $t('analytics.daily_forecast.candidate_id', { id: event.candidateIds.join(', ') }) }}</span>
                 <span v-if="event.evidenceIds.length">{{ $t('analytics.daily_forecast.evidence_ids', { ids: event.evidenceIds.join(', ') }) }}</span>
@@ -145,8 +145,9 @@
             type="button"
             class="analytics-daily-forecast-detail-row"
             style="min-height: 44px"
-            :disabled="entry.sourceKind !== 'actual'"
-            @click="onDetailEntry(entry)"
+            :disabled="!canNavigateEntry(entry)"
+            @click="onDetailEntry(entry, 'pointer')"
+            @keydown.enter.prevent="onDetailEntry(entry, 'keyboard')"
           >
             <span class="analytics-daily-forecast-detail-main">
               <span class="font-weight-600">{{ entry.sourceLabel || sourceLabel(entry.sourceKind) }}</span>
@@ -161,7 +162,7 @@
                 {{ sourceLabel(source.sourceKind) }}<template v-if="source.sourceLabel"> — {{ source.sourceLabel }}</template> · {{ formatCurrency(source.amount) }}
               </div>
               <div v-if="source.overdue">{{ $t('analytics.daily_forecast.overdue') }}</div>
-              <div v-if="source.confidence?.level">{{ $t('analytics.daily_forecast.confidence', { level: source.confidence.level }) }}</div>
+              <div v-if="confidenceLevel(source.confidence)">{{ $t('analytics.daily_forecast.confidence', { level: confidenceLabel(source.confidence) }) }}</div>
               <div v-for="reason in source.reasons ?? []" :key="reason">{{ reason }}</div>
               <div v-if="source.sourceId">{{ $t('analytics.daily_forecast.source_id', { id: source.sourceId }) }}</div>
               <div v-if="source.candidateId">{{ $t('analytics.daily_forecast.candidate_id', { id: source.candidateId }) }}</div>
@@ -200,6 +201,8 @@ const monthTitle = computed(() => new Intl.DateTimeFormat(profileStore.language,
 const formatCurrency = (value) => (Number.isFinite(value) ? `${formatNumberForDashboard(value)} ${analyticsStore.displayCurrencyCode}` : '—')
 const formatSignedCurrency = (value) => (Number.isFinite(value) ? `${value > 0 ? '+' : ''}${formatCurrency(value)}` : '—')
 const sourceLabel = (sourceKind) => t(`analytics.daily_forecast.source_${sourceKind}`)
+const confidenceLevel = (confidence) => (typeof confidence === 'string' ? confidence : confidence?.level)
+const confidenceLabel = (confidence) => t(`analytics.daily_forecast.confidence_${confidenceLevel(confidence)}`)
 const chartSeries = computed(() => ({
   ...daily.value,
   barGroups: daily.value.barGroups.map((group) => ({
@@ -224,13 +227,7 @@ const legendItems = computed(() => [
   { id: 'available', label: t('analytics.daily_forecast.available_change'), color: 'var(--transfer2)' },
 ])
 const materialRows = (rows) => rows.filter(({ value }) => Number.isFinite(value) && value !== 0)
-const componentIdentity = (component) => `${component.bundleComponentId ?? ''} ${component.bundleLabel ?? ''} ${component.categoryId ?? ''}`.toLowerCase()
-const expenseComponentLabel = (component) => {
-  const identity = componentIdentity(component)
-  if (identity.includes('tax')) return t('analytics.daily_forecast.taxes')
-  if (identity.includes('insurance')) return t('analytics.daily_forecast.insurance')
-  return component.bundleLabel || component.sourceLabel || sourceLabel(component.sourceKind)
-}
+const expenseComponentLabel = (component) => component.bundleLabel || component.sourceLabel || sourceLabel(component.sourceKind)
 const eventDetailRows = (event) => {
   const rows = event.components.flatMap((component) => {
     const flow = component.flowAmounts ?? {}
@@ -316,10 +313,11 @@ const onSelectPoint = async ({ activation, point, transactionIds }) => {
   }
   await navigateTo(selection.route)
 }
-const onDetailEntry = async (entry) => {
-  if (entry.sourceKind === 'actual') {
+const canNavigateEntry = (entry) => entry.sourceKind === 'actual' && entry.transactionIds?.length > 0
+const onDetailEntry = async (entry, activation) => {
+  if (canNavigateEntry(entry)) {
     const selection = projectLineChartSelection({
-      activation: 'pointer',
+      activation,
       transactionIds: entry.transactionIds,
       kind: 'actual',
       route: RouteConstants.ROUTE_TRANSACTION_LIST,
