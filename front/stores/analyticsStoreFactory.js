@@ -33,6 +33,7 @@ const DAILY_FLOW_KEYS = ['income', 'refunds', 'expenses', 'savingsDeposits', 'sa
 const DAILY_SOURCE_KEYS = ['income', 'refunds', 'savingsWithdrawals', 'newDebt']
 const DAILY_USE_KEYS = ['expenses', 'savingsDeposits', 'debtRepayments']
 const DAILY_SOURCE_KINDS = ['actual', 'defined', 'inferred', 'variable']
+const DAILY_IMPACT_KEYS = ['savingsChange', 'debtChange', 'netWorthChange']
 const CATEGORY_SERIES_LIMIT = 6
 const UNAVAILABLE_EVIDENCE_PREVIEW_LIMIT = 20
 const BUDGET_PLAN_TYPES = new Set(['reset', 'rollover', 'adjusted'])
@@ -141,6 +142,18 @@ const buildDailyEventSummaries = (days, decimalPlaces) => {
       ]
       const sources = dailyTotal(components, DAILY_SOURCE_KEYS, decimalPlaces)
       const uses = dailyTotal(components, DAILY_USE_KEYS, decimalPlaces)
+      const impact = Object.fromEntries(
+        DAILY_IMPACT_KEYS.map((key) => [
+          key,
+          entries.some((entry) => entry.flowAmounts?.[key] === null)
+            ? null
+            : roundDaily(
+                entries.reduce((total, entry) => total + (entry.flowAmounts?.[key] ?? 0), 0),
+                decimalPlaces,
+              ),
+        ]),
+      )
+      impact.availableCashChange = Number.isFinite(sources) && Number.isFinite(uses) ? roundDaily(sources - uses, decimalPlaces) : null
       return {
         id,
         date: entries[0].date,
@@ -159,7 +172,8 @@ const buildDailyEventSummaries = (days, decimalPlaces) => {
         flowAmounts: components,
         sources,
         uses,
-        availableCashChange: Number.isFinite(sources) && Number.isFinite(uses) ? roundDaily(sources - uses, decimalPlaces) : null,
+        availableCashChange: impact.availableCashChange,
+        impact,
       }
     })
     .sort((left, right) => left.date.localeCompare(right.date) || left.sourceKind.localeCompare(right.sourceKind) || left.id.localeCompare(right.id))
@@ -208,6 +222,8 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
       transactionId: entry.transactionId,
       transactionIds: entry.transactionId ? [String(entry.transactionId)] : [],
       evidenceIds: [],
+      sourceAccountKind: entry.sourceKind ?? null,
+      destinationAccountKind: entry.destinationKind ?? null,
       flowAmounts: classified.flowAmounts,
       affectedMetricIds: classified.affectedMetricIds,
       status: classified.status,
@@ -349,6 +365,54 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     items: structuredClone(forecast.variableEnvelopes ?? []),
   }
   const eventSummaries = buildDailyEventSummaries(days, currencyDecimalPlaces)
+  const actualEntries = days.flatMap(({ actual }) => actual?.entries ?? [])
+  const projectedEntries = days.flatMap(({ projected }) => projected?.entries ?? [])
+  const savingsForKind = (entries, kind) =>
+    roundDaily(
+      entries.reduce((total, entry) => total + (entry.destinationAccountKind === kind ? entry.amount : 0) - (entry.sourceAccountKind === kind ? entry.amount : 0), 0),
+      currencyDecimalPlaces,
+    )
+  const impactItem = ({ id, actual, remaining, status, projectedSources }) => ({
+    id,
+    actual,
+    remaining,
+    final: Number.isFinite(actual) && Number.isFinite(remaining) ? roundDaily(actual + remaining, currencyDecimalPlaces) : null,
+    status,
+    projectedSources,
+  })
+  const impactItems = [
+    impactItem({
+      id: 'availableCashChange',
+      actual: forecast.actualToDate.availableCashChange,
+      remaining: forecast.remainingFromToday.availableCashChange,
+      status: forecast.statusByMetric.availableCashChange,
+      projectedSources: projectedEntries.filter(({ flowAmounts }) => DAILY_FLOW_KEYS.some((key) => flowAmounts?.[key] !== 0)),
+    }),
+    ...[
+      ['savingsIncluded', 'savingsAccessible'],
+      ['savingsExcluded', 'savingsRestricted'],
+    ].map(([id, kind]) =>
+      impactItem({
+        id,
+        actual: savingsForKind(actualEntries, kind),
+        remaining: savingsForKind(projectedEntries, kind),
+        status: forecast.statusByMetric.savingsChange,
+        projectedSources: projectedEntries.filter(({ sourceAccountKind, destinationAccountKind }) => sourceAccountKind === kind || destinationAccountKind === kind),
+      }),
+    ),
+    ...[
+      ['debtChange', 'debtChange'],
+      ['netWorthChange', 'netWorthChange'],
+    ].map(([id, key]) =>
+      impactItem({
+        id,
+        actual: forecast.actualToDate[key],
+        remaining: forecast.remainingFromToday[key],
+        status: forecast.statusByMetric[key],
+        projectedSources: projectedEntries.filter(({ flowAmounts }) => flowAmounts?.[key] !== 0),
+      }),
+    ),
+  ]
 
   const unavailableTransactionIds = [
     ...new Set(days.flatMap(({ actual }) => (actual?.entries ?? []).filter(({ status }) => status === 'unavailable').flatMap(({ transactionIds }) => transactionIds))),
@@ -451,6 +515,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     days,
     barGroups,
     eventSummaries,
+    impactItems,
     summary: {
       inflow: inflowSummary,
       outflow: summaryValue(DAILY_USE_KEYS, monthlyTotals.uses),
@@ -1050,7 +1115,10 @@ export function createAnalyticsStore(id, useDependencies) {
         if (flowKey) return forecast[field]?.[flowKey]
         const savingsKind = metric === 'savingsIncluded' ? 'savingsAccessible' : metric === 'savingsExcluded' ? 'savingsRestricted' : null
         if (!savingsKind) return null
-        return forecast.dailyProjectedEntries.reduce((total, entry) => total + (entry.destinationKind === savingsKind ? entry.amount : 0) - (entry.sourceKind === savingsKind ? entry.amount : 0), 0)
+        return forecast.dailyProjectedEntries.reduce(
+          (total, entry) => total + (entry.destinationAccountKind === savingsKind ? entry.amount : 0) - (entry.sourceAccountKind === savingsKind ? entry.amount : 0),
+          0,
+        )
       }
       const trend = summarizeBalanceMovements({ balanceSeries: balanceSeries.value, months: Number(balancePeriod.value), today: getNow() })
       const series = trend.series.map((item) => {
@@ -1086,7 +1154,7 @@ export function createAnalyticsStore(id, useDependencies) {
           projectedSources: forecast.dailyProjectedEntries.filter((entry) => {
             if (flowKey) return entry.flowAmounts?.[flowKey] !== 0
             const savingsKind = item.id === 'savingsIncluded' ? 'savingsAccessible' : 'savingsRestricted'
-            return (entry.destinationKind === savingsKind ? entry.amount : entry.sourceKind === savingsKind ? -entry.amount : 0) !== 0
+            return (entry.destinationAccountKind === savingsKind ? entry.amount : entry.sourceAccountKind === savingsKind ? -entry.amount : 0) !== 0
           }),
         }
       })
@@ -1187,6 +1255,10 @@ export function createAnalyticsStore(id, useDependencies) {
         currencyDecimalPlaces: displayCurrencyDecimalPlaces.value,
       })
     })
+    const dailyForecastImpact = computed(() => ({
+      items: dailyForecast.value.impactItems,
+      payrollEvents: dailyForecast.value.eventSummaries.filter(({ bundleId }) => bundleId).map(({ id, date, bundleId, impact }) => ({ id, date, bundleId, impact })),
+    }))
     const dailyForecastSourceErrors = computed(() =>
       ['recurringTransactions', 'subscriptions'].filter((source) => ancillaryState[source].status === 'error').map((source) => ({ source, message: ancillaryState[source].error?.message ?? '' })),
     )
@@ -1402,6 +1474,7 @@ export function createAnalyticsStore(id, useDependencies) {
       cashUseCategoryRankingItems,
       cashUseState,
       dailyForecast,
+      dailyForecastImpact,
       dailyForecastState,
       selectedFlow,
       flowMonthMin,

@@ -1118,6 +1118,57 @@ test('split savings trends retain Task 8 actual evidence and final metadata', as
   }
 })
 
+test('projects split savings from normalized account roles and exposes reconciled monthly impact', async () => {
+  now = new Date('2026-08-10T12:00:00')
+  storageOverrides.set('analyticsSavingsView', 'split')
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const included = analyticsAccount('saving-included', 'asset', 'savingAsset', true)
+  const excluded = analyticsAccount('saving-excluded', 'asset', 'savingAsset', false)
+  accountStore.accountList = [checking, included, excluded]
+  const recurring = (id, amount, source, destination, day) => ({
+    id,
+    attributes: {
+      active: true,
+      type: 'transfer',
+      first_date: `2026-04-${day}`,
+      repetitions: [{ type: 'monthly', moment: day }],
+      transactions: [{ amount: String(amount), currency_code: 'USD', source_id: source.id, destination_id: destination.id }],
+    },
+  })
+  const recurringDefinitions = [
+    recurring('included-deposit', 25, checking, included, '20'),
+    recurring('excluded-deposit', 75, checking, excluded, '20'),
+    recurring('included-withdrawal', 10, included, checking, '25'),
+  ]
+  recurringTransactionResult = async () => ({ ok: true, data: recurringDefinitions })
+  const inputSnapshot = structuredClone(recurringDefinitions)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(recurringDefinitions, inputSnapshot)
+  const includedSeries = store.financialTrend.series.find(({ id }) => id === 'savingsIncluded')
+  const excludedSeries = store.financialTrend.series.find(({ id }) => id === 'savingsExcluded')
+  assert.equal(includedSeries.remainingFromToday, 15)
+  assert.equal(excludedSeries.remainingFromToday, 75)
+  assert.equal(
+    includedSeries.projectedSources.every(
+      ({ sourceKind, sourceAccountKind, destinationAccountKind }) => sourceKind === 'defined' && [sourceAccountKind, destinationAccountKind].includes('savingsAccessible'),
+    ),
+    true,
+  )
+  assert.deepEqual(
+    store.dailyForecastImpact.items.map(({ id, remaining }) => [id, remaining]),
+    [
+      ['availableCashChange', -90],
+      ['savingsIncluded', 15],
+      ['savingsExcluded', 75],
+      ['debtChange', 0],
+      ['netWorthChange', -75],
+    ],
+  )
+})
+
 test('ignores unavailable gross expenses outside the selected financial trend window', async () => {
   const old = new Date()
   old.setMonth(old.getMonth() - 18)
@@ -2805,6 +2856,14 @@ test('projects dated payroll and bill events while keeping the variable envelope
   assert.equal(
     payrollEvent.components.every(({ bundleComponentId, evidenceIds }) => bundleComponentId && evidenceIds.length > 0),
     true,
+  )
+  assert.deepEqual(payrollEvent.impact, { savingsChange: 0, debtChange: 0, netWorthChange: 800, availableCashChange: 800 })
+  assert.deepEqual(
+    store.dailyForecastImpact.payrollEvents.map(({ date, impact }) => ({ date, impact })),
+    [
+      { date: '2026-08-14', impact: { savingsChange: 0, debtChange: 0, netWorthChange: 800, availableCashChange: 800 } },
+      { date: '2026-08-31', impact: { savingsChange: 0, debtChange: 0, netWorthChange: 800, availableCashChange: 800 } },
+    ],
   )
   assert.deepEqual(store.dailyForecast.days.find(({ date }) => date === '2026-08-05').actual.transactionIds, ['actual-income'])
   const orderedProjection = JSON.stringify({
