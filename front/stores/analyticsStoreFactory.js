@@ -702,6 +702,7 @@ export function createAnalyticsStore(id, useDependencies) {
             ]
           const attributes = definitionFor(candidate)
           const transaction = attributes.transactions?.[0] ?? {}
+          const budgetId = transaction.budget_id ?? transaction.budget?.id ?? attributes.budget_id ?? attributes.budget?.id ?? null
           const amount = transaction.primary_amount ?? transaction.amount ?? attributes.pc_amount_avg ?? attributes.amount_avg ?? candidate.expectedAmount?.value
           const currencyCode =
             transaction.primary_amount !== null && transaction.primary_amount !== undefined
@@ -714,6 +715,7 @@ export function createAnalyticsStore(id, useDependencies) {
             candidate.id,
             {
               value: converted.value,
+              budgetId: budgetId ? String(budgetId) : null,
               conversion: {
                 mode,
                 sourceCurrency: currencyCode ?? null,

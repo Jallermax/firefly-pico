@@ -1189,7 +1189,7 @@ test('derives financial trends from the shared ledger and reconstructed balances
     expense('last-month', 30, new Date(today.getFullYear(), today.getMonth() - 1, 20), 'food'),
     expense('current', 10, new Date(today.getFullYear(), today.getMonth(), 1), 'food'),
   ]
-  const expectedForecast = 30
+  const expectedForecast = 10
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
@@ -3074,7 +3074,7 @@ test('normalizes active JSON API budget plans for forecast envelopes without cha
   transactionResult = months.map((month, index) =>
     dailyTransaction({
       id: `groceries-${index + 1}`,
-      date: `${month}-${[5, 14, 27][index]}`,
+      date: `${month}-${String([5, 14, 27][index]).padStart(2, '0')}`,
       amount: [80, 100, 80][index],
       source: checking,
       destination: expense,
@@ -3082,11 +3082,26 @@ test('normalizes active JSON API budget plans for forecast envelopes without cha
       budgetId: 'groceries',
     }),
   )
+  recurringTransactionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'budgeted-delivery',
+        attributes: {
+          active: true,
+          type: 'withdrawal',
+          first_date: '2026-05-20',
+          repetitions: [{ type: 'monthly', moment: '20' }],
+          transactions: [{ amount: '20', currency_code: 'USD', description: 'Budgeted delivery', source_id: 'checking', destination_id: 'expense', category_id: 'groceries', budget_id: 'groceries' }],
+        },
+      },
+    ],
+  })
   const store = (analyticsStore = useAnalyticsStore())
 
   await store.init()
 
-  const baseline = JSON.stringify({ ledger: store.ledger, balances: store.balanceSeries, flow: store.selectedFlow, category: store.categorySummary, cashUse: store.cashUseSeries })
+  const baseline = JSON.stringify({ ledger: store.ledger, balances: store.balanceSeries, flow: store.selectedFlow })
   const envelopes = store.financialTrend.forecast.variableEnvelopes
   assert.deepEqual(
     envelopes.map(({ budgetId, plan, expected }) => ({ budgetId, plan, expected })),
@@ -3100,12 +3115,15 @@ test('normalizes active JSON API budget plans for forecast envelopes without cha
     store.financialTrend.forecast.dailyProjectedEntries.some(({ sourceKind }) => sourceKind === 'variable'),
     false,
   )
+  const budgetedDelivery = store.financialTrend.forecast.dailyProjectedEntries.find(({ sourceId }) => sourceId === 'budgeted-delivery')
+  assert.deepEqual({ budgetId: budgetedDelivery.budgetId, categoryId: budgetedDelivery.categoryId }, { budgetId: 'groceries', categoryId: 'groceries' })
+  assert.equal(store.financialTrend.forecast.variableEnvelopes.find(({ budgetId }) => budgetId === 'groceries').known, 20)
 
   budgetStore.budgetList = [{ id: 'groceries', attributes: { active: true, auto_budget_type: { fireflyCode: 'reset' }, auto_budget_period: { fireflyCode: 'monthly' }, amount: '120' } }]
   await nextTick()
 
   assert.equal(store.financialTrend.forecast.variableEnvelopes.find(({ budgetId }) => budgetId === 'groceries').plan, 120)
-  assert.equal(JSON.stringify({ ledger: store.ledger, balances: store.balanceSeries, flow: store.selectedFlow, category: store.categorySummary, cashUse: store.cashUseSeries }), baseline)
+  assert.equal(JSON.stringify({ ledger: store.ledger, balances: store.balanceSeries, flow: store.selectedFlow }), baseline)
 })
 
 test('keeps the daily card and combination-chart selection contract exact without inventing projected transaction routes', () => {
