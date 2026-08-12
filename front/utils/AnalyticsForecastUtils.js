@@ -697,7 +697,10 @@ const budgetAttribution = ({ explicitBudgetId = null, entries = [] }) => {
 
 const candidateWithBudgetAttribution = ({ candidate, entries, candidateAmounts }) => ({
   ...candidate,
-  budgetAttribution: budgetAttribution({ explicitBudgetId: candidate?.budgetId ?? candidateAmounts?.[candidate.id]?.budgetId, entries }),
+  budgetAttribution:
+    projectionContext(candidate).context.direction === 'expense'
+      ? budgetAttribution({ explicitBudgetId: candidate?.budgetId ?? candidateAmounts?.[candidate.id]?.budgetId, entries })
+      : { status: 'unassigned', budgetId: null, budgetIds: [] },
 })
 
 const robustAuthoritativeAmount = ({ candidate, input, entries, currencyDecimalPlaces }) => {
@@ -816,7 +819,7 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
     label: bundleComponentLabel(representative, context),
     phase,
     context,
-    budgetAttribution: budgetAttribution({ entries: evidence.map(({ entry }) => entry) }),
+    budgetAttribution: context.direction === 'expense' ? budgetAttribution({ entries: evidence.map(({ entry }) => entry) }) : { status: 'unassigned', budgetId: null, budgetIds: [] },
     reconciliationOnly: FLOW_KEYS.every((metric) => flowAmountsFor(context, 1, currencyDecimalPlaces)[metric] === 0),
     evidenceEntryIds: evidence.map(({ entry }) => String(entry.id)).sort(),
     evidenceTransactionIds: unique(evidence.map(({ occurrence }) => occurrence.transactionId)).sort(),

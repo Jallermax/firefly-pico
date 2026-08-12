@@ -2563,6 +2563,39 @@ test('preserves explicit authoritative budget membership over missing matched hi
   assert.equal(result.audit.budgets.incompleteAttributions, undefined)
 })
 
+test('keeps unbudgeted recurring income from suppressing an unrelated sparse expense plan', () => {
+  const months = ['2026-05', '2026-06', '2026-07']
+  const history = months.map((month, index) => entry({ id: `salary-${index}`, date: `${month}-20`, value: 1000, direction: 'income', description: 'Salary' }))
+  const candidate = definedCandidate({ id: 'salary', sourceAccountId: 'employer', destinationAccountId: 'checking', direction: 'income', date: '2026-08-20', amount: 1000 })
+  const budgetPlans = [{ id: 'groceries', type: 'reset', period: 'monthly', amount: 200 }]
+  const options = {
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate]),
+    historyMonths: 3,
+    today: '2026-08-10',
+    endDate: '2026-08-31',
+  }
+  const inputsBefore = structuredClone({ history, candidate, budgetPlans })
+  const ordered = buildRemainingActivityForecast({ ...options, ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-10' }), budgetPlans })
+  const reversed = buildRemainingActivityForecast({
+    ...options,
+    ledger: ledger([...history].reverse(), { startMonth: '2026-05', endDate: '2026-08-10' }),
+    budgetPlans: [...budgetPlans].reverse(),
+  })
+  const projected = ordered.dailyProjectedEntries.find(({ candidateId }) => candidate.id === candidateId)
+  const groceries = ordered.variableEnvelopes.find(({ budgetId }) => budgetId === 'groceries')
+
+  assert.deepEqual(projected.budgetAttribution, { status: 'unassigned', budgetId: null, budgetIds: [] })
+  assert.deepEqual(
+    { plan: groceries.plan, expected: groceries.expected, remaining: groceries.remaining, planStatus: groceries.planStatus },
+    { plan: 200, expected: 200, remaining: 200, planStatus: 'ready' },
+  )
+  assert.equal(ordered.remainingFromToday.expenses, 200)
+  assert.equal(ordered.audit.budgets.incompleteAttributions, undefined)
+  assert.equal(JSON.stringify(reversed), JSON.stringify(ordered))
+  assert.deepEqual({ history, candidate, budgetPlans }, inputsBefore)
+})
+
 test('uses covered all-known budget months as zero variable history and reconciles known separately', () => {
   const months = ['2026-05', '2026-06', '2026-07']
   const known = months.map((month, index) =>
