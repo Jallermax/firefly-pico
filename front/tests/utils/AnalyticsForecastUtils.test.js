@@ -970,6 +970,40 @@ test('keeps a transaction-linked one-off candidate when only other splits from i
   assert.equal(result.dailyProjectedEntries.filter(({ candidateId }) => candidateId === candidate.id).length, 1)
 })
 
+test('keeps a transaction-linked one-off candidate when an admitted legacy split has the same context and amount', () => {
+  const history = payrollHistory()
+  const adjustment = entry({
+    id: 'independent-tax-adjustment',
+    transactionId: 'payroll-may-mid',
+    date: '2026-05-15',
+    value: 600,
+    sourceId: 'checking',
+    destinationId: 'tax-authority',
+    categoryId: 'taxes',
+    description: 'Independent tax adjustment',
+  })
+  const base = definedCandidate({ id: 'independent-tax-adjustment', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-20', amount: 600 })
+  const candidate = {
+    ...base,
+    identity: { ...base.identity, categoryId: 'taxes', payee: 'independent tax adjustment' },
+    evidence: { entryIds: [], transactionIds: [adjustment.transactionId], dates: [adjustment.date] },
+  }
+  const result = buildRemainingActivityForecast({
+    ledger: ledger([...history, adjustment], { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate], { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.equal(result.audit.bundles.length, 1)
+  assert.equal(result.audit.bundles[0].entryIds.includes(adjustment.id), false)
+  assert.equal(result.audit.recurring.removedHistoryEntryIds.includes(adjustment.id), false)
+  assert.equal(result.audit.recurring.suppressedCandidateIds.includes(candidate.id), false)
+  assert.equal(result.dailyProjectedEntries.filter(({ candidateId }) => candidate.id === candidateId).length, 1)
+})
+
 test('uses a recency-weighted median with medium confidence when only one payroll occurrence changes', () => {
   const history = payrollHistory({ latestRegimes: ['old', 'current'] })
   const candidates = payrollCandidates(history)
