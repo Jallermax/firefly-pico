@@ -805,7 +805,10 @@ const precedingBusinessDay = (value) => {
 
 const bundleEntryCurrency = (entry) => String(entry?.conversion?.displayCurrency ?? entry?.conversion?.sourceCurrency ?? '')
 
-const bundleComponentIsFlowMaterial = (entry, currencyDecimalPlaces) => FLOW_KEYS.some((metric) => flowAmountsFor(projectionContext(entry).context, 1, currencyDecimalPlaces)[metric] !== 0)
+const bundleComponentIsCumulativeMaterial = (entry, currencyDecimalPlaces) =>
+  [...CUMULATIVE_METRICS].some((metric) => flowAmountsFor(projectionContext(entry).context, 1, currencyDecimalPlaces)[metric] !== 0)
+
+const bundleComponentHasProjectedFlow = (component, currencyDecimalPlaces) => FLOW_KEYS.some((metric) => flowAmountsFor(component.context, 1, currencyDecimalPlaces)[metric] !== 0)
 
 const bundleComponentDescription = (entry) =>
   String(entry?.description ?? '')
@@ -939,7 +942,7 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
     phase,
     context,
     budgetAttribution: context.direction === 'expense' ? budgetAttribution({ entries: evidence.map(({ entry }) => entry) }) : { status: 'unassigned', budgetId: null, budgetIds: [] },
-    reconciliationOnly: FLOW_KEYS.every((metric) => flowAmountsFor(context, 1, currencyDecimalPlaces)[metric] === 0),
+    reconciliationOnly: !bundleComponentIsCumulativeMaterial(representative, currencyDecimalPlaces),
     evidenceEntryIds: evidence.map(({ entry }) => String(entry.id)).sort(),
     evidenceTransactionIds: unique(evidence.map(({ entry }) => String(entry.transactionId))).sort(),
     samples: evidence.map(({ entry, occurrence }) => ({ id: String(entry.id), transactionId: String(entry.transactionId), date: occurrence.date, value: amountOf(entry) })),
@@ -1013,11 +1016,13 @@ const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, 
     const phaseOnlyKeys = new Set([...phaseComponents.middle, ...phaseComponents.monthEnd])
     const eligibleSignature = ({ components }) =>
       [...components.keys()]
-        .filter((key) => !phaseOnlyKeys.has(key) && bundleComponentIsFlowMaterial(components.get(key), currencyDecimalPlaces))
+        .filter((key) => !phaseOnlyKeys.has(key) && bundleComponentIsCumulativeMaterial(components.get(key), currencyDecimalPlaces))
         .sort()
         .join('||')
     const latestPairStableMaterialKeys = unique(latestPair.flatMap(({ components }) => [...components.keys()]))
-      .filter((key) => !phaseOnlyKeys.has(key) && latestPair.every(({ components }) => components.has(key)) && bundleComponentIsFlowMaterial(latestPair[0].components.get(key), currencyDecimalPlaces))
+      .filter(
+        (key) => !phaseOnlyKeys.has(key) && latestPair.every(({ components }) => components.has(key)) && bundleComponentIsCumulativeMaterial(latestPair[0].components.get(key), currencyDecimalPlaces),
+      )
       .sort()
     const pairSignaturesAgree = eligibleSignature(latestPair[0]) === eligibleSignature(latestPair[1])
     const pairAmountsAgree = latestPairStableMaterialKeys.every(
@@ -1215,7 +1220,7 @@ const projectRecurringBundles = ({ bundles, currencyDecimalPlaces }) =>
   bundles.flatMap((bundle) =>
     bundle.projectedDates.flatMap(({ date, phase }) =>
       bundle.components
-        .filter((component) => !component.reconciliationOnly && (component.phase === 'both' || component.phase === phase))
+        .filter((component) => bundleComponentHasProjectedFlow(component, currencyDecimalPlaces) && (component.phase === 'both' || component.phase === phase))
         .map((component) => ({
           ...projectedEntry({
             id: `projected:inferred:${bundle.id}:${phase}:${component.id}:${date}`,
