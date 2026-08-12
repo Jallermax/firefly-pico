@@ -821,7 +821,10 @@ test('keeps an authoritative exact-evidence obligation when its payroll componen
 
   assert.equal(result.audit.bundles.length, 1)
   const bundle = result.audit.bundles[0]
-  assert.equal(bundle.components.some(({ label }) => label === 'State payroll tax'), false)
+  assert.equal(
+    bundle.components.some(({ label }) => label === 'State payroll tax'),
+    false,
+  )
   assert.ok(bundle.inconsistentComponentKeys.some((key) => key.includes('state payroll tax')))
   assert.ok(stateTaxes.every(({ id }) => !bundle.entryIds.includes(id)))
   assert.equal(result.audit.recurring.suppressedCandidateIds.includes(candidate.id), false)
@@ -832,6 +835,35 @@ test('keeps an authoritative exact-evidence obligation when its payroll componen
       { date: '2026-08-31', amount: 472.5 },
     ],
   )
+})
+
+test('still suppresses inferred exact evidence for a stable inconsistent payroll component', () => {
+  const history = duplicateContextPayrollHistory({ missingLatestStateTax: true })
+  const stateTaxes = history.filter(({ description }) => description === 'State payroll tax')
+  const base = definedCandidate({ id: 'state-payroll-tax', sourceAccountId: 'checking', destinationAccountId: 'tax-authority', date: '2026-08-14', amount: 472.5 })
+  const candidate = {
+    ...base,
+    id: 'inferred:state-payroll-tax',
+    identity: { ...base.identity, categoryId: 'taxes', payee: 'state payroll tax' },
+    source: { type: 'inferred', id: 'inferred:state-payroll-tax', label: 'State payroll tax', authoritative: false },
+    confidence: { score: 0.9, factors: {}, reasons: ['Recurring split evidence'] },
+    evidence: { entryIds: stateTaxes.map(({ id }) => id), transactionIds: stateTaxes.map(({ transactionId }) => transactionId), dates: stateTaxes.map(({ date }) => date) },
+  }
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [candidate],
+    ...normalizedCandidateInputs([candidate], { ...accountContexts, 'tax-authority': { kind: 'expense', includeNetWorth: false } }),
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.ok(result.audit.recurring.suppressedCandidateIds.includes(candidate.id))
+  assert.equal(
+    result.dailyProjectedEntries.some(({ candidateId }) => candidateId === candidate.id),
+    false,
+  )
+  assert.ok(stateTaxes.every(({ id }) => !result.audit.recurring.removedHistoryEntryIds.includes(id)))
 })
 
 test('discovers legacy grouped payroll when same-context components have distinct stable descriptions', () => {
@@ -845,16 +877,26 @@ test('discovers legacy grouped payroll when same-context components have distinc
   })
 
   assert.equal(result.audit.bundles.length, 1)
-  assert.deepEqual(
-    result.dailyProjectedEntries.filter(({ destinationAccountId }) => destinationAccountId === 'tax-authority').map(({ bundleLabel, amount }) => ({ bundleLabel, amount })),
-    [
-      { bundleLabel: 'Local payroll tax', amount: 157.5 },
-      { bundleLabel: 'Local payroll tax', amount: 157.5 },
-      { bundleLabel: 'State payroll tax', amount: 472.5 },
-      { bundleLabel: 'State payroll tax', amount: 472.5 },
-    ],
-  )
-  assert.deepEqual(result.audit.recurring.conflictingTransactionIds, [])
+  const taxes = result.dailyProjectedEntries.filter(({ destinationAccountId }) => destinationAccountId === 'tax-authority')
+  assert.deepEqual(Object.fromEntries(['Local payroll tax', 'State payroll tax'].map((label) => [label, taxes.filter(({ bundleLabel }) => bundleLabel === label).map(({ amount }) => amount)])), {
+    'Local payroll tax': [157.5, 157.5],
+    'State payroll tax': [472.5, 472.5],
+  })
+  assert.deepEqual(result.audit.recurring.conflictingTransactionIds ?? [], [])
+})
+
+test('rejects legacy grouped payroll when same-context components remain indistinguishable', () => {
+  const history = legacyGroupedDuplicateContextPayrollHistory().map((item) => (item.destinationAccount.id === 'tax-authority' ? { ...item, description: 'Payroll tax' } : item))
+  const result = buildRemainingActivityForecast({
+    ledger: ledger(history, { startMonth: '2026-05', endDate: '2026-08-11' }),
+    candidates: [],
+    historyMonths: 3,
+    today: '2026-08-11',
+    endDate: '2026-08-31',
+  })
+
+  assert.deepEqual(result.audit.bundles, [])
+  assert.equal(result.audit.recurring.conflictingTransactionIds.length, 6)
 })
 
 test('keeps distinct non-Latin descriptions as stable duplicate-context component identities', () => {
@@ -870,10 +912,8 @@ test('keeps distinct non-Latin descriptions as stable duplicate-context componen
   })
 
   assert.equal(result.audit.bundles.length, 1)
-  assert.deepEqual(
-    result.dailyProjectedEntries.filter(({ destinationAccountId }) => destinationAccountId === 'tax-authority').map(({ bundleLabel }) => bundleLabel),
-    ['Налог штата', 'Налог штата', '地方税', '地方税'],
-  )
+  const labels = result.dailyProjectedEntries.filter(({ destinationAccountId }) => destinationAccountId === 'tax-authority').map(({ bundleLabel }) => bundleLabel)
+  assert.deepEqual(Object.fromEntries(['Налог штата', '地方税'].map((label) => [label, labels.filter((value) => value === label).length])), { 'Налог штата': 2, 地方税: 2 })
 })
 
 test('rejects indistinguishable duplicate-context rows without choosing an amount or input-order winner', () => {

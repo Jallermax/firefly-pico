@@ -190,13 +190,11 @@ const conflictingRecurringTransactionIds = (entries) => {
     if (!entry.transactionId || !entry.date || !usableLedgerValue(entry)) continue
     const transactionId = String(entry.transactionId)
     const dates = groups.get(transactionId) ?? new Map()
-    const contexts = dates.get(entry.date) ?? []
-    contexts.push(contextKey(projectionContext(entry).context))
-    dates.set(entry.date, contexts)
+    dates.set(entry.date, [...(dates.get(entry.date) ?? []), entry])
     groups.set(transactionId, dates)
   }
   return [...groups.entries()]
-    .filter(([, dates]) => dates.size > 1 || [...dates.values()].some((contexts) => new Set(contexts).size !== contexts.length))
+    .filter(([, dates]) => dates.size > 1 || [...dates.values()].some((dateEntries) => recurringBundleComponents(dateEntries).ambiguousKeys.length > 0))
     .map(([transactionId]) => transactionId)
     .sort()
 }
@@ -807,7 +805,13 @@ const precedingBusinessDay = (value) => {
 
 const bundleEntryCurrency = (entry) => String(entry?.conversion?.displayCurrency ?? entry?.conversion?.sourceCurrency ?? '')
 
-const bundleComponentDescription = (entry) => normalizeIdentityText(entry?.description)
+const bundleComponentDescription = (entry) =>
+  String(entry?.description ?? '')
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
 
 const recurringBundleComponents = (entries) => {
   const byContext = new Map()
@@ -942,7 +946,8 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
 
 const bundleCandidateMatchesAdmittedComponent = ({ candidate, bundle, amount }) => {
   const explicitEntryIds = new Set((candidate?.evidence?.entryIds ?? []).map(String))
-  if (bundle.candidateMatchingEntryIds.some((id) => explicitEntryIds.has(String(id)))) return true
+  const matchingEntryIds = candidate?.source?.authoritative === true ? bundle.matchingEntryIds : bundle.candidateMatchingEntryIds
+  if (matchingEntryIds.some((id) => explicitEntryIds.has(String(id)))) return true
   const transactionIds = new Set((candidate?.evidence?.transactionIds ?? []).map(String))
   if (transactionIds.size === 0) return false
   const candidateContext = projectionContext(candidate).context
