@@ -262,6 +262,25 @@ const dailyTransaction = ({ id, date, amount, source, destination, categoryId = 
     ],
   },
 })
+const dailySplitTransaction = ({ id, date, splits }) => ({
+  id,
+  attributes: {
+    transactions: splits.map(({ amount, source, destination, categoryId = null, budgetId = null, description = null, tags = [], currencyCode = 'USD' }, index) => ({
+      transaction_journal_id: `${id}-journal-${index}`,
+      amount: String(amount),
+      currency_code: currencyCode,
+      date,
+      description,
+      category_id: categoryId,
+      budget_id: budgetId,
+      source_id: source.id,
+      destination_id: destination.id,
+      accountSource: source,
+      accountDestination: destination,
+      tags,
+    })),
+  },
+})
 const deferred = () => {
   let resolve
   const promise = new Promise((resolvePromise) => {
@@ -2623,6 +2642,138 @@ test('keeps actual rows through today, dated known evidence after today, and var
   assert.equal(store.dailyForecast?.audit.remainingExpectedIds.length, store.financialTrend.forecast.audit.recurring.remainingExpectedIds.length)
 })
 
+test('projects dated payroll and bill events while keeping the variable envelope out of daily bars and the Available path', async () => {
+  now = new Date(2026, 7, 10, 12)
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const revenue = { ...analyticsAccount('revenue', 'revenue'), attributes: { ...analyticsAccount('revenue', 'revenue').attributes, name: 'Employer' } }
+  const tax = { ...analyticsAccount('tax', 'expense'), attributes: { ...analyticsAccount('tax', 'expense').attributes, name: 'Payroll taxes' } }
+  const bill = analyticsAccount('bill', 'expense')
+  const groceries = analyticsAccount('groceries', 'expense')
+  accountStore.accountList = [checking, revenue, tax, bill, groceries]
+  budgetStore.budgetList = [
+    {
+      id: 'groceries',
+      attributes: { active: true, auto_budget_type: { fireflyCode: 'reset' }, auto_budget_period: { fireflyCode: 'monthly' }, amount: '90' },
+    },
+  ]
+  const payroll = (id, date) =>
+    dailySplitTransaction({
+      id,
+      date,
+      splits: [
+        { amount: 1000, source: revenue, destination: checking, description: 'Base pay', tags: ['paystub/payroll'] },
+        { amount: 200, source: checking, destination: tax, categoryId: 'taxes', budgetId: 'payroll-tax', description: 'Payroll taxes', tags: ['paystub/payroll'] },
+      ],
+    })
+  transactionResult = [
+    payroll('payroll-may-middle', '2026-05-15'),
+    payroll('payroll-may-end', '2026-05-29'),
+    payroll('payroll-june-middle', '2026-06-15'),
+    payroll('payroll-june-end', '2026-06-30'),
+    payroll('payroll-july-middle', '2026-07-15'),
+    payroll('payroll-july-end', '2026-07-31'),
+    dailyTransaction({ id: 'groceries-may', date: '2026-05-07', amount: 80, source: checking, destination: groceries, categoryId: 'groceries', budgetId: 'groceries' }),
+    dailyTransaction({ id: 'groceries-june', date: '2026-06-12', amount: 90, source: checking, destination: groceries, categoryId: 'groceries', budgetId: 'groceries' }),
+    dailyTransaction({ id: 'groceries-july', date: '2026-07-24', amount: 100, source: checking, destination: groceries, categoryId: 'groceries', budgetId: 'groceries' }),
+    dailyTransaction({ id: 'actual-income', date: '2026-08-05', amount: 100, source: revenue, destination: checking }),
+  ]
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'known-bill',
+        attributes: {
+          active: true,
+          name: 'Known bill',
+          amount_avg: '60',
+          currency_code: 'USD',
+          next_expected_match: '2026-08-20',
+          transactions: [{ source_id: checking.id, destination_id: bill.id, category_id: 'utilities', budget_id: 'groceries', amount: '60', currency_code: 'USD' }],
+        },
+      },
+    ],
+  })
+  const inputSnapshot = structuredClone(transactionResult)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(transactionResult, inputSnapshot)
+  assert.deepEqual(
+    store.dailyForecast.barGroups.map(({ id }) => id),
+    ['inflow', 'outflow'],
+  )
+  assert.deepEqual(
+    store.dailyForecast.eventSummaries.map(({ date }) => [...new Set([date])]),
+    [['2026-08-14'], ['2026-08-20'], ['2026-08-31']],
+  )
+  assert.deepEqual(
+    store.dailyForecast.eventSummaries.filter(({ bundleId }) => bundleId).map(({ date }) => date),
+    ['2026-08-14', '2026-08-31'],
+  )
+  assert.equal(store.dailyForecast.variableEnvelope.uses, 90)
+  const groceryEnvelope = store.dailyForecast.variableEnvelope.items.find(({ budgetId }) => budgetId === 'groceries')
+  assert.equal(groceryEnvelope.remaining, 150)
+  assert.equal(groceryEnvelope.known, 60)
+  assert.equal(groceryEnvelope.flowAmounts.expenses, 90)
+  assert.equal(groceryEnvelope.date, undefined)
+  assert.equal(
+    store.dailyForecast.days.flatMap(({ projected }) => projected?.entries ?? []).some(({ id }) => id === groceryEnvelope.id),
+    false,
+  )
+  assert.equal(
+    store.dailyForecast.barGroups.flatMap(({ points }) => points).some(({ entries }) => entries.some(({ id }) => id === groceryEnvelope.id)),
+    false,
+  )
+  assert.equal(store.dailyForecast.summary.outflow.projected, 550)
+  assert.equal(store.dailyForecast.variableEnvelope.availableCashChange, -90)
+  assert.equal(store.dailyForecast.availableLine.excludesVariableEnvelope, true)
+  assert.equal(store.dailyForecast.availableLine.points.at(-1).value, 1640)
+  assert.equal(store.dailyForecast.monthlyTotals.availableCashChange, 1550)
+  const payrollEvent = store.dailyForecast.eventSummaries.find(({ date }) => date === '2026-08-14')
+  assert.equal(payrollEvent.sourceKind, 'inferred')
+  assert.equal(typeof payrollEvent.bundleId, 'string')
+  assert.equal(typeof payrollEvent.sourceId, 'string')
+  assert.equal(payrollEvent.confidence.level, 'medium')
+  assert.deepEqual(payrollEvent.transactionIds, [])
+  assert.equal(payrollEvent.sourceIds.includes(payrollEvent.sourceId), true)
+  assert.equal(payrollEvent.evidenceIds.includes(payrollEvent.bundleId), true)
+  assert.deepEqual(payrollEvent.components.map(({ bundleLabel }) => bundleLabel).sort(), ['Employer', 'Payroll taxes'])
+  assert.equal(
+    payrollEvent.components.every(({ transactionIds }) => transactionIds.length === 0),
+    true,
+  )
+  assert.equal(
+    payrollEvent.components.every(({ bundleComponentId, evidenceIds }) => bundleComponentId && evidenceIds.length > 0),
+    true,
+  )
+  assert.deepEqual(store.dailyForecast.days.find(({ date }) => date === '2026-08-05').actual.transactionIds, ['actual-income'])
+  const orderedProjection = JSON.stringify({
+    barGroups: store.dailyForecast.barGroups,
+    availableLine: store.dailyForecast.availableLine,
+    eventSummaries: store.dailyForecast.eventSummaries,
+    variableEnvelope: store.dailyForecast.variableEnvelope,
+    reconciliation: store.dailyForecast.reconciliation,
+  })
+  const reversedInput = structuredClone(transactionResult).reverse()
+  const reversedSnapshot = structuredClone(reversedInput)
+  transactionResult = reversedInput
+
+  await store.refresh()
+
+  assert.equal(
+    JSON.stringify({
+      barGroups: store.dailyForecast.barGroups,
+      availableLine: store.dailyForecast.availableLine,
+      eventSummaries: store.dailyForecast.eventSummaries,
+      variableEnvelope: store.dailyForecast.variableEnvelope,
+      reconciliation: store.dailyForecast.reconciliation,
+    }),
+    orderedProjection,
+  )
+  assert.deepEqual(reversedInput, reversedSnapshot)
+})
+
 test('suppresses fulfilled recurring activity from projected daily rows without losing its actual transaction ID', async () => {
   now = new Date(2026, 7, 10, 12)
   const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
@@ -2878,6 +3029,85 @@ test('applies per-metric unavailability to future daily components without blank
   assert.equal(store.dailyForecastState.isUnavailable, false)
   assert.deepEqual(store.dailyForecastState.unavailableMetricIds, ['expenses'])
   assert.deepEqual(store.dailyForecastState.unavailableCandidateIds, ['defined:subscription:foreign-expense'])
+})
+
+test('isolates one unavailable expense event without erasing a valid income bundle, later bars, or actual transaction identity', async () => {
+  now = new Date(2026, 7, 10, 12)
+  currencyStore.exchangeRates = { rates: { USD: 1 } }
+  const checking = analyticsAccount('checking', 'asset', 'defaultAsset', true)
+  const revenue = analyticsAccount('revenue', 'revenue')
+  const tax = analyticsAccount('tax', 'expense')
+  const expense = analyticsAccount('expense', 'expense')
+  accountStore.accountList = [checking, revenue, tax, expense]
+  const payroll = (id, date) =>
+    dailySplitTransaction({
+      id,
+      date,
+      splits: [
+        { amount: 1000, source: revenue, destination: checking, description: 'Base pay', tags: ['paystub/payroll'] },
+        { amount: 200, source: checking, destination: tax, categoryId: 'taxes', description: 'Payroll taxes', tags: ['paystub/payroll'] },
+      ],
+    })
+  transactionResult = [
+    payroll('payroll-may-middle', '2026-05-15'),
+    payroll('payroll-may-end', '2026-05-29'),
+    payroll('payroll-june-middle', '2026-06-15'),
+    payroll('payroll-june-end', '2026-06-30'),
+    payroll('payroll-july-middle', '2026-07-15'),
+    payroll('payroll-july-end', '2026-07-31'),
+    dailyTransaction({ id: 'actual-income', date: '2026-08-05', amount: 50, source: revenue, destination: checking }),
+  ]
+  subscriptionResult = async () => ({
+    ok: true,
+    data: [
+      {
+        id: 'foreign-expense',
+        attributes: {
+          active: true,
+          amount_avg: '60',
+          currency_code: 'EUR',
+          next_expected_match: '2026-08-20',
+          transactions: [{ source_id: checking.id, destination_id: expense.id, amount: '60', currency_code: 'EUR' }],
+        },
+      },
+    ],
+  })
+  const inputSnapshot = structuredClone(transactionResult)
+  const store = (analyticsStore = useAnalyticsStore())
+
+  await store.init()
+
+  assert.deepEqual(transactionResult, inputSnapshot)
+  const middleIncome = store.dailyForecast.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-14')
+  const middleUses = store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-14')
+  const unavailableUse = store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-20')
+  const laterEmptyUse = store.dailyForecast.barGroups.find(({ id }) => id === 'outflow').points.find(({ x }) => x === '2026-08-21')
+  const monthEndIncome = store.dailyForecast.barGroups.find(({ id }) => id === 'inflow').points.find(({ x }) => x === '2026-08-31')
+  assert.equal(middleIncome.value, 1000)
+  assert.equal(middleUses.value, -200)
+  assert.equal(unavailableUse.value, null)
+  assert.equal(laterEmptyUse.value, 0)
+  assert.equal(monthEndIncome.value, 1000)
+  assert.equal(store.dailyForecast.days.find(({ date }) => date === '2026-08-20').projected.components.expenses, null)
+  assert.equal(store.dailyForecast.days.find(({ date }) => date === '2026-08-20').projected.components.income, 0)
+  assert.equal(store.dailyForecast.days.find(({ date }) => date === '2026-08-21').projected.components.expenses, 0)
+  assert.deepEqual(store.dailyForecast.days.find(({ date }) => date === '2026-08-05').actual.transactionIds, ['actual-income'])
+  assert.equal(
+    store.dailyForecast.eventSummaries.every(({ transactionIds }) => transactionIds.length === 0),
+    true,
+  )
+  assert.deepEqual(store.dailyForecast.audit.unavailableEvents, [
+    {
+      date: '2026-08-20',
+      sourceKind: 'defined',
+      sourceId: 'foreign-expense',
+      candidateId: 'defined:subscription:foreign-expense',
+      affectedMetricIds: ['expenses'],
+    },
+  ])
+  assert.equal(store.dailyForecastState.isBlockingUnavailable, false)
+  assert.equal(store.dailyForecastState.isPartiallyUnavailable, true)
+  assert.equal(store.dailyForecastState.isUnavailable, false)
 })
 
 test('labels a defensible chart with account-dependent unresolved forecast inputs as partial', async () => {

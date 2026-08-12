@@ -98,6 +98,69 @@ const sortDailyEntries = (entries, keys, decimalPlaces) =>
     const rightValue = dailyEntryValue(right, keys, decimalPlaces)
     return Math.abs(rightValue ?? 0) - Math.abs(leftValue ?? 0) || String(left.id).localeCompare(String(right.id))
   })
+const buildDailyEventSummaries = (days, decimalPlaces) => {
+  const groups = new Map()
+  for (const day of days) {
+    for (const entry of day.projected?.entries ?? []) {
+      const identity = entry.bundleId ?? entry.candidateId ?? entry.sourceId ?? entry.id
+      const key = `${day.date}|${entry.sourceKind}|${identity}`
+      groups.set(key, [...(groups.get(key) ?? []), entry])
+    }
+  }
+  return [...groups.entries()]
+    .map(([id, entries]) => {
+      const components = emptyDailyComponents()
+      entries.forEach((entry) => addDailyComponents(components, entry.flowAmounts, decimalPlaces))
+      const sourceIds = [
+        ...new Set(
+          entries
+            .map(({ sourceId }) => sourceId)
+            .filter(Boolean)
+            .map(String),
+        ),
+      ].sort()
+      const candidateIds = [
+        ...new Set(
+          entries
+            .map(({ candidateId }) => candidateId)
+            .filter(Boolean)
+            .map(String),
+        ),
+      ].sort()
+      const evidenceIds = [...new Set(entries.flatMap(projectedEvidenceIds))].sort()
+      const bundleIds = [
+        ...new Set(
+          entries
+            .map(({ bundleId }) => bundleId)
+            .filter(Boolean)
+            .map(String),
+        ),
+      ]
+      const sources = dailyTotal(components, DAILY_SOURCE_KEYS, decimalPlaces)
+      const uses = dailyTotal(components, DAILY_USE_KEYS, decimalPlaces)
+      return {
+        id,
+        date: entries[0].date,
+        sourceKind: entries[0].sourceKind,
+        sourceId: sourceIds.length === 1 ? sourceIds[0] : null,
+        sourceIds,
+        candidateId: candidateIds.length === 1 ? candidateIds[0] : null,
+        candidateIds,
+        bundleId: bundleIds.length === 1 ? bundleIds[0] : null,
+        bundleLabel: entries[0].sourceLabel ?? null,
+        confidence: dailyConfidence(entries[0].confidence),
+        reasons: [...new Set(entries.flatMap(({ reasons = [] }) => reasons))].sort(),
+        evidenceIds,
+        transactionIds: [],
+        components: entries.map((entry) => ({ ...entry, transactionIds: [], evidenceIds: [...(entry.evidenceIds ?? [])].map(String).sort() })),
+        flowAmounts: components,
+        sources,
+        uses,
+        availableCashChange: Number.isFinite(sources) && Number.isFinite(uses) ? roundDaily(sources - uses, decimalPlaces) : null,
+      }
+    })
+    .sort((left, right) => left.date.localeCompare(right.date) || left.sourceKind.localeCompare(right.sourceKind) || left.id.localeCompare(right.id))
+}
 export const summarizeUnavailableEvidence = (records) => {
   const metricIds = [...new Set(records.flatMap(({ metricIds = [] }) => metricIds).map(String))].sort()
   const sourceIds = [...new Set(records.flatMap(({ sourceIds = [], candidateIds = [] }) => [...sourceIds, ...candidateIds]).map(String))].filter((id) => !id.startsWith('projected:')).sort()
@@ -171,26 +234,32 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
   const candidateById = new Map(candidates.map((candidate) => [String(candidate.id), candidate]))
   const unresolvedByCandidateId = new Map((forecast.audit.recurring.unresolvedCandidates ?? []).map((candidate) => [String(candidate.candidateId), candidate]))
   const fulfilledExpectedIds = new Set(forecast.audit.recurring.fulfilledExpectedIds ?? [])
+  const unavailableEvents = []
   for (const candidateId of forecast.audit.unavailable.candidateIds) {
     const candidate = candidateById.get(String(candidateId))
+    const unresolved = unresolvedByCandidateId.get(String(candidateId))
     const sourceKind = candidate?.source?.authoritative ? 'defined' : 'inferred'
-    const affectedMetricIds = unresolvedByCandidateId.get(String(candidateId))?.affectedMetricIds ?? DAILY_FLOW_KEYS
+    const affectedMetricIds = [...(unresolved?.affectedMetricIds ?? DAILY_FLOW_KEYS)].filter((key) => DAILY_FLOW_KEYS.includes(key)).sort()
     const expectedDates = (candidate?.expectedDates ?? [])
       .filter((date) => date.startsWith(monthKey) && !fulfilledExpectedIds.has(`expected:${candidate.id}:${date}`))
       .map((date) => (date <= todayKey ? futureDates[0] : date))
       .filter(Boolean)
-    addProjectedUnavailableFlowKeys(sourceKind, expectedDates.length > 0 ? [...new Set(expectedDates)] : futureDates, affectedMetricIds)
+    const affectedDates = expectedDates.length > 0 ? [...new Set(expectedDates)].sort() : futureDates
+    addProjectedUnavailableFlowKeys(sourceKind, affectedDates, affectedMetricIds)
+    affectedDates.forEach((date) =>
+      unavailableEvents.push({
+        date,
+        sourceKind,
+        sourceId: String(unresolved?.sourceId ?? candidate?.source?.id ?? candidateId),
+        candidateId: String(candidateId),
+        affectedMetricIds,
+      }),
+    )
   }
   const historyMonths = new Set(forecast.audit.history.months ?? [])
   const unavailableEntryIds = new Set(forecast.audit.unavailable.entryIds ?? [])
-  for (const entry of ledger.entries.filter((item) => historyMonths.has(item.monthKey) && unavailableEntryIds.has(String(item.id)))) {
-    addProjectedUnavailableFlowKeys('variable', futureDates, classifyForecastFlowAmounts({ entry, currencyDecimalPlaces }).affectedMetricIds)
-  }
-  addProjectedUnavailableFlowKeys(
-    'variable',
-    futureDates,
-    DAILY_FLOW_KEYS.filter((key) => forecast.statusByMetric[key] === 'insufficientHistory'),
-  )
+  if (forecast.status === 'insufficientHistory' && forecast.dailyProjectedEntries.length === 0 && (forecast.variableEnvelopes ?? []).length === 0)
+    addProjectedUnavailableFlowKeys('variable', futureDates, DAILY_FLOW_KEYS)
   futureDates.forEach((date) => {
     const components = dayByDate.get(date).projected.components
     DAILY_FLOW_KEYS.forEach((key) => {
@@ -265,6 +334,16 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
   const barGroups = [buildDirectionGroup('inflow', 'sources', DAILY_SOURCE_KEYS, 1), buildDirectionGroup('outflow', 'uses', DAILY_USE_KEYS, -1)]
   const envelopeComponents = emptyDailyComponents()
   for (const envelope of forecast.variableEnvelopes ?? []) addDailyComponents(envelopeComponents, envelope.flowAmounts ?? emptyDailyComponents(), currencyDecimalPlaces)
+  const envelopeSources = dailyTotal(envelopeComponents, DAILY_SOURCE_KEYS, currencyDecimalPlaces)
+  const envelopeUses = dailyTotal(envelopeComponents, DAILY_USE_KEYS, currencyDecimalPlaces)
+  const variableEnvelope = {
+    components: envelopeComponents,
+    sources: envelopeSources,
+    uses: envelopeUses,
+    availableCashChange: Number.isFinite(envelopeSources) && Number.isFinite(envelopeUses) ? roundDaily(envelopeSources - envelopeUses, currencyDecimalPlaces) : null,
+    items: structuredClone(forecast.variableEnvelopes ?? []),
+  }
+  const eventSummaries = buildDailyEventSummaries(days, currencyDecimalPlaces)
 
   const unavailableTransactionIds = [
     ...new Set(days.flatMap(({ actual }) => (actual?.entries ?? []).filter(({ status }) => status === 'unavailable').flatMap(({ transactionIds }) => transactionIds))),
@@ -358,6 +437,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     openingValue: 0,
     days,
     barGroups,
+    eventSummaries,
     summary: {
       inflow: summaryValue(DAILY_SOURCE_KEYS, monthlyTotals.sources),
       outflow: summaryValue(DAILY_USE_KEYS, monthlyTotals.uses),
@@ -367,6 +447,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
       id: 'availableCashChange',
       labelKey: 'analytics.daily_forecast.available_change',
       openingValue: 0,
+      excludesVariableEnvelope: true,
       points: days.map((day) => ({
         x: day.date,
         xLabel: day.label,
@@ -382,6 +463,7 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
     status: forecast.status,
     statusByMetric: forecast.statusByMetric,
     monthlyTotals,
+    variableEnvelope,
     variableEnvelopes: forecast.variableEnvelopes ?? [],
     reconciliation: { status: reconciliationStatus, componentDeltas, availableCashDelta },
     audit: {
@@ -390,6 +472,9 @@ const buildDailyForecastProjection = ({ ledger, forecast, candidates, today, cur
       unavailableTransactionIds: [...new Set(unavailableTransactionIds)],
       unavailableEntryIds: forecast.audit.unavailable.entryIds,
       unavailableCandidateIds: forecast.audit.unavailable.candidateIds,
+      unavailableEvents: unavailableEvents.sort(
+        (left, right) => left.date.localeCompare(right.date) || left.sourceKind.localeCompare(right.sourceKind) || left.candidateId.localeCompare(right.candidateId),
+      ),
       missingCurrencies: forecast.audit.unavailable.missingCurrencies,
       unclassifiedValue: hasUnclassifiedActivity ? unclassifiedValue : 0,
       unclassifiedTransactionIds,
