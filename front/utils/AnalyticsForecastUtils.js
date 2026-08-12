@@ -805,6 +805,88 @@ const precedingBusinessDay = (value) => {
   return formatDate(result)
 }
 
+const bundleEntryCurrency = (entry) => String(entry?.conversion?.displayCurrency ?? entry?.conversion?.sourceCurrency ?? '')
+
+const recurringBundleOccurrences = ({ entries, months = null, conflictingTransactionIds, currencyDecimalPlaces }) => {
+  const conflictingTransactions = new Set(conflictingTransactionIds)
+  const byDate = new Map()
+  for (const entry of entries) {
+    if ((months && !months.includes(entry.monthKey)) || !usableLedgerValue(entry) || !entry.transactionId || conflictingTransactions.has(String(entry.transactionId)) || !entry.date) continue
+    byDate.set(String(entry.date), [...(byDate.get(String(entry.date)) ?? []), entry])
+  }
+
+  const occurrences = []
+  for (const [date, dateEntries] of [...byDate.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const sortedEntries = dateEntries.sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    const anchorGroups = new Map()
+    const anchorGroupByEntryId = new Map()
+    for (const entry of sortedEntries) {
+      const context = projectionContext(entry).context
+      const flows = flowAmountsFor(context, amountOf(entry), currencyDecimalPlaces)
+      if (flows.income <= 0 || flows.availableCashChange <= 0 || !context.sourceAccountId || !context.destinationAccountId) continue
+      const key = [context.sourceAccountId, context.destinationAccountId, bundleEntryCurrency(entry)].join('|')
+      const group = anchorGroups.get(key) ?? { key, context, entries: [] }
+      group.entries.push(entry)
+      anchorGroups.set(key, group)
+      anchorGroupByEntryId.set(String(entry.id), key)
+    }
+
+    const groups = [...anchorGroups.values()]
+      .map((group) => ({
+        ...group,
+        entries: group.entries.sort(
+          (left, right) =>
+            flowAmountsFor(projectionContext(right).context, amountOf(right), currencyDecimalPlaces).availableCashChange -
+              flowAmountsFor(projectionContext(left).context, amountOf(left), currencyDecimalPlaces).availableCashChange || String(left.id).localeCompare(String(right.id)),
+        ),
+      }))
+      .sort((left, right) => left.key.localeCompare(right.key))
+    const assigned = new Map(groups.map(({ key }) => [key, []]))
+
+    for (const entry of sortedEntries) {
+      const ownAnchorGroup = anchorGroupByEntryId.get(String(entry.id))
+      if (ownAnchorGroup) {
+        assigned.get(ownAnchorGroup).push(entry)
+        continue
+      }
+      const context = projectionContext(entry).context
+      const currency = bundleEntryCurrency(entry)
+      const matchingGroups = groups.filter(
+        (group) =>
+          bundleEntryCurrency(group.entries[0]) === currency &&
+          (context.sourceAccountId === group.context.destinationAccountId ||
+            context.sourceAccountId === group.context.sourceAccountId ||
+            context.destinationAccountId === group.context.destinationAccountId),
+      )
+      if (matchingGroups.length === 1) assigned.get(matchingGroups[0].key).push(entry)
+    }
+
+    for (const group of groups) {
+      const cohort = assigned.get(group.key).sort((left, right) => String(left.id).localeCompare(String(right.id)))
+      const components = new Map()
+      let duplicateComponent = false
+      for (const entry of cohort) {
+        const key = contextKey(projectionContext(entry).context)
+        if (components.has(key)) duplicateComponent = true
+        components.set(key, entry)
+      }
+      if (duplicateComponent || components.size < 2) continue
+      const anchor = group.entries[0]
+      const anchorKey = contextKey(projectionContext(anchor).context)
+      occurrences.push({
+        date,
+        monthKey: String(anchor.monthKey),
+        transactionId: String(anchor.transactionId),
+        transactionIds: unique(cohort.map(({ transactionId }) => String(transactionId))).sort(),
+        entries: cohort,
+        components,
+        anchorKey,
+      })
+    }
+  }
+  return occurrences.sort((left, right) => left.date.localeCompare(right.date) || left.transactionId.localeCompare(right.transactionId) || left.anchorKey.localeCompare(right.anchorKey))
+}
+
 const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, currencyDecimalPlaces }) => {
   const evidence = occurrences
     .map((occurrence) => ({ occurrence, entry: occurrence.components.get(key) }))
@@ -822,49 +904,15 @@ const recurringBundleComponent = ({ key, occurrences, phase = 'both', bundleId, 
     budgetAttribution: context.direction === 'expense' ? budgetAttribution({ entries: evidence.map(({ entry }) => entry) }) : { status: 'unassigned', budgetId: null, budgetIds: [] },
     reconciliationOnly: FLOW_KEYS.every((metric) => flowAmountsFor(context, 1, currencyDecimalPlaces)[metric] === 0),
     evidenceEntryIds: evidence.map(({ entry }) => String(entry.id)).sort(),
-    evidenceTransactionIds: unique(evidence.map(({ occurrence }) => occurrence.transactionId)).sort(),
+    evidenceTransactionIds: unique(evidence.map(({ entry }) => String(entry.transactionId))).sort(),
     samples: evidence.map(({ entry, occurrence }) => ({ id: String(entry.id), date: occurrence.date, value: amountOf(entry) })),
   }
 }
 
-const discoverRecurringBundles = ({ entries, months, excludedEntryIds, conflictingTransactionIds, today, endDate, currencyDecimalPlaces }) => {
-  const excluded = new Set(excludedEntryIds)
-  const conflictingTransactions = new Set(conflictingTransactionIds)
-  const grouped = new Map()
-  for (const entry of entries) {
-    if (
-      !months.includes(entry.monthKey) ||
-      excluded.has(String(entry.id)) ||
-      !usableLedgerValue(entry) ||
-      !entry.transactionId ||
-      conflictingTransactions.has(String(entry.transactionId)) ||
-      !entry.date
-    )
-      continue
-    const key = `${entry.date}|${entry.transactionId}`
-    grouped.set(key, [...(grouped.get(key) ?? []), entry])
-  }
-
+const discoverRecurringBundles = ({ entries, months, conflictingTransactionIds, today, endDate, currencyDecimalPlaces }) => {
   const families = new Map()
-  for (const group of [...grouped.values()]) {
-    const sortedEntries = group.sort((left, right) => String(left.id).localeCompare(String(right.id)))
-    const currencies = unique(sortedEntries.map(({ conversion }) => conversion?.displayCurrency ?? conversion?.sourceCurrency)).sort()
-    if (currencies.length > 1) continue
-    const components = new Map()
-    let duplicateComponent = false
-    for (const entry of sortedEntries) {
-      const key = contextKey(projectionContext(entry).context)
-      if (components.has(key)) duplicateComponent = true
-      components.set(key, entry)
-    }
-    if (duplicateComponent || components.size < 2) continue
-    const anchor = sortedEntries
-      .map((entry) => ({ entry, flowAmounts: flowAmountsFor(projectionContext(entry).context, amountOf(entry), currencyDecimalPlaces) }))
-      .filter(({ flowAmounts }) => flowAmounts.income > 0 && flowAmounts.availableCashChange > 0)
-      .sort((left, right) => right.flowAmounts.availableCashChange - left.flowAmounts.availableCashChange || String(left.entry.id).localeCompare(String(right.entry.id)))[0]?.entry
-    if (!anchor) continue
-    const anchorKey = contextKey(projectionContext(anchor).context)
-    const occurrence = { date: String(anchor.date), monthKey: String(anchor.monthKey), transactionId: String(anchor.transactionId), components, anchorKey }
+  for (const occurrence of recurringBundleOccurrences({ entries, months, conflictingTransactionIds, currencyDecimalPlaces })) {
+    const { anchorKey } = occurrence
     families.set(anchorKey, [...(families.get(anchorKey) ?? []), occurrence])
   }
 
@@ -965,35 +1013,14 @@ const discoverRecurringBundles = ({ entries, months, excludedEntryIds, conflicti
       phaseDates,
       projectedDates,
       components,
-      matchingEntryIds: unique(occurrences.flatMap(({ components }) => [...components.values()].map(({ id }) => String(id)))).sort(),
+      matchingEntryIds: unique(occurrences.flatMap(({ components }) => [...admittedComponentKeys].map((key) => components.get(key)?.id).filter(Boolean))).sort(),
     })
   }
   return discovered.sort((left, right) => left.id.localeCompare(right.id))
 }
 
 const fulfillRecurringBundles = ({ bundles, currentEntries, conflictingTransactionIds, currencyDecimalPlaces }) => {
-  const conflictingTransactions = new Set(conflictingTransactionIds)
-  const groups = new Map()
-  for (const entry of currentEntries) {
-    if (!usableLedgerValue(entry) || !entry.transactionId || conflictingTransactions.has(String(entry.transactionId)) || !entry.date) continue
-    const key = `${entry.date}|${entry.transactionId}`
-    groups.set(key, [...(groups.get(key) ?? []), entry])
-  }
-  const occurrences = [...groups.values()]
-    .map((entries) => {
-      const sortedEntries = entries.sort((left, right) => String(left.id).localeCompare(String(right.id)))
-      const currencies = unique(sortedEntries.map(({ conversion }) => conversion?.displayCurrency ?? conversion?.sourceCurrency)).sort()
-      if (currencies.length > 1) return null
-      const components = new Map()
-      for (const entry of sortedEntries) {
-        const key = contextKey(projectionContext(entry).context)
-        if (components.has(key)) return null
-        components.set(key, entry)
-      }
-      return { date: String(sortedEntries[0].date), transactionId: String(sortedEntries[0].transactionId), entries: sortedEntries, components }
-    })
-    .filter(Boolean)
-    .sort((left, right) => left.date.localeCompare(right.date) || left.transactionId.localeCompare(right.transactionId))
+  const occurrences = recurringBundleOccurrences({ entries: currentEntries, conflictingTransactionIds, currencyDecimalPlaces })
 
   return bundles.map((bundle) => {
     const remainingDates = [...bundle.projectedDates]
@@ -1019,10 +1046,14 @@ const fulfillRecurringBundles = ({ bundles, currentEntries, conflictingTransacti
       if (!matched) continue
       const projectedIndex = remainingDates.findIndex(({ phase }) => phase === matched.phase)
       if (projectedIndex >= 0) remainingDates.splice(projectedIndex, 1)
+      const matchedEntries = bundle.components
+        .filter((component) => component.phase === 'both' || component.phase === matched.phase)
+        .map(({ key }) => occurrence.components.get(key))
+        .filter(Boolean)
       fulfilledPhases.push({
         phase: matched.phase,
-        entryIds: occurrence.entries.map(({ id }) => String(id)).sort(),
-        transactionIds: [occurrence.transactionId],
+        entryIds: matchedEntries.map(({ id }) => String(id)).sort(),
+        transactionIds: unique(matchedEntries.map(({ transactionId }) => String(transactionId))).sort(),
       })
     }
     return { ...bundle, projectedDates: remainingDates, fulfilledPhases: fulfilledPhases.sort((left, right) => left.phase.localeCompare(right.phase)) }
@@ -1486,15 +1517,19 @@ export function buildRemainingActivityForecast({
   const discoveredBundles = discoverRecurringBundles({
     entries,
     months,
-    excludedEntryIds: [...authoritativeEvidencedHistoryEntryIds, ...matchedHistory.entryIds],
     conflictingTransactionIds,
     today: todayKey,
     endDate: endKey,
     currencyDecimalPlaces,
   })
   const bundleMatchingEntryIds = new Set(discoveredBundles.flatMap(({ matchingEntryIds }) => matchingEntryIds))
+  const bundleMatchingTransactionIds = new Set(discoveredBundles.flatMap(({ transactionIds }) => transactionIds))
   const bundleSuppressedCandidateIds = preparedProjectionCandidates
-    .filter((candidate) => (candidate.evidence?.entryIds ?? []).some((id) => bundleMatchingEntryIds.has(String(id))))
+    .filter(
+      (candidate) =>
+        (candidate.evidence?.entryIds ?? []).some((id) => bundleMatchingEntryIds.has(String(id))) ||
+        (candidate.evidence?.transactionIds ?? []).some((id) => bundleMatchingTransactionIds.has(String(id))),
+    )
     .map(({ id }) => String(id))
   const aggregateSuppressedCandidateIds = aggregateBundleCandidateIds({
     candidates: preparedProjectionCandidates,
