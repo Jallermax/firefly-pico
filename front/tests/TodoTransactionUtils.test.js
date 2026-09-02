@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import {
   TODO_BATCH_CONCURRENCY,
   TODO_PAGE_SIZE,
-  TODO_QUERY_TIMEOUT,
   buildTodoRemovalRequest,
   buildTodoRestoreRequest,
   buildTodoTransactionsPath,
@@ -180,5 +179,4 @@ test('rejects an invalid concurrency limit', async () => {
 
 test('uses a fixed page size suitable for the Firefly endpoint', () => {
   assert.equal(TODO_PAGE_SIZE, 50)
-  assert.equal(TODO_QUERY_TIMEOUT, 60000)
 })

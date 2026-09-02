@@ -11,7 +11,6 @@ use Illuminate\Http\Request;
 
 class TagController extends BaseControllerFirefly
 {
-    private const TRANSACTIONS_TIMEOUT_SECONDS = 60;
 
     public function __construct()
     {
@@ -53,12 +52,6 @@ class TagController extends BaseControllerFirefly
     {
         BaseAuthorization::checkUser();
         return $this->respond(['data' => app(TagService::class)->computeTotal($request->id)]);
-    }
-
-    public function getTransactions(Request $request)
-    {
-        $response = $this->getHttpClient()->timeout(self::TRANSACTIONS_TIMEOUT_SECONDS)->get($this->getFullUrl());
-        return response($response->body(), $response->status());
     }
 
 }

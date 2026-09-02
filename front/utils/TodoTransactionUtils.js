@@ -1,6 +1,5 @@
 export const TODO_PAGE_SIZE = 50
 export const TODO_BATCH_CONCURRENCY = 3
-export const TODO_QUERY_TIMEOUT = 60000
 
 const getSplits = (transaction) => transaction?.attributes?.transactions ?? []
 const getTags = (split) => split?.tags ?? []
