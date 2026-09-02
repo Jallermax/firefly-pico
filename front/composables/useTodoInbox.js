@@ -69,7 +69,7 @@ export function useTodoInbox() {
   const transformTransaction = (transaction) => TransactionTransformer.transformFromApi(cloneDeep(transaction))
 
   const fetchPage = async (requestedPage) => {
-    const response = await tagRepository.getTodoTransactions(markerName.value, {
+    const response = await tagRepository.getTodoTransactions(tagStore.tagTodo, {
       page: requestedPage,
       pageSize: TODO_PAGE_SIZE,
     })

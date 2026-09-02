@@ -12,7 +12,7 @@ const getRequestData = (transactions) => ({
   transactions,
 })
 
-export const buildTodoTransactionsPath = (tagName) => `api/tags/${encodeURIComponent(tagName)}/transactions`
+export const buildTodoTransactionsPath = (tag) => `api/tags/${encodeURIComponent(typeof tag === 'object' ? (tag?.id ?? tag?.attributes?.tag) : tag)}/transactions`
 
 export const getTodoJournalIds = (transaction, markerName) =>
   getSplits(transaction)

@@ -11,9 +11,9 @@ export default class TagRepository extends BaseRepository {
     return await axios.post(`${this.getUrl()}/${id}/total`)
   }
 
-  async getTodoTransactions(tagName, { page = 1, pageSize = TODO_PAGE_SIZE, showLoading = true } = {}) {
+  async getTodoTransactions(tag, { page = 1, pageSize = TODO_PAGE_SIZE, showLoading = true } = {}) {
     const appStore = useAppStore()
-    const path = buildTodoTransactionsPath(tagName)
+    const path = buildTodoTransactionsPath(tag)
     const url = this.getUrlForRequest({
       url: `${appStore.picoBackendURL}/${path}`,
       page,
