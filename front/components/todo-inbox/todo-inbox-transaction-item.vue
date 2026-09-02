@@ -5,6 +5,7 @@
         <div class="todo-inbox-receipt-content">
           <app-icon :icon="TablerIconConstants.booleanCheckOn" :size="17" />
           <span class="ellipse-text">{{ description }}</span>
+          <span class="todo-inbox-receipt-amount">{{ amount }}</span>
           <span class="todo-inbox-receipt-label">{{ $t('todo_inbox.done') }}</span>
         </div>
       </template>
@@ -38,13 +39,14 @@
         <van-button size="mini" plain type="danger" @click.stop="emit('retry', props.value)">{{ $t('todo_inbox.retry') }}</van-button>
       </div>
 
-      <transaction-split-view v-if="props.isExpanded" :transaction="props.value" show-empty-fields />
+      <transaction-split-view v-if="props.isExpanded" :transaction="props.value" show-empty-fields :show-attachments="false" />
     </template>
   </div>
 </template>
 
 <script setup>
 import TablerIconConstants from '~/constants/TablerIconConstants.js'
+import Currency from '~/models/Currency.js'
 import Transaction from '~/models/Transaction.js'
 
 const props = defineProps({
@@ -74,4 +76,8 @@ const emit = defineEmits(['edit', 'toggle', 'done', 'undo', 'retry'])
 
 const appStore = useAppStore()
 const description = computed(() => Transaction.getDescription(props.value))
+const amount = computed(() => {
+  const currency = Transaction.getCurrency(props.value)
+  return [Transaction.getAmountFormatted(props.value), Currency.getSymbol(currency) ?? Currency.getCode(currency)].filter(Boolean).join(' ')
+})
 </script>

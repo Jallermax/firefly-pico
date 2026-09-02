@@ -2,7 +2,7 @@
   <div class="app-form todo-inbox-page" :class="{ empty: showEmptyState || !hasMarkerConfiguration }">
     <app-top-toolbar />
 
-    <empty-list v-if="!hasMarkerConfiguration" :title="$t('todo_inbox.marker_missing')" :subtitle="$t('todo_inbox.marker_missing_help')">
+    <empty-list v-if="!hasMarkerConfiguration" :title="$t('todo_inbox.marker_not_configured')" :subtitle="$t('todo_inbox.marker_not_configured_help')">
       <template #action>
         <app-tutorial v-bind="TUTORIAL_CONSTANTS.todoTag" />
       </template>
@@ -57,7 +57,7 @@
 
       <empty-list v-else-if="showEmptyState" :title="$t('todo_inbox.empty')" :subtitle="$t('todo_inbox.empty_help')" />
 
-      <div v-else-if="items.length > 0" class="todo-inbox-list">
+      <div v-else-if="items.length > 0" class="todo-inbox-list" :class="{ 'transaction-desktop-list': appStore.isDesktopLayout }">
         <todo-inbox-transaction-item
           v-for="item in items"
           :key="item.id"

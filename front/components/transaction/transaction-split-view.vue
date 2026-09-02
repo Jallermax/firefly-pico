@@ -142,7 +142,7 @@
       </van-cell-group>
     </div>
 
-    <van-cell-group v-show="transaction.id && hasAttachments" inset class="transaction-split-attachments">
+    <van-cell-group v-if="props.showAttachments" v-show="transaction.id && hasAttachments" inset class="transaction-split-attachments">
       <transaction-attachments-list :transaction="transaction" read-only @count="hasAttachments = $event > 0" />
     </van-cell-group>
   </div>
@@ -166,6 +166,10 @@ const props = defineProps({
   showEmptyFields: {
     type: Boolean,
     default: false,
+  },
+  showAttachments: {
+    type: Boolean,
+    default: true,
   },
 })
 
