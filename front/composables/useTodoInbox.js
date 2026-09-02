@@ -48,7 +48,8 @@ export function useTodoInbox() {
   const receiptById = computed(() => Object.fromEntries(receipts.value.map((receipt) => [String(receipt.id), receipt])))
   const activeItems = computed(() => getActiveTodoItems(items.value, receipts.value))
   const remainingCount = computed(() => Math.max(0, totalCount.value - receipts.value.length))
-  const isPageLocked = computed(() => isTodoPageLocked(receipts.value, isBatchRunning.value))
+  const isAnyItemProcessing = computed(() => Object.values(itemState).some((state) => state.isProcessing))
+  const isPageLocked = computed(() => isTodoPageLocked(receipts.value, isBatchRunning.value, isAnyItemProcessing.value))
   const areAllExpanded = computed(() => activeItems.value.length > 0 && activeItems.value.every((item) => expandedIds.value.has(String(item.id))))
 
   const getState = (id) => itemState[String(id)] ?? { isProcessing: false, error: null }
@@ -243,7 +244,7 @@ export function useTodoInbox() {
 
   const markPageDone = async () => {
     const targets = [...activeItems.value]
-    if (targets.length === 0 || isBatchRunning.value) {
+    if (targets.length === 0 || isBatchRunning.value || isAnyItemProcessing.value) {
       return false
     }
 
@@ -266,6 +267,7 @@ export function useTodoInbox() {
       })
       const failed = results.filter((result) => result.status === 'rejected').length
       batchResult.value = { successful: results.length - failed, failed, total: results.length }
+      batchProgress.value = null
       return failed === 0
     } finally {
       isBatchRunning.value = false
@@ -308,7 +310,7 @@ export function useTodoInbox() {
       return false
     }
     wasEditing.value = false
-    return await loadPage(page.value)
+    return await loadPage(page.value, { clearReceipts: true })
   }
 
   return {
@@ -329,6 +331,7 @@ export function useTodoInbox() {
     isLoaded,
     loadError,
     isPageLocked,
+    isAnyItemProcessing,
     isBatchRunning,
     batchProgress,
     batchResult,

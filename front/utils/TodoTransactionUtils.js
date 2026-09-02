@@ -73,7 +73,7 @@ export const getSafeTodoPage = (page, totalPages) => {
   return Math.min(currentPage, lastPage)
 }
 
-export const isTodoPageLocked = (receipts, isBatchRunning) => receipts.length > 0 || isBatchRunning
+export const isTodoPageLocked = (receipts, isBatchRunning, isItemProcessing = false) => receipts.length > 0 || isBatchRunning || isItemProcessing
 
 export const runWithConcurrency = async (items, limit, worker, onProgress) => {
   if (!Number.isInteger(limit) || limit < 1) {

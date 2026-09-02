@@ -111,6 +111,7 @@ test('filters completed receipts from active items and locks their offset page',
   assert.deepEqual(getActiveTodoItems(items, receipts), [{ id: '43' }])
   assert.equal(isTodoPageLocked(receipts, false), true)
   assert.equal(isTodoPageLocked([], true), true)
+  assert.equal(isTodoPageLocked([], false, true), true)
   assert.equal(isTodoPageLocked([], false), false)
 })
 
