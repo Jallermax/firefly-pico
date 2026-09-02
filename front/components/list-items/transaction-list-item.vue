@@ -1,5 +1,5 @@
 <template>
-  <van-swipe-cell ref="swipeCell" v-bind="clickWithoutSwipe">
+  <van-swipe-cell ref="swipeCell" v-bind="clickWithoutSwipe" :disabled="!props.isDeleteEnabled">
     <van-cell :class="cellClass">
       <template #title>
         <div class="display-flex transaction-card prevent-select align-items-lg-stretch">
@@ -55,7 +55,7 @@
       </template>
     </van-cell>
 
-    <template #right>
+    <template v-if="props.isDeleteEnabled" #right>
       <van-button class="delete-button" square type="danger" text="Delete" @click="onDelete" />
     </template>
   </van-swipe-cell>
@@ -73,6 +73,11 @@ import { useTransactionListItem } from '~/composables/useTransactionListItem.js'
 const props = defineProps({
   value: Object,
   isDetailedMode: {
+    type: Boolean,
+    default: true,
+  },
+  isDeleteEnabled: {
+    type: Boolean,
     default: true,
   },
 })
