@@ -15,6 +15,11 @@
       </template>
     </van-cell>
 
+    <div v-if="props.receipt && props.error" class="todo-inbox-item-error">
+      <span>{{ props.error }}</span>
+      <van-button size="mini" plain type="danger" @click.stop="emit('undo', props.value)">{{ $t('todo_inbox.retry') }}</van-button>
+    </div>
+
     <template v-else>
       <transaction-list-item-desktop v-if="appStore.isDesktopLayout" :value="props.value" :is-delete-enabled="false" @on-edit="emit('edit', props.value)" />
       <transaction-list-item v-else :value="props.value" :is-detailed-mode="false" :is-delete-enabled="false" @on-edit="emit('edit', props.value)" />

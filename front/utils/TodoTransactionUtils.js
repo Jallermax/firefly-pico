@@ -21,6 +21,12 @@ export const getTodoJournalIds = (transaction, markerName) =>
 
 export const hasTodoMarker = (transaction, markerName) => getTodoJournalIds(transaction, markerName).length > 0
 
+export const hasTodoMarkerOnJournals = (transaction, markerName, journalIds) => {
+  const splitByJournalId = new Map(getSplits(transaction).map((split) => [getJournalKey(split.transaction_journal_id), split]))
+  const expectedJournalIds = [...new Set(journalIds.map(getJournalKey))]
+  return expectedJournalIds.length > 0 && expectedJournalIds.every((journalId) => hasMarker(splitByJournalId.get(journalId), markerName))
+}
+
 export const buildTodoRemovalRequest = (transaction, markerName) => {
   const markedSplits = getSplits(transaction).filter((split) => hasMarker(split, markerName))
 

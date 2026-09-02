@@ -10,6 +10,7 @@ import {
   getSafeTodoPage,
   getTodoJournalIds,
   hasTodoMarker,
+  hasTodoMarkerOnJournals,
   isTodoPageLocked,
   runWithConcurrency,
 } from '../utils/TodoTransactionUtils.js'
@@ -85,6 +86,17 @@ test('does not duplicate a marker that is already restored', () => {
   assert.deepEqual(result.restoredJournalIds, ['101', '103'])
   assert.deepEqual(result.missingJournalIds, [])
   assert.deepEqual(result.requestData.transactions, [])
+})
+
+test('verifies the marker on every expected journal after undo', () => {
+  const transaction = makeTransaction()
+
+  assert.equal(hasTodoMarkerOnJournals(transaction, 'todo', ['101', '103']), true)
+
+  transaction.attributes.transactions[2].tags = ['family']
+  assert.equal(hasTodoMarkerOnJournals(transaction, 'todo', ['101', '103']), false)
+  assert.equal(hasTodoMarkerOnJournals(transaction, 'todo', ['101', '999']), false)
+  assert.equal(hasTodoMarkerOnJournals(transaction, 'todo', []), false)
 })
 
 test('encodes the marker name in the tag-transactions path', () => {
