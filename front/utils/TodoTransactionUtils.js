@@ -1,6 +1,6 @@
 export const TODO_PAGE_SIZE = 50
 export const TODO_BATCH_CONCURRENCY = 3
-export const TODO_HISTORY_START = '1970-01-01'
+export const TODO_QUERY_TIMEOUT = 60000
 
 const getSplits = (transaction) => transaction?.attributes?.transactions ?? []
 const getTags = (split) => split?.tags ?? []
@@ -14,11 +14,6 @@ const getRequestData = (transactions) => ({
 })
 
 export const buildTodoTransactionsPath = (tag) => `api/tags/${encodeURIComponent(typeof tag === 'object' ? (tag?.id ?? tag?.attributes?.tag) : tag)}/transactions`
-
-export const getTodoHistoryFilters = (endDate) => [
-  { field: 'start', value: TODO_HISTORY_START },
-  { field: 'end', value: endDate },
-]
 
 export const getTodoJournalIds = (transaction, markerName) =>
   getSplits(transaction)
