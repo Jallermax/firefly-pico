@@ -8,6 +8,7 @@ import {
   buildTodoTransactionsPath,
   getActiveTodoItems,
   getSafeTodoPage,
+  getTodoHistoryFilters,
   getTodoJournalIds,
   hasTodoMarker,
   hasTodoMarkerOnJournals,
@@ -108,6 +109,13 @@ test('prefers the tag ID so hierarchical marker names stay one path segment', ()
   const tag = { id: '314', attributes: { tag: 'smart-processor/to-review' } }
 
   assert.equal(buildTodoTransactionsPath(tag), 'api/tags/314/transactions')
+})
+
+test('bounds the all-history tag query so Firefly can use its date range collector', () => {
+  assert.deepEqual(getTodoHistoryFilters('2026-09-02'), [
+    { field: 'start', value: '1970-01-01' },
+    { field: 'end', value: '2026-09-02' },
+  ])
 })
 
 test('filters completed receipts from active items and locks their offset page', () => {
