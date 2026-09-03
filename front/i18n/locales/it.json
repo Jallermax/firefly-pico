@@ -34,6 +34,12 @@
   "tags": "Tag",
   "todo": "Da fare",
   "todo_inbox": {
+    "saving": "Salvataggio…",
+    "restoring": "Ripristino…",
+    "queued": "In coda",
+    "source": "Sorgente",
+    "rendered": "Formattato",
+    "completion_unconfirmed": "Impossibile confermare il completamento. Riprova verifica la transazione prima di salvarla di nuovo.",
     "title": "Posta TODO",
     "all_history": "Tutta la cronologia",
     "expand_all": "Espandi tutto",

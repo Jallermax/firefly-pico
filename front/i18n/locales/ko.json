@@ -34,6 +34,12 @@
   "tags": "태그",
   "todo": "할 일",
   "todo_inbox": {
+    "saving": "저장 중…",
+    "restoring": "복원 중…",
+    "queued": "대기 중",
+    "source": "원문",
+    "rendered": "서식 보기",
+    "completion_unconfirmed": "완료 여부를 확인할 수 없습니다. 다시 시도하면 저장하기 전에 거래를 확인합니다.",
     "title": "TODO 받은 편지함",
     "all_history": "전체 내역",
     "expand_all": "모두 펼치기",

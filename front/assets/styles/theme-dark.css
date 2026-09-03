@@ -514,6 +514,11 @@
     box-shadow: rgba(0, 0, 0, 0.35) 0 8px 24px;
 }
 
+.van-theme-dark .todo-inbox-page {
+    --todo-divider: #48484b;
+    --todo-muted: #96969e;
+}
+
 .van-theme-dark .todo-inbox-item-actions {
     border-top-color: #333;
 }

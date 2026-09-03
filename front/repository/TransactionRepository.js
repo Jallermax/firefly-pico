@@ -34,6 +34,7 @@ export default class TransactionRepository extends BaseRepository {
     return await axios.put(`${this.getUrl()}/${id}`, requestData, {
       showLoading: false,
       showErrorToast: false,
+      retryOnTimeout: false,
     })
   }
 }

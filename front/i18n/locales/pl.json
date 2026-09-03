@@ -34,6 +34,12 @@
   "tags": "Tagi",
   "todo": "Todo",
   "todo_inbox": {
+    "saving": "Zapisywanie…",
+    "restoring": "Przywracanie…",
+    "queued": "W kolejce",
+    "source": "Źródło",
+    "rendered": "Sformatowane",
+    "completion_unconfirmed": "Nie można potwierdzić zakończenia. Ponowna próba sprawdzi transakcję przed kolejnym zapisem.",
     "title": "Skrzynka TODO",
     "all_history": "Cała historia",
     "expand_all": "Rozwiń wszystko",

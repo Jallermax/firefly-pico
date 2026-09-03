@@ -1,6 +1,19 @@
 <template>
   <div class="app-form todo-inbox-page" :class="{ empty: showEmptyState || !hasMarkerConfiguration }">
-    <app-top-toolbar />
+    <app-top-toolbar>
+      <template v-if="appStore.isDesktopLayout && hasMarkerConfiguration" #right>
+        <div class="todo-inbox-page-actions">
+          <van-button size="small" plain class="todo-inbox-action" :disabled="activeItems.length === 0 || isBatchRunning" :aria-pressed="areAllExpanded" @click="toggleAll">
+            <app-icon :icon="areAllExpanded ? TablerIconConstants.upArrow : TablerIconConstants.downArrow" :size="16" />
+            {{ areAllExpanded ? $t('todo_inbox.collapse_all') : $t('todo_inbox.expand_all') }}
+          </van-button>
+          <van-button size="small" plain class="todo-inbox-action" :disabled="activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
+            <app-icon :icon="TablerIconConstants.booleanCheckOn" :size="17" />
+            {{ $t('todo_inbox.mark_page_done') }}
+          </van-button>
+        </div>
+      </template>
+    </app-top-toolbar>
 
     <empty-list v-if="!hasMarkerConfiguration" :title="$t('todo_inbox.marker_not_configured')" :subtitle="$t('todo_inbox.marker_not_configured_help')">
       <template #action>
@@ -9,27 +22,14 @@
     </empty-list>
 
     <template v-else>
-      <van-cell-group inset class="todo-inbox-controls">
-        <van-cell>
-          <template #title>
-            <div class="todo-inbox-context">
-              <div class="todo-inbox-marker">
-                <app-icon :icon="TablerIconConstants.tag" :size="16" />
-                <span>{{ markerName }}</span>
-              </div>
-              <span class="text-muted">{{ $t('todo_inbox.all_history') }}</span>
-            </div>
-          </template>
-          <template #value>
-            <span>{{ $t('todo_inbox.remaining_items', { count: remainingCount }) }}</span>
-          </template>
-        </van-cell>
-
+      <van-cell-group v-if="!appStore.isDesktopLayout" inset class="todo-inbox-controls">
         <div class="todo-inbox-page-actions">
-          <van-button size="small" plain :disabled="activeItems.length === 0 || isBatchRunning" @click="toggleAll">
+          <van-button size="small" plain class="todo-inbox-action" :disabled="activeItems.length === 0 || isBatchRunning" :aria-pressed="areAllExpanded" @click="toggleAll">
+            <app-icon :icon="areAllExpanded ? TablerIconConstants.upArrow : TablerIconConstants.downArrow" :size="16" />
             {{ areAllExpanded ? $t('todo_inbox.collapse_all') : $t('todo_inbox.expand_all') }}
           </van-button>
-          <van-button size="small" type="primary" :disabled="activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
+          <van-button size="small" plain class="todo-inbox-action" :disabled="activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
+            <app-icon :icon="TablerIconConstants.booleanCheckOn" :size="17" />
             {{ $t('todo_inbox.mark_page_done') }}
           </van-button>
         </div>
@@ -58,13 +58,14 @@
       <empty-list v-else-if="showEmptyState" :title="$t('todo_inbox.empty')" :subtitle="$t('todo_inbox.empty_help')" />
 
       <div v-else-if="items.length > 0" class="todo-inbox-list-wrapper">
-        <div class="todo-inbox-list" :class="{ 'transaction-desktop-list': appStore.isDesktopLayout }">
+        <div ref="listElement" class="todo-inbox-list">
           <todo-inbox-transaction-item
             v-for="item in items"
             :key="item.id"
             :value="item"
             :is-expanded="expandedIds.has(String(item.id))"
             :is-processing="getState(item.id).isProcessing"
+            :is-queued="getState(item.id).isQueued"
             :error="getState(item.id).error"
             :receipt="receiptById[String(item.id)]"
             @edit="editItem"
@@ -101,7 +102,7 @@
 </template>
 
 <script setup>
-import { computed, onActivated, onMounted } from 'vue'
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import { useTodoInbox } from '~/composables/useTodoInbox.js'
 import { useToolbar } from '~/composables/useToolbar.js'
 import RouteConstants from '~/constants/RouteConstants.js'
@@ -146,7 +147,24 @@ const {
 } = useTodoInbox()
 
 const showEmptyState = computed(() => isLoaded.value && !isLoading.value && !loadError.value && items.value.length === 0)
-const toolbarSubtitle = computed(() => (hasMarkerConfiguration.value ? t('todo_inbox.page_context', { page: page.value, total: totalPages.value, count: remainingCount.value }) : null))
+const listElement = ref(null)
+watch(
+  () => items.value.map((item) => ({ id: String(item.id), pending: getState(item.id).isProcessing || getState(item.id).isQueued })),
+  async (current, previous) => {
+    const settledIds = previous.filter((item) => item.pending && !current.find((next) => next.id === item.id)?.pending).map((item) => item.id)
+    if (!settledIds.length || !listElement.value) return
+    const anchor = [...listElement.value.children].find(
+      (element) => !settledIds.includes(element.dataset.todoId) && element.getBoundingClientRect().bottom > 0 && element.getBoundingClientRect().top < window.innerHeight,
+    )
+    if (!anchor) return
+    const top = anchor.getBoundingClientRect().top
+    await nextTick()
+    if (anchor.isConnected) window.scrollBy({ top: anchor.getBoundingClientRect().top - top, behavior: 'instant' })
+  },
+)
+const toolbarSubtitle = computed(() =>
+  hasMarkerConfiguration.value ? `${markerName.value} · ${t('todo_inbox.all_history')} · ${t('todo_inbox.remaining_items', { count: remainingCount.value })}` : null,
+)
 
 const onDone = (item) => doneItem(item).catch(() => {})
 const onUndo = (item) => undoItem(item).catch(() => {})

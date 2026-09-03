@@ -48,11 +48,11 @@ export function useTodoInbox() {
   const receiptById = computed(() => Object.fromEntries(receipts.value.map((receipt) => [String(receipt.id), receipt])))
   const activeItems = computed(() => getActiveTodoItems(items.value, receipts.value))
   const remainingCount = computed(() => Math.max(0, totalCount.value - receipts.value.length))
-  const isAnyItemProcessing = computed(() => Object.values(itemState).some((state) => state.isProcessing))
+  const isAnyItemProcessing = computed(() => Object.values(itemState).some((state) => state.isProcessing || state.isQueued))
   const isPageLocked = computed(() => isTodoPageLocked(receipts.value, isBatchRunning.value, isAnyItemProcessing.value))
   const areAllExpanded = computed(() => activeItems.value.length > 0 && activeItems.value.every((item) => expandedIds.value.has(String(item.id))))
 
-  const getState = (id) => itemState[String(id)] ?? { isProcessing: false, error: null }
+  const getState = (id) => itemState[String(id)] ?? { isProcessing: false, isQueued: false, error: null }
 
   const setState = (id, values) => {
     const key = String(id)
@@ -104,7 +104,7 @@ export function useTodoInbox() {
   }
 
   const loadPage = async (requestedPage = page.value, options = {}) => {
-    if (!hasMarkerConfiguration.value || isLoading.value) {
+    if (!hasMarkerConfiguration.value || isLoading.value || isAnyItemProcessing.value) {
       return false
     }
 
@@ -129,29 +129,29 @@ export function useTodoInbox() {
   }
 
   const removeStaleItem = (item, messageKey) => {
-    items.value = items.value.filter((currentItem) => String(currentItem.id) !== String(item.id))
-    totalCount.value = Math.max(0, totalCount.value - 1)
+    addReceipt(item, [], messageKey)
     UIUtils.showToastSuccess(t(messageKey))
   }
 
-  const addReceipt = (item, journalIds) => {
+  const addReceipt = (item, journalIds, messageKey = 'todo_inbox.done') => {
     const receipt = {
       id: String(item.id),
       item,
       journalIds,
       markerName: markerName.value,
+      messageKey,
     }
     receipts.value = [...receipts.value.filter((currentReceipt) => String(currentReceipt.id) !== String(item.id)), receipt]
-    expandedIds.value = new Set([...expandedIds.value].filter((id) => id !== String(item.id)))
+    setState(item.id, { pendingJournalIds: null })
   }
 
   const doneItem = async (item) => {
     const id = String(item.id)
-    if (getState(id).isProcessing) {
+    if (getState(id).isProcessing || receiptById.value[id]) {
       return { status: 'ignored' }
     }
 
-    setState(id, { isProcessing: true, error: null })
+    setState(id, { isProcessing: true, isQueued: false, error: null })
     try {
       const latestResponse = await transactionRepository.getTodoTransaction(id)
       if (get(latestResponse, 'status') === 404) {
@@ -164,17 +164,31 @@ export function useTodoInbox() {
 
       const latestTransaction = getResponseTransaction(latestResponse)
       if (!hasTodoMarker(latestTransaction, markerName.value)) {
-        removeStaleItem(item, 'todo_inbox.completed_elsewhere')
+        if (getState(id).pendingJournalIds?.length) {
+          addReceipt(item, getState(id).pendingJournalIds)
+        } else {
+          removeStaleItem(item, 'todo_inbox.completed_elsewhere')
+        }
         return { status: 'stale' }
       }
 
       const { journalIds, requestData } = buildTodoRemovalRequest(latestTransaction, markerName.value)
+      setState(id, { pendingJournalIds: journalIds })
       const updateResponse = await transactionRepository.updateTodoTags(id, requestData)
+      let updatedTransaction = getResponseTransaction(updateResponse)
       if (!ResponseUtils.isSuccess(updateResponse)) {
-        throw new Error(getResponseError(updateResponse, 'todo_inbox.item_error'))
+        if (!updateResponse?.status || updateResponse.status >= 500) {
+          const verification = await transactionRepository.getTodoTransaction(id)
+          updatedTransaction = getResponseTransaction(verification)
+          if (!ResponseUtils.isSuccess(verification) || !updatedTransaction || hasTodoMarker(updatedTransaction, markerName.value)) {
+            throw new Error(t('todo_inbox.completion_unconfirmed'))
+          }
+        } else {
+          setState(id, { pendingJournalIds: null })
+          throw new Error(getResponseError(updateResponse, 'todo_inbox.item_error'))
+        }
       }
 
-      const updatedTransaction = getResponseTransaction(updateResponse)
       if (!updatedTransaction || hasTodoMarker(updatedTransaction, markerName.value)) {
         throw new Error(t('todo_inbox.marker_still_present'))
       }
@@ -227,9 +241,6 @@ export function useTodoInbox() {
         items.value[index] = transformTransaction(restoredTransaction)
       }
       receipts.value = receipts.value.filter((currentReceipt) => String(currentReceipt.id) !== id)
-      if (appStore.isDesktopLayout) {
-        expandedIds.value = new Set([...expandedIds.value, id])
-      }
       if (restoration.missingJournalIds.length > 0) {
         UIUtils.showToastError(t('todo_inbox.undo_partial', { count: restoration.missingJournalIds.length }))
       }
@@ -254,6 +265,7 @@ export function useTodoInbox() {
     }
 
     isBatchRunning.value = true
+    targets.forEach((item) => setState(item.id, { isQueued: true, error: null }))
     batchResult.value = null
     batchProgress.value = { processed: 0, total: targets.length, successful: 0, failed: 0 }
     try {
@@ -275,7 +287,7 @@ export function useTodoInbox() {
   }
 
   const continuePage = async () => {
-    if (isBatchRunning.value || receipts.value.length === 0) {
+    if (isBatchRunning.value || isAnyItemProcessing.value || receipts.value.length === 0) {
       return false
     }
     return await loadPage(page.value, { clearReceipts: true })

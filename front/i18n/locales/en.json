@@ -34,6 +34,12 @@
   "tags": "Tags",
   "todo": "Todo",
   "todo_inbox": {
+    "saving": "Saving…",
+    "restoring": "Restoring…",
+    "queued": "Queued",
+    "source": "Source",
+    "rendered": "Rendered",
+    "completion_unconfirmed": "Could not confirm completion. Retry checks the transaction before saving again.",
     "title": "TODO Inbox",
     "all_history": "All history",
     "expand_all": "Expand all",

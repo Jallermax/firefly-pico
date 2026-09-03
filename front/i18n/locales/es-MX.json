@@ -34,6 +34,12 @@
   "tags": "Etiquetas",
   "todo": "Pendiente",
   "todo_inbox": {
+    "saving": "Guardando…",
+    "restoring": "Restaurando…",
+    "queued": "En espera",
+    "source": "Fuente",
+    "rendered": "Formato",
+    "completion_unconfirmed": "No se pudo confirmar la finalización. Reintentar verifica la transacción antes de volver a guardar.",
     "title": "Bandeja TODO",
     "all_history": "Todo el historial",
     "expand_all": "Expandir todo",

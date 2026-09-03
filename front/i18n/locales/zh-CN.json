@@ -32,6 +32,12 @@
   "tags": "标签",
   "todo": "待办",
   "todo_inbox": {
+    "saving": "正在保存…",
+    "restoring": "正在恢复…",
+    "queued": "排队中",
+    "source": "源码",
+    "rendered": "渲染",
+    "completion_unconfirmed": "无法确认完成。重试会先检查交易，再重新保存。",
     "title": "待办收件箱",
     "all_history": "全部历史",
     "expand_all": "全部展开",

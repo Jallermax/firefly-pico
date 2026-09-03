@@ -34,6 +34,12 @@
   "tags": "Tags",
   "todo": "A fazer",
   "todo_inbox": {
+    "saving": "Salvando…",
+    "restoring": "Restaurando…",
+    "queued": "Na fila",
+    "source": "Fonte",
+    "rendered": "Formatado",
+    "completion_unconfirmed": "Não foi possível confirmar a conclusão. Tentar novamente verifica a transação antes de salvar de novo.",
     "title": "Caixa TODO",
     "all_history": "Todo o histórico",
     "expand_all": "Expandir tudo",
