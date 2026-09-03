@@ -1,6 +1,6 @@
 <template>
   <div class="transaction-split-view" :class="{ 'transaction-split-view-desktop': appStore.isDesktopLayout }">
-    <van-cell-group inset class="transaction-split-summary">
+    <van-cell-group v-if="isSplitPayment" inset class="transaction-split-summary">
       <van-cell class="transaction-split-summary-cell">
         <template #title>
           <div class="transaction-split-summary-heading">
@@ -29,7 +29,7 @@
       <van-cell-group v-for="(split, index) in splits" :key="split.transaction_journal_id ?? index" inset class="transaction-split-card" role="listitem">
         <van-cell class="transaction-split-card-header">
           <template #title>
-            <div class="transaction-split-card-position">{{ index + 1 }} / {{ splits.length }}</div>
+            <div v-if="isSplitPayment" class="transaction-split-card-position">{{ index + 1 }} / {{ splits.length }}</div>
             <div class="transaction-split-card-title word-break-word" role="heading" aria-level="2">{{ split.description }}</div>
           </template>
 
@@ -63,7 +63,7 @@
           </template>
         </van-cell>
 
-        <van-cell v-if="profileStore.categoriesEnabled && (split.category || split.category_name)" class="transaction-split-detail-row">
+        <van-cell v-if="profileStore.categoriesEnabled && (props.showEmptyFields || split.category || split.category_name)" class="transaction-split-detail-row">
           <template #title>
             <div class="transaction-split-detail-label">
               <app-icon :icon="TablerIconConstants.category" :size="17" />
@@ -72,11 +72,11 @@
           </template>
           <template #value>
             <category-badge v-if="split.category" :value="split.category" />
-            <span v-else>{{ split.category_name }}</span>
+            <span v-else>{{ split.category_name || $t('todo_inbox.none') }}</span>
           </template>
         </van-cell>
 
-        <van-cell v-if="profileStore.budgetsEnabled && (split.budget || split.budget_name)" class="transaction-split-detail-row">
+        <van-cell v-if="profileStore.budgetsEnabled && (props.showEmptyFields || split.budget || split.budget_name)" class="transaction-split-detail-row">
           <template #title>
             <div class="transaction-split-detail-label">
               <app-icon :icon="TablerIconConstants.budget" :size="17" />
@@ -84,11 +84,11 @@
             </div>
           </template>
           <template #value>
-            <div class="transaction-split-detail-text">{{ split.budget ? Budget.getDisplayName(split.budget) : split.budget_name }}</div>
+            <div class="transaction-split-detail-text">{{ split.budget ? Budget.getDisplayName(split.budget) : split.budget_name || $t('todo_inbox.none') }}</div>
           </template>
         </van-cell>
 
-        <van-cell v-if="profileStore.tagsEnabled && split.tags?.filter(Boolean).length" class="transaction-split-detail-row">
+        <van-cell v-if="profileStore.tagsEnabled && (props.showEmptyFields || split.tags?.filter(Boolean).length)" class="transaction-split-detail-row">
           <template #title>
             <div class="transaction-split-detail-label">
               <app-icon :icon="TablerIconConstants.tag" :size="17" />
@@ -97,12 +97,16 @@
           </template>
           <template #value>
             <div class="transaction-split-tags">
-              <tag-badge v-for="tag in split.tags.filter(Boolean)" :key="tag.id" :value="tag" :max-length="30" />
+              <tag-badge v-for="tag in split.tags?.filter(Boolean) ?? []" :key="tag.id" :value="tag" :max-length="30" />
+              <span v-if="!split.tags?.filter(Boolean).length">{{ $t('todo_inbox.none') }}</span>
             </div>
           </template>
         </van-cell>
 
-        <van-cell v-if="split.subscription_name ?? split.bill_name" class="transaction-split-detail-row">
+        <van-cell
+          v-if="(props.showEmptyFields ? profileStore.recurringTransactionsEnabled : true) && (props.showEmptyFields || split.subscription_name || split.bill_name)"
+          class="transaction-split-detail-row"
+        >
           <template #title>
             <div class="transaction-split-detail-label">
               <app-icon :icon="TablerIconConstants.recurringTransaction" :size="17" />
@@ -110,7 +114,7 @@
             </div>
           </template>
           <template #value>
-            <div class="transaction-split-detail-text">{{ split.subscription_name ?? split.bill_name }}</div>
+            <div class="transaction-split-detail-text">{{ split.subscription_name || split.bill_name || $t('todo_inbox.none') }}</div>
           </template>
         </van-cell>
 
@@ -126,19 +130,19 @@
           </template>
         </van-cell>
 
-        <van-cell v-if="split.notes" class="transaction-split-notes-row">
+        <van-cell v-if="props.showEmptyFields || split.notes" class="transaction-split-notes-row">
           <template #title>
             <div class="transaction-split-detail-label">
               <app-icon :icon="TablerIconConstants.fieldText1" :size="17" />
               <span>{{ $t('notes') }}</span>
             </div>
-            <div class="transaction-split-notes word-break-word">{{ split.notes }}</div>
+            <div class="transaction-split-notes word-break-word">{{ split.notes || $t('todo_inbox.none') }}</div>
           </template>
         </van-cell>
       </van-cell-group>
     </div>
 
-    <van-cell-group v-show="transaction.id && hasAttachments" inset class="transaction-split-attachments">
+    <van-cell-group v-if="props.showAttachments" v-show="transaction.id && hasAttachments" inset class="transaction-split-attachments">
       <transaction-attachments-list :transaction="transaction" read-only @count="hasAttachments = $event > 0" />
     </van-cell-group>
   </div>
@@ -159,6 +163,14 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  showEmptyFields: {
+    type: Boolean,
+    default: false,
+  },
+  showAttachments: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const hasAttachments = ref(false)
@@ -168,6 +180,7 @@ const profileStore = useProfileStore()
 const { locale } = useI18n()
 
 const splits = computed(() => Transaction.getSplits(props.transaction))
+const isSplitPayment = computed(() => Transaction.isSplitPayment(props.transaction))
 const totals = computed(() => Transaction.getSplitTotals(props.transaction))
 const groupTitle = computed(() => Transaction.getDescription(props.transaction))
 const dateFormatted = computed(() => {
