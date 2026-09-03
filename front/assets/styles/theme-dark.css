@@ -537,3 +537,192 @@
 .van-theme-dark .todo-inbox-status {
     border-color: #666;
 }
+
+.van-theme-dark .analytics-chart-tooltip {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: rgba(0, 0, 0, 0.55) 0 3px 8px;
+}
+
+.van-theme-dark .analytics-cash-use-card {
+    --analytics-selection-band: rgba(79, 195, 247, 0.2);
+    --analytics-selection-outline: #4fc3f7;
+}
+
+.van-theme-dark .analytics-cash-use-legend-item:hover,
+.van-theme-dark .analytics-cash-use-legend-item.active,
+.van-theme-dark .analytics-cash-use-legend-item.pinned,
+.van-theme-dark .analytics-cash-use-month-cell.active {
+    background: #303033;
+}
+
+.van-theme-dark .analytics-cash-use-month-row-label {
+    color: #ddd;
+    background: #1c1c1e;
+}
+
+.van-theme-dark .analytics-cash-use-month-cell strong {
+    color: #f5f5f5;
+}
+
+.van-theme-dark .analytics-card {
+    box-shadow: var(--analytics-card-shadow), var(--analytics-card-ring);
+}
+
+.van-theme-dark .analytics-combination-chart {
+    color: var(--van-text-color);
+}
+
+.van-theme-dark .analytics-combination-area-label {
+    background: #2a2a2c;
+    box-shadow: rgba(0, 0, 0, 0.45) 0 3px 10px;
+}
+
+.van-theme-dark .analytics-combination-area-active {
+    filter: drop-shadow(0 1px 3px rgba(255, 255, 255, 0.18));
+}
+
+.van-theme-dark .analytics-daily-forecast-summary-item,
+.van-theme-dark .analytics-daily-forecast-day-summary > div {
+    background: #242426;
+}
+
+.van-theme-dark .analytics-daily-forecast-detail-row {
+    border-color: #444;
+}
+
+.van-theme-dark .analytics-daily-forecast-disclosure {
+  border-color: #555;
+  background: #242426;
+}
+
+.van-theme-dark .analytics-daily-forecast-evidence-item {
+  background: #1c1c1e;
+}
+
+.van-theme-dark .analytics-daily-forecast-component-row {
+  border-color: #444;
+}
+
+.van-theme-dark .analytics-daily-forecast-partial-badge {
+  background: #5c4500;
+  color: #ffe7a0;
+}
+
+.van-theme-dark .analytics-daily-forecast-partial-note {
+  border-color: #8f6d10;
+  background: #382e13;
+  color: #ffe7a0;
+}
+
+.van-theme-dark .analytics-daily-forecast-detail-section {
+  background: #242426;
+}
+
+.van-theme-dark .analytics-daily-forecast-impact-row {
+  background: #1c1c1e;
+}
+
+.van-theme-dark .analytics-daily-forecast-impact-row small {
+  color: #ffe7a0;
+}
+
+.van-theme-dark .analytics-page-switch {
+    background: #27272a;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.van-theme-dark .analytics-page-switch .app-tabs-item {
+    color: #d4d4d8;
+}
+
+.van-theme-dark .analytics-page-switch .app-tabs-item:hover,
+.van-theme-dark .analytics-page-switch .app-tabs-item.active {
+    color: #fff;
+}
+
+.van-theme-dark .analytics-fx-badge {
+    color: #90caf9;
+    background: rgba(30, 136, 229, 0.18);
+}
+
+.van-theme-dark .analytics-metric-summary,
+.van-theme-dark .analytics-calculation-details,
+.van-theme-dark .analytics-assumption-note,
+.van-theme-dark .analytics-warning {
+    background: var(--van-background-3);
+}
+
+.van-theme-dark .analytics-balance-view {
+    border-color: #444;
+}
+
+.van-theme-dark .analytics-category-facet-header,
+.van-theme-dark .analytics-category-facet-row,
+.van-theme-dark .analytics-metric-facet-header,
+.van-theme-dark .analytics-metric-facet-row,
+.van-theme-dark .analytics-category-summary-row,
+.van-theme-dark .analytics-category-summary-mobile-row {
+    border-color: #444;
+}
+
+.van-theme-dark .analytics-category-summary,
+.van-theme-dark .analytics-category-summary-mobile,
+.van-theme-dark .analytics-forecast-detail-row {
+    background: var(--van-background-3);
+}
+
+.van-theme-dark .analytics-calculation-details summary:focus-visible {
+    outline-color: #64b5f6;
+}
+
+.van-theme-dark .analytics-flow-node-label {
+    fill: var(--van-text-color);
+}
+
+.van-theme-dark .analytics-flow-node-amount {
+    fill: var(--van-text-color);
+}
+
+.van-theme-dark .analytics-flow-pattern-line {
+    stroke: #111;
+}
+
+.van-theme-dark .analytics-flow-pattern-dot {
+    fill: #111;
+}
+
+.van-theme-dark .analytics-flow-hover-details {
+    border-color: #666;
+    color: var(--van-text-color-2);
+    background: #2a2a2a;
+    box-shadow: rgba(0, 0, 0, 0.35) 0 3px 8px;
+}
+
+.van-theme-dark .analytics-flow-node:focus-visible .analytics-flow-interaction-target,
+.van-theme-dark .analytics-flow-ribbon:focus-visible .analytics-flow-ribbon-shape {
+    stroke: #64b5f6;
+}
+
+.van-theme-dark .analytics-flow-month-button,
+.van-theme-dark .analytics-flow-unbalanced,
+.van-theme-dark .analytics-flow-condensed-notice,
+.van-theme-dark .analytics-flow-settings-note,
+.van-theme-dark .analytics-flow-audit,
+.van-theme-dark .analytics-flow-exact-values,
+.van-theme-dark .analytics-flow-detail-row {
+    background: var(--van-background-3);
+}
+
+.van-theme-dark .analytics-flow-audit summary:focus-visible,
+.van-theme-dark .analytics-flow-exact-values summary:focus-visible {
+    outline-color: #64b5f6;
+}
+
+.van-theme-dark .analytics-flow-audit-section h4,
+.van-theme-dark .analytics-flow-details-header {
+    border-color: #444;
+}
+
+.van-theme-dark .analytics-flow-pool-bar {
+    stroke: #f5f5f5;
+}

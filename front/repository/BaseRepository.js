@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { get } from 'lodash-es'
 
+const MERGED_PAGE_CONCURRENCY = 6
+
 export default class BaseRepository {
   constructor(endpoint) {
     this.endpoint = endpoint
@@ -29,20 +31,33 @@ export default class BaseRepository {
     return get(response, 'data', {})
   }
 
-  async getAllWithMerge({ filters = [], getAll = null } = {}) {
+  async getAllWithMerge({ filters = [], getAll = null, pageSize = 50 } = {}) {
     let list = []
-    let getMethod = (getAll ?? this.getAll)
-    const firstPageResponseBody = await getMethod({ filters, page: 1 })
+    let getMethod = getAll ?? this.getAll
+    const firstPageResponseBody = await getMethod({ filters, page: 1, pageSize })
     let responseList = get(firstPageResponseBody, 'data', [])
     list = [...list, ...responseList]
 
     let totalPages = get(firstPageResponseBody, 'meta.pagination.total_pages')
-    for (let page = 2; page <= totalPages; page++) {
-      const pageResponse = await getMethod({ filters, page })
-      let responseList = get(pageResponse, 'data', [])
-      list = [...list, ...responseList]
-    }
+    const remainingPages = await this.getRemainingPages({ filters, getMethod, pageSize, totalPages })
+    for (const pageResponse of remainingPages) list.push(...get(pageResponse, 'data', []))
     return list
+  }
+
+  async getAllWithMergeResult({ filters = [], getAll = null, pageSize = 50 } = {}) {
+    const list = []
+    const getMethod = getAll ?? this.getAll
+    const firstPage = await getMethod({ filters, page: 1, pageSize })
+    if (!Array.isArray(firstPage?.data)) return { ok: false, data: [] }
+
+    list.push(...firstPage.data)
+    const totalPages = Number(firstPage?.meta?.pagination?.total_pages ?? 1)
+    const remainingPages = await this.getRemainingPages({ filters, getMethod, pageSize, totalPages })
+    for (const response of remainingPages) {
+      if (!Array.isArray(response?.data)) return { ok: false, data: [] }
+      list.push(...response.data)
+    }
+    return { ok: true, data: list }
   }
 
   async update(id, data) {
@@ -64,6 +79,20 @@ export default class BaseRepository {
   }
 
   // ---------------------------- PRIVATE --------------------------
+
+  async getRemainingPages({ filters, getMethod, pageSize, totalPages }) {
+    const pages = Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) => index + 2)
+    const responses = new Array(pages.length)
+    let nextIndex = 0
+    const worker = async () => {
+      while (nextIndex < pages.length) {
+        const index = nextIndex++
+        responses[index] = await getMethod({ filters, page: pages[index], pageSize })
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(MERGED_PAGE_CONCURRENCY, pages.length) }, worker))
+    return responses
+  }
 
   getUrlForRequest({ filters = [], page = 1, pageSize = 10, url = null } = {}) {
     let requestURL = url ?? this.getUrl()

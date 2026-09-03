@@ -6,6 +6,7 @@ import {
   IconCalendarEvent,
   IconCarambola,
   IconCategory,
+  IconChartLine,
   IconCoin,
   IconCoins,
   IconCreditCard,
@@ -85,6 +86,7 @@ export default defineNuxtPlugin((nuxtApp) => {
   nuxtApp.vueApp.component('IconCodeCircle', IconCodeCircle)
   nuxtApp.vueApp.component('IconReplace', IconReplace)
   nuxtApp.vueApp.component('IconCarambola', IconCarambola)
+  nuxtApp.vueApp.component('IconChartLine', IconChartLine)
   nuxtApp.vueApp.component('IconDelta', IconDelta)
   nuxtApp.vueApp.component('IconHash', IconHash)
   nuxtApp.vueApp.component('IconTransfer', IconTransfer)
