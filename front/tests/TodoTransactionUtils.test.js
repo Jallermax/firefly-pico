@@ -104,6 +104,12 @@ test('encodes the marker name in the tag-transactions path', () => {
   assert.equal(buildTodoTransactionsPath('Проверить'), 'api/tags/%D0%9F%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%B8%D1%82%D1%8C/transactions')
 })
 
+test('prefers the tag ID so hierarchical marker names stay one path segment', () => {
+  const tag = { id: '314', attributes: { tag: 'smart-processor/to-review' } }
+
+  assert.equal(buildTodoTransactionsPath(tag), 'api/tags/314/transactions')
+})
+
 test('filters completed receipts from active items and locks their offset page', () => {
   const items = [{ id: '42' }, { id: '43' }]
   const receipts = [{ id: '42' }]
@@ -111,6 +117,7 @@ test('filters completed receipts from active items and locks their offset page',
   assert.deepEqual(getActiveTodoItems(items, receipts), [{ id: '43' }])
   assert.equal(isTodoPageLocked(receipts, false), true)
   assert.equal(isTodoPageLocked([], true), true)
+  assert.equal(isTodoPageLocked([], false, true), true)
   assert.equal(isTodoPageLocked([], false), false)
 })
 

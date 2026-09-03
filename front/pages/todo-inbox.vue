@@ -29,7 +29,7 @@
           <van-button size="small" plain :disabled="activeItems.length === 0 || isBatchRunning" @click="toggleAll">
             {{ areAllExpanded ? $t('todo_inbox.collapse_all') : $t('todo_inbox.expand_all') }}
           </van-button>
-          <van-button size="small" type="primary" :disabled="activeItems.length === 0" :loading="isBatchRunning" @click="markPageDone">
+          <van-button size="small" type="primary" :disabled="activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
             {{ $t('todo_inbox.mark_page_done') }}
           </van-button>
         </div>
@@ -57,26 +57,28 @@
 
       <empty-list v-else-if="showEmptyState" :title="$t('todo_inbox.empty')" :subtitle="$t('todo_inbox.empty_help')" />
 
-      <div v-else-if="items.length > 0" class="todo-inbox-list" :class="{ 'transaction-desktop-list': appStore.isDesktopLayout }">
-        <todo-inbox-transaction-item
-          v-for="item in items"
-          :key="item.id"
-          :value="item"
-          :is-expanded="expandedIds.has(String(item.id))"
-          :is-processing="getState(item.id).isProcessing"
-          :error="getState(item.id).error"
-          :receipt="receiptById[String(item.id)]"
-          @edit="editItem"
-          @toggle="toggleExpanded"
-          @done="onDone"
-          @retry="onDone"
-          @undo="onUndo"
-        />
+      <div v-else-if="items.length > 0" class="todo-inbox-list-wrapper">
+        <div class="todo-inbox-list" :class="{ 'transaction-desktop-list': appStore.isDesktopLayout }">
+          <todo-inbox-transaction-item
+            v-for="item in items"
+            :key="item.id"
+            :value="item"
+            :is-expanded="expandedIds.has(String(item.id))"
+            :is-processing="getState(item.id).isProcessing"
+            :error="getState(item.id).error"
+            :receipt="receiptById[String(item.id)]"
+            @edit="editItem"
+            @toggle="toggleExpanded"
+            @done="onDone"
+            @retry="onDone"
+            @undo="onUndo"
+          />
+        </div>
       </div>
 
       <div v-if="receipts.length > 0" class="todo-inbox-continue">
         <span>{{ $t('todo_inbox.continue_help') }}</span>
-        <van-button type="primary" size="small" :loading="isLoading" :disabled="isBatchRunning" @click="continuePage">
+        <van-button type="primary" size="small" :loading="isLoading" :disabled="isBatchRunning || isAnyItemProcessing" @click="continuePage">
           {{ $t('todo_inbox.continue') }}
         </van-button>
       </div>
@@ -126,6 +128,7 @@ const {
   isLoaded,
   loadError,
   isPageLocked,
+  isAnyItemProcessing,
   isBatchRunning,
   batchProgress,
   batchResult,

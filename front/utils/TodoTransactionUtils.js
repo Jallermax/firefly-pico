@@ -12,7 +12,7 @@ const getRequestData = (transactions) => ({
   transactions,
 })
 
-export const buildTodoTransactionsPath = (tagName) => `api/tags/${encodeURIComponent(tagName)}/transactions`
+export const buildTodoTransactionsPath = (tag) => `api/tags/${encodeURIComponent(typeof tag === 'object' ? (tag?.id ?? tag?.attributes?.tag) : tag)}/transactions`
 
 export const getTodoJournalIds = (transaction, markerName) =>
   getSplits(transaction)
@@ -73,7 +73,7 @@ export const getSafeTodoPage = (page, totalPages) => {
   return Math.min(currentPage, lastPage)
 }
 
-export const isTodoPageLocked = (receipts, isBatchRunning) => receipts.length > 0 || isBatchRunning
+export const isTodoPageLocked = (receipts, isBatchRunning, isItemProcessing = false) => receipts.length > 0 || isBatchRunning || isItemProcessing
 
 export const runWithConcurrency = async (items, limit, worker, onProgress) => {
   if (!Number.isInteger(limit) || limit < 1) {

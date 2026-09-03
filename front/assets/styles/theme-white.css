@@ -2298,6 +2298,12 @@ body {
     margin: 16px;
 }
 
+.todo-inbox-list-wrapper {
+    width: 100%;
+    min-width: 0;
+    container: transaction-list / inline-size;
+}
+
 .todo-inbox-item {
     min-width: 0;
     overflow: hidden;
