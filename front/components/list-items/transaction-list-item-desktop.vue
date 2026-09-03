@@ -1,5 +1,5 @@
 <template>
-  <van-swipe-cell ref="swipeCell" v-bind="clickWithoutSwipe">
+  <van-swipe-cell ref="swipeCell" v-bind="clickWithoutSwipe" :disabled="!props.isDeleteEnabled">
     <div class="transaction-desktop-row cursor-pointer" :class="cellClass">
       <div class="transaction-desktop-type-dot" :class="typeClass" />
 
@@ -49,7 +49,7 @@
       </div>
     </div>
 
-    <template #right>
+    <template v-if="props.isDeleteEnabled" #right>
       <van-button class="delete-button" square type="danger" text="Delete" @click="onDelete" />
     </template>
   </van-swipe-cell>
@@ -64,6 +64,10 @@ import { useClickWithoutSwipe } from '~/composables/useClickWithoutSwipe.js'
 
 const props = defineProps({
   value: Object,
+  isDeleteEnabled: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const emit = defineEmits(['onEdit', 'onDelete'])

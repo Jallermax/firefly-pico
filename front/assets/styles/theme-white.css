@@ -2252,3 +2252,186 @@ body {
         display: none;
     }
 }
+
+/* ------------------------ TODO Inbox ------------------------ */
+
+.todo-inbox-page {
+    padding-bottom: 110px;
+}
+
+.todo-inbox-controls {
+    overflow: hidden;
+}
+
+.todo-inbox-context,
+.todo-inbox-marker,
+.todo-inbox-page-actions,
+.todo-inbox-item-actions,
+.todo-inbox-receipt-content,
+.todo-inbox-item-error,
+.todo-inbox-load-error,
+.todo-inbox-continue {
+    display: flex;
+    align-items: center;
+}
+
+.todo-inbox-context {
+    flex-wrap: wrap;
+    gap: 5px 10px;
+}
+
+.todo-inbox-marker {
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.todo-inbox-page-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 16px 12px;
+}
+
+.todo-inbox-list {
+    gap: 10px;
+    margin: 16px;
+}
+
+.todo-inbox-item {
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--van-cell-background);
+    box-shadow: rgba(149, 157, 165, 0.2) 0 8px 24px;
+}
+
+.todo-inbox-item + .todo-inbox-item {
+    margin-top: 10px;
+}
+
+.todo-inbox-item-actions {
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid #eef2f7;
+}
+
+.todo-inbox-item .transaction-split-view {
+    padding: 2px 0 10px;
+    background: var(--van-background);
+}
+
+.todo-inbox-item .transaction-split-list {
+    margin-top: 10px;
+}
+
+.todo-inbox-item-completed {
+    box-shadow: none;
+}
+
+.todo-inbox-receipt {
+    min-height: 40px;
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.todo-inbox-receipt .van-cell__title {
+    min-width: 0;
+}
+
+.todo-inbox-receipt .van-cell__value {
+    flex: 0 0 auto;
+}
+
+.todo-inbox-receipt-content {
+    min-width: 0;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.todo-inbox-receipt-amount,
+.todo-inbox-receipt-label {
+    flex: 0 0 auto;
+    font-size: 11px;
+}
+
+.todo-inbox-receipt-label {
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.todo-inbox-item-error,
+.todo-inbox-load-error {
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #fff1f2;
+    color: #b91c1c;
+    font-size: 12px;
+}
+
+.todo-inbox-load-error {
+    margin: 16px;
+    border-radius: 8px;
+}
+
+.todo-inbox-status {
+    margin: 10px 16px;
+    padding: 8px 12px;
+    border: 1px dashed #bab5b5;
+    border-radius: 8px;
+    background: var(--van-cell-background);
+    color: var(--van-text-color-2);
+    font-size: 12px;
+}
+
+.todo-inbox-continue {
+    position: sticky;
+    z-index: 2;
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    justify-content: space-between;
+    gap: 12px;
+    margin: 16px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--van-cell-background);
+    box-shadow: rgba(0, 0, 0, 0.24) 0 3px 8px;
+    color: var(--van-text-color-2);
+    font-size: 12px;
+}
+
+.todo-inbox-pagination {
+    margin: 18px 16px;
+}
+
+.transaction-desktop-list > .todo-inbox-item,
+.transaction-desktop-list > .todo-inbox-item > .van-swipe-cell,
+.transaction-desktop-list > .todo-inbox-item > .van-swipe-cell > .van-swipe-cell__wrapper {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+}
+
+.transaction-desktop-list > .todo-inbox-item > .todo-inbox-item-actions,
+.transaction-desktop-list > .todo-inbox-item > .todo-inbox-item-error,
+.transaction-desktop-list > .todo-inbox-item > .transaction-split-view,
+.transaction-desktop-list > .todo-inbox-item > .todo-inbox-receipt {
+    grid-column: 1 / -1;
+}
+
+@media (min-width: 801px) {
+    .todo-inbox-list.transaction-desktop-list {
+        overflow: visible;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .todo-inbox-item + .todo-inbox-item {
+        margin-top: 0;
+    }
+
+    .todo-inbox-continue {
+        bottom: 16px;
+    }
+}
