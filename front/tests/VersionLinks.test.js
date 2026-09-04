@@ -20,10 +20,10 @@ async function renderSettings(currentCommitSha, isNewVersionAvailable = false) {
     render,
     setup: () => ({
       appStore: {
-        currentAppVersion: '1.10.0',
+        currentAppVersion: '1.12.1-3-dev',
         currentCommitSha,
         isNewVersionAvailable,
-        latestAppVersion: isNewVersionAvailable ? '1.11.0' : null,
+        latestAppVersion: isNewVersionAvailable ? '1.12.1-4-dev' : null,
       },
       RELEASES_URL: Constants.RELEASES_URL,
       PERSONAL_REPO_URL: Constants.PERSONAL_REPO_URL,
@@ -43,7 +43,7 @@ test('personal builds link the upstream version and exact deployed commit separa
   const sha = '710523ef10dddb4fd569726ed69eb21826a37ed7'
   const html = await renderSettings(sha)
 
-  assert.match(html, new RegExp(`<a href="${EXPECTED_RELEASES_URL}">1\\.10\\.0</a>`))
+  assert.match(html, new RegExp(`<a href="${EXPECTED_RELEASES_URL}">1\\.12\\.1-3-dev</a>`))
   assert.match(html, new RegExp(`<a href="${EXPECTED_PERSONAL_REPO_URL}/commit/${sha}">${sha}</a>`))
   assert.equal((html.match(new RegExp(`>${sha}</a>`, 'g')) ?? []).length, 1)
 })
@@ -51,14 +51,14 @@ test('personal builds link the upstream version and exact deployed commit separa
 test('local builds omit the personal commit link when no SHA was embedded', async () => {
   const html = await renderSettings('')
 
-  assert.match(html, new RegExp(`<a href="${EXPECTED_RELEASES_URL}">1\\.10\\.0</a>`))
+  assert.match(html, new RegExp(`<a href="${EXPECTED_RELEASES_URL}">1\\.12\\.1-3-dev</a>`))
   assert.doesNotMatch(html, new RegExp(`${EXPECTED_PERSONAL_REPO_URL}/commit/`))
 })
 
 test('available updates link to upstream releases', async () => {
   const html = await renderSettings('', true)
 
-  assert.ok(html.includes(`<a href="${EXPECTED_RELEASES_URL}">settings.new_version_available: 1.11.0`))
+  assert.ok(html.includes(`<a href="${EXPECTED_RELEASES_URL}">settings.new_version_available: 1.12.1-4-dev`))
 })
 
 test('repository and release links have distinct production targets', () => {

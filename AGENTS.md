@@ -282,3 +282,4 @@ Read this before generating any UI so new screens look like they belong. The app
 - Put stable personal features in `personal/deploy`. Put experimental-only work in its named input branch, such as `personal/extended-analytics`; do not commit directly to `personal/experimental`.
 - If a merge conflicts, the workflow must stop without publishing. Resolve the candidate locally with rerere enabled, run the same focused tests and builds as the workflow, then push both verified branch tips atomically without force.
 - Deploy stable from an exact `personal/deploy` SHA or experimental from an exact `personal/experimental` SHA. Keep `/VERSION` as that raw SHA so deployment checks can verify the running image.
+- Display the latest `*-dev` tag reachable from `upstream/dev` as the upstream version and the exact deployed personal branch SHA as the separate personal revision; never substitute `front/package.json` for a tagged dev build version.

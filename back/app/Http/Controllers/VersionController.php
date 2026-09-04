@@ -23,7 +23,7 @@ class VersionController extends BaseController
 
     private function resolveLatestVersion()
     {
-        $versionFile = base_path('VERSION');
+        $versionFile = base_path(file_exists(base_path('UPSTREAM_VERSION')) ? 'UPSTREAM_VERSION' : 'VERSION');
         $includeDev = false;
 
         if (file_exists($versionFile)) {
