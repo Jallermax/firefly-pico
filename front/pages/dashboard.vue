@@ -5,6 +5,7 @@
         <dashboard-control-desktop v-if="appStore.isDesktopLayout" />
       </template>
     </app-top-toolbar>
+    <analytics-page-switch />
 
     <van-pull-refresh v-model="isRefreshing" @refresh="onRefresh">
       <dashboard-control v-if="!appStore.isDesktopLayout" />
