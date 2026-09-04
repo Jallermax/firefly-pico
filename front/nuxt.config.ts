@@ -30,7 +30,7 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     public: {
-      version: pkg.version,
+      version: process.env.NUXT_PUBLIC_VERSION ?? pkg.version,
       commitSha: process.env.NUXT_PUBLIC_COMMIT_SHA ?? '',
       queryTimeout: 8000,
     },
