@@ -57,16 +57,20 @@ COPY back/ .
 RUN mv .env.example .env
 RUN composer dump-autoload --no-dev --optimize
 RUN php artisan key:generate
-ARG APP_VERSION
-RUN echo $APP_VERSION > /var/www/html/VERSION
-RUN tar --owner=www-data --group=www-data --exclude=.git -czf /tmp/app-back.tar.gz .
 
 #Configure frontend - Step 1: Install dependencies
 WORKDIR /var/www/html/front
 COPY front/package.json front/package-lock.json front/.npmrc* ./
 RUN npm ci --ignore-scripts
 
+#Embed the version only after dependency installation so new commit SHAs preserve that cache layer
+WORKDIR /var/www/html
+ARG APP_VERSION
+RUN echo $APP_VERSION > /var/www/html/VERSION
+RUN tar --owner=www-data --group=www-data --exclude=.git -czf /tmp/app-back.tar.gz .
+
 #Configure frontend - Step 2: Copy source and build
+WORKDIR /var/www/html/front
 COPY front/ .
 RUN NUXT_PUBLIC_VERSION="$APP_VERSION" npm run build
 RUN npm prune --production
