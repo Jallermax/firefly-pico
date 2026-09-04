@@ -34,6 +34,10 @@ jobs:
         id: prepare
         run: bash scripts/sync-personal-branches.sh
 
+      - name: Validate Docker dependency cache boundary
+        if: steps.prepare.outputs.changed == 'true'
+        run: bash tests/scripts/test_dockerfile_cache.sh
+
       - name: Select stable candidate
         if: steps.prepare.outputs.changed == 'true'
         run: git switch sync-stable
