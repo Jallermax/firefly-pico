@@ -1,0 +1,65 @@
+name: Sync personal deploy branches
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: personal-deploy-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: personal/deploy
+          fetch-depth: 0
+
+      - name: Fetch branch inputs
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --prune origin '+refs/heads/personal/*:refs/remotes/origin/personal/*'
+          git remote add upstream https://github.com/cioraneanu/firefly-pico.git
+          git fetch --prune upstream '+refs/heads/dev:refs/remotes/upstream/dev'
+
+      - name: Prepare stable and experimental candidates
+        id: prepare
+        run: bash scripts/sync-personal-branches.sh
+
+      - name: Test and build stable candidate
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git switch sync-stable
+          cd front
+          npm ci
+          node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/useTodoInbox.test.js
+          npm run build
+
+      - name: Test and build experimental candidate
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git switch sync-experimental
+          rm -rf front/.nuxt front/.output
+          cd front
+          npm ci
+          node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/useTodoInbox.test.js
+          node --test tests/stores/analyticsStore.test.js tests/utils/AnalyticsBalanceUtils.test.js tests/utils/AnalyticsCashUseUtils.test.js tests/utils/AnalyticsCategoryPresentationUtils.test.js tests/utils/AnalyticsForecastUtils.test.js tests/utils/AnalyticsLedgerUtils.test.js tests/utils/AnalyticsRecurringUtils.test.js tests/utils/AnalyticsUtils.test.js
+          npm run build
+
+      - name: Publish both candidates
+        if: steps.prepare.outputs.changed == 'true'
+        run: git push --atomic origin refs/heads/sync-stable:refs/heads/personal/deploy refs/heads/sync-experimental:refs/heads/personal/experimental
+
+      - name: Report no changes
+        if: steps.prepare.outputs.changed != 'true'
+        run: echo 'Personal deploy branches are already current.'
