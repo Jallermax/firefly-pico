@@ -31,6 +31,7 @@ export const useAppStore = defineStore('app', () => {
   const profileFloatButtonPosition = useLocalStorage('profileFloatButtonPosition', { y: window.innerHeight / 2.2 })
 
   const currentAppVersion = ref(runtimeConfig.public.version)
+  const currentCommitSha = ref(runtimeConfig.public.commitSha)
   const queryTimeout = ref(runtimeConfig.public.queryTimeout)
 
   // General info from backend, { latest_version, use_llm, etc }
@@ -157,6 +158,7 @@ export const useAppStore = defineStore('app', () => {
 
     profileFloatButtonPosition,
     currentAppVersion,
+    currentCommitSha,
     queryTimeout,
     latestAppVersion,
 

@@ -72,7 +72,7 @@ RUN tar --owner=www-data --group=www-data --exclude=.git -czf /tmp/app-back.tar.
 #Configure frontend - Step 2: Copy source and build
 WORKDIR /var/www/html/front
 COPY front/ .
-RUN NUXT_PUBLIC_VERSION="$APP_VERSION" npm run build
+RUN NUXT_PUBLIC_COMMIT_SHA="$APP_VERSION" npm run build
 RUN tar --owner=www-data --group=www-data \
     --exclude=.git \
     --exclude=.nuxt \

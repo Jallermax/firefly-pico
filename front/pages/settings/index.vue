@@ -12,42 +12,38 @@
       <app-field-link :label="$t('settings.about_entry')" :icon="TablerIconConstants.settingsAbout" @click="navigateTo(RouteConstants.ROUTE_SETTINGS_ABOUT)" />
     </van-cell-group>
 
-
     <van-cell-group inset style="overflow: auto">
       <app-field-link label="Sync everything" :icon="TablerIconConstants.lastSync" :is-link="false" @click="onSyncEverything" />
     </van-cell-group>
 
-
-
     <div class="text-muted subtitle flex-center mt-20 flex-column">
       <div>
-        <a :href="REPO_URL">{{$t('settings.version')}}: {{ appStore.currentAppVersion }}</a>
+        {{ $t('settings.version') }}: <a :href="REPO_URL">{{ appStore.currentAppVersion }}</a>
+        <template v-if="appStore.currentCommitSha">
+          - <a :href="`${PERSONAL_REPO_URL}/commit/${appStore.currentCommitSha}`">{{ appStore.currentCommitSha }}</a>
+        </template>
       </div>
 
       <div v-if="appStore.isNewVersionAvailable" class="latest-version-badge">
-        <a :href="REPO_URL">{{$t('settings.new_version_available')}}: {{ appStore.latestAppVersion }} 🎉</a>
+        <a :href="REPO_URL">{{ $t('settings.new_version_available') }}: {{ appStore.latestAppVersion }} 🎉</a>
       </div>
     </div>
-    <div/>
+    <div />
   </div>
 </template>
 
 <script setup>
 import RouteConstants from '~/constants/RouteConstants'
 import { useToolbar } from '~/composables/useToolbar'
-import { REPO_URL } from '~/constants/Constants'
+import { PERSONAL_REPO_URL, REPO_URL } from '~/constants/Constants'
 
 import TablerIconConstants from '~/constants/TablerIconConstants'
-import UIUtils from '~/utils/UIUtils.js'
-import { useDashboardStore } from '~/stores/dashboardStore'
 
 const appStore = useAppStore()
-const dashboardStore = useDashboardStore()
 const toolbar = useToolbar()
 
 const { t } = useI18n()
 toolbar.init({ title: t('settings.settings_title') })
-
 
 const onSyncEverything = async () => {
   await appStore.syncEverything()

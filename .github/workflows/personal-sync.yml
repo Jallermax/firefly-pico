@@ -57,7 +57,7 @@ jobs:
           printf 'STABLE_LOCK=%s\n' "$stable_lock" >> "$GITHUB_ENV"
           cd front
           npm ci --prefer-offline --no-audit --no-fund
-          node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/useTodoInbox.test.js
+          node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/VersionLinks.test.js tests/useTodoInbox.test.js
           npm run build
 
       - name: Test and build experimental candidate
@@ -72,7 +72,7 @@ jobs:
           fi
           rm -rf front/.nuxt front/.output
           cd front
-          node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/useTodoInbox.test.js
+          node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/VersionLinks.test.js tests/useTodoInbox.test.js
           node --test tests/repository/BaseRepository.test.js tests/stores/analyticsStore.test.js tests/utils/AnalyticsBalanceUtils.test.js tests/utils/AnalyticsCashUseUtils.test.js tests/utils/AnalyticsCategoryPresentationUtils.test.js tests/utils/AnalyticsForecastUtils.test.js tests/utils/AnalyticsLedgerUtils.test.js tests/utils/AnalyticsRecurringUtils.test.js tests/utils/AnalyticsUtils.test.js tests/utils/ChartUtils.test.js
           npm run build
 
