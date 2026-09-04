@@ -53,7 +53,7 @@ jobs:
           cd front
           npm ci
           node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/useTodoInbox.test.js
-          node --test tests/stores/analyticsStore.test.js tests/utils/AnalyticsBalanceUtils.test.js tests/utils/AnalyticsCashUseUtils.test.js tests/utils/AnalyticsCategoryPresentationUtils.test.js tests/utils/AnalyticsForecastUtils.test.js tests/utils/AnalyticsLedgerUtils.test.js tests/utils/AnalyticsRecurringUtils.test.js tests/utils/AnalyticsUtils.test.js
+          node --test tests/repository/BaseRepository.test.js tests/stores/analyticsStore.test.js tests/utils/AnalyticsBalanceUtils.test.js tests/utils/AnalyticsCashUseUtils.test.js tests/utils/AnalyticsCategoryPresentationUtils.test.js tests/utils/AnalyticsForecastUtils.test.js tests/utils/AnalyticsLedgerUtils.test.js tests/utils/AnalyticsRecurringUtils.test.js tests/utils/AnalyticsUtils.test.js tests/utils/ChartUtils.test.js
           npm run build
 
       - name: Publish both candidates
