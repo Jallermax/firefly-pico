@@ -25,7 +25,7 @@
       </div>
 
       <div v-if="appStore.isNewVersionAvailable" class="latest-version-badge">
-        <a :href="REPO_URL">{{ $t('settings.new_version_available') }}: {{ appStore.latestAppVersion }} 🎉</a>
+        <a :href="RELEASES_URL">{{ $t('settings.new_version_available') }}: {{ appStore.latestAppVersion }} 🎉</a>
       </div>
     </div>
     <div />
