@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 dockerfile="$repo_root/Dockerfile"
+release_workflow="$repo_root/.github/workflows/docker-image.yml"
+dev_workflow="$repo_root/.github/workflows/docker-image-dev.yml"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -11,15 +13,19 @@ fail() {
 
 npm_ci_line=$(grep -n -m1 'RUN npm ci --ignore-scripts' "$dockerfile" | cut -d: -f1)
 version_line=$(grep -n -m1 'RUN echo \$APP_VERSION > /var/www/html/VERSION' "$dockerfile" | cut -d: -f1)
-frontend_commit_line=$(grep -n -m1 'NUXT_PUBLIC_COMMIT_SHA="\$APP_VERSION"' "$dockerfile" | cut -d: -f1 || true)
+commit_arg_line=$(grep -n -m1 'ARG APP_COMMIT_SHA' "$dockerfile" | cut -d: -f1 || true)
+frontend_commit_line=$(grep -n -m1 'NUXT_PUBLIC_COMMIT_SHA="\$APP_COMMIT_SHA"' "$dockerfile" | cut -d: -f1 || true)
 
 [ -n "$npm_ci_line" ] || fail 'frontend dependency installation is missing'
 [ -n "$version_line" ] || fail 'embedded application version is missing'
+[ -n "$commit_arg_line" ] || fail 'commit SHA build argument is missing'
 [ -n "$frontend_commit_line" ] || fail 'frontend commit SHA is not embedded separately'
 [ "$npm_ci_line" -lt "$version_line" ] || fail 'APP_VERSION invalidates the frontend dependency cache'
 if grep -q 'NUXT_PUBLIC_VERSION="\$APP_VERSION"' "$dockerfile"; then
   fail 'commit SHA replaces the upstream application version'
 fi
+grep -q 'APP_COMMIT_SHA=${{ github.sha }}' "$release_workflow" || fail 'release images do not embed the exact commit SHA'
+grep -q 'APP_COMMIT_SHA=${{ github.sha }}' "$dev_workflow" || fail 'dev images do not embed the exact commit SHA'
 if grep -q '^RUN npm prune' "$dockerfile"; then
   fail 'runtime packaging repeats a dependency-tree rewrite after every build'
 fi

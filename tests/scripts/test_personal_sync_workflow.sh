@@ -18,6 +18,8 @@ grep -q 'contents: write' "$workflow" || fail 'contents write permission is miss
 grep -q 'scripts/sync-personal-branches.sh' "$workflow" || fail 'tested composition script is not used'
 grep -q 'TodoReviewUtils.test.js' "$workflow" || fail 'TODO Inbox tests are not gated'
 grep -q 'VersionLinks.test.js' "$workflow" || fail 'personal version links are not gated'
+grep -q 'NUXT_PUBLIC_COMMIT_SHA=' "$workflow" || fail 'candidate builds do not embed their exact commit SHA'
+grep -q 'tests/scripts/verify_built_version.sh' "$workflow" || fail 'compiled version links are not verified'
 grep -q 'AnalyticsForecastUtils.test.js' "$workflow" || fail 'analytics tests are not gated'
 [ "$(grep -c 'npm run build' "$workflow")" -eq 2 ] || fail 'both candidates must build'
 grep -q 'uses: actions/setup-node@v4' "$workflow" || fail 'Node setup and npm cache are missing'

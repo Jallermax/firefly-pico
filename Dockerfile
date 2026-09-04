@@ -66,13 +66,14 @@ RUN npm ci --ignore-scripts
 #Embed the version only after dependency installation so new commit SHAs preserve that cache layer
 WORKDIR /var/www/html
 ARG APP_VERSION
+ARG APP_COMMIT_SHA
 RUN echo $APP_VERSION > /var/www/html/VERSION
 RUN tar --owner=www-data --group=www-data --exclude=.git -czf /tmp/app-back.tar.gz .
 
 #Configure frontend - Step 2: Copy source and build
 WORKDIR /var/www/html/front
 COPY front/ .
-RUN NUXT_PUBLIC_COMMIT_SHA="$APP_VERSION" npm run build
+RUN NUXT_PUBLIC_COMMIT_SHA="$APP_COMMIT_SHA" npm run build
 RUN tar --owner=www-data --group=www-data \
     --exclude=.git \
     --exclude=.nuxt \

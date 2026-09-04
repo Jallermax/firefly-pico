@@ -54,11 +54,14 @@ jobs:
         run: |
           set -euo pipefail
           stable_lock=$(git hash-object front/package-lock.json)
+          stable_sha=$(git rev-parse HEAD)
           printf 'STABLE_LOCK=%s\n' "$stable_lock" >> "$GITHUB_ENV"
           cd front
           npm ci --prefer-offline --no-audit --no-fund
           node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/VersionLinks.test.js tests/useTodoInbox.test.js
-          npm run build
+          NUXT_PUBLIC_COMMIT_SHA="$stable_sha" npm run build
+          cd ..
+          bash tests/scripts/verify_built_version.sh "$stable_sha"
 
       - name: Test and build experimental candidate
         if: steps.prepare.outputs.changed == 'true'
@@ -71,10 +74,13 @@ jobs:
             npm ci --prefix front --prefer-offline --no-audit --no-fund
           fi
           rm -rf front/.nuxt front/.output
+          experimental_sha=$(git rev-parse HEAD)
           cd front
           node --test tests/TodoInboxRendering.test.js tests/TodoInboxTransport.test.js tests/TodoReviewUtils.test.js tests/TodoTransactionUtils.test.js tests/VersionLinks.test.js tests/useTodoInbox.test.js
           node --test tests/repository/BaseRepository.test.js tests/stores/analyticsStore.test.js tests/utils/AnalyticsBalanceUtils.test.js tests/utils/AnalyticsCashUseUtils.test.js tests/utils/AnalyticsCategoryPresentationUtils.test.js tests/utils/AnalyticsForecastUtils.test.js tests/utils/AnalyticsLedgerUtils.test.js tests/utils/AnalyticsRecurringUtils.test.js tests/utils/AnalyticsUtils.test.js tests/utils/ChartUtils.test.js
-          npm run build
+          NUXT_PUBLIC_COMMIT_SHA="$experimental_sha" npm run build
+          cd ..
+          bash tests/scripts/verify_built_version.sh "$experimental_sha"
 
       - name: Publish both candidates
         if: steps.prepare.outputs.changed == 'true'

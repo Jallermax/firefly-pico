@@ -18,7 +18,7 @@
 
     <div class="text-muted subtitle flex-center mt-20 flex-column">
       <div>
-        {{ $t('settings.version') }}: <a :href="REPO_URL">{{ appStore.currentAppVersion }}</a>
+        {{ $t('settings.version') }}: <a :href="RELEASES_URL">{{ appStore.currentAppVersion }}</a>
         <template v-if="appStore.currentCommitSha">
           - <a :href="`${PERSONAL_REPO_URL}/commit/${appStore.currentCommitSha}`">{{ appStore.currentCommitSha }}</a>
         </template>
@@ -35,7 +35,7 @@
 <script setup>
 import RouteConstants from '~/constants/RouteConstants'
 import { useToolbar } from '~/composables/useToolbar'
-import { PERSONAL_REPO_URL, REPO_URL } from '~/constants/Constants'
+import { PERSONAL_REPO_URL, RELEASES_URL } from '~/constants/Constants'
 
 import TablerIconConstants from '~/constants/TablerIconConstants'
 
