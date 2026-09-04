@@ -73,44 +73,11 @@ RUN tar --owner=www-data --group=www-data --exclude=.git -czf /tmp/app-back.tar.
 WORKDIR /var/www/html/front
 COPY front/ .
 RUN NUXT_PUBLIC_VERSION="$APP_VERSION" npm run build
-RUN npm prune --production
-RUN npm cache clean --force
 RUN tar --owner=www-data --group=www-data \
     --exclude=.git \
     --exclude=.nuxt \
     --exclude=.cache \
-    --exclude=node_modules/eslint-plugin-vue \
-    --exclude=node_modules/esbuild \
-    --exclude=node_modules/date-fns \
-    --exclude=node_modules/csso \
-    --exclude=node_modules/node-gyp \
-    --exclude=node_modules/vite \
-    --exclude=node_modules/@npmcli \
-    --exclude=node_modules/caniuse-lite \
-    --exclude=node_modules/vite-plugin-inspect \
-    --exclude=node_modules/@eslint \
-    --exclude=node_modules/lodash \
-    --exclude=node_modules/nuxi \
-    --exclude=node_modules/@unocss \
-    --exclude=node_modules/eslint* \
-    --exclude=node_modules/@rollup \
-    --exclude=node_modules/prettier \
-    --exclude=node_modules/@esbuild \
-    --exclude=node_modules/workbox-build \
-    --exclude=node_modules/es-abstract \
-    --exclude=node_modules/shiki \
-    --exclude=node_modules/@nuxt \
-    --exclude=node_modules/@typescript-eslint \
-#     Temporarily. There's probably a bug in vue-router which references this dev plugin while in production mode
-#    --exclude=node_modules/@vue/devtools* \
-    --exclude=node_modules/vant \
-    --exclude=node_modules/mathjs \
-    --exclude=node_modules/typescript \
-    --exclude=node_modules/@faker-js \
-    --exclude=node_modules/@opentelemetry \
-    node_modules/@babel/parser \
-    --exclude=node_modules/@babel \
-    --exclude=node_modules/@tabler \
+    --exclude=./node_modules \
     -czf /tmp/app-front.tar.gz .
 
 
