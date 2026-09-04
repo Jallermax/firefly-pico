@@ -15,5 +15,9 @@ version_line=$(grep -n -m1 'RUN echo \$APP_VERSION > /var/www/html/VERSION' "$do
 [ -n "$npm_ci_line" ] || fail 'frontend dependency installation is missing'
 [ -n "$version_line" ] || fail 'embedded application version is missing'
 [ "$npm_ci_line" -lt "$version_line" ] || fail 'APP_VERSION invalidates the frontend dependency cache'
+if grep -q '^RUN npm prune' "$dockerfile"; then
+  fail 'runtime packaging repeats a dependency-tree rewrite after every build'
+fi
+grep -q -- '--exclude=\./node_modules' "$dockerfile" || fail 'root frontend dependencies are included in the runtime image'
 
-echo 'PASS: commit version changes preserve the frontend dependency layer'
+echo 'PASS: commit version changes preserve dependency layers and runtime packaging excludes the build tree'
