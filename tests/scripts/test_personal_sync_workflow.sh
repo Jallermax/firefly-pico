@@ -17,6 +17,11 @@ grep -q 'scripts/sync-personal-branches.sh' "$workflow" || fail 'tested composit
 grep -q 'TodoReviewUtils.test.js' "$workflow" || fail 'TODO Inbox tests are not gated'
 grep -q 'AnalyticsForecastUtils.test.js' "$workflow" || fail 'analytics tests are not gated'
 [ "$(grep -c 'npm run build' "$workflow")" -eq 2 ] || fail 'both candidates must build'
+grep -q 'uses: actions/setup-node@v4' "$workflow" || fail 'Node setup and npm cache are missing'
+grep -q 'cache: npm' "$workflow" || fail 'npm download cache is missing'
+grep -q 'npm ci --prefer-offline --no-audit --no-fund' "$workflow" || fail 'dependency install is not optimized'
+grep -q 'STABLE_LOCK=' "$workflow" || fail 'stable dependency lock is not recorded'
+grep -q 'experimental_lock.*!=.*STABLE_LOCK' "$workflow" || fail 'experimental dependencies are not reused safely'
 grep -q 'git push --atomic origin' "$workflow" || fail 'publication is not atomic'
 if grep -Eq 'git push[^#]*(--force|-f([[:space:]]|$))' "$workflow"; then
   fail 'workflow contains a force push'
