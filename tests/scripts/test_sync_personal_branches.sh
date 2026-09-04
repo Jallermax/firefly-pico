@@ -19,8 +19,8 @@ assert_ancestor() {
   git -C "$work" merge-base --is-ancestor "$1" "$2" || fail "$1 is not an ancestor of $2"
 }
 
-git init --bare "$tmp/upstream.git" >/dev/null
-git init --bare "$tmp/fork.git" >/dev/null
+git init --bare --initial-branch=main "$tmp/upstream.git" >/dev/null
+git init --bare --initial-branch=main "$tmp/fork.git" >/dev/null
 git init -b dev "$tmp/seed" >/dev/null
 git -C "$tmp/seed" config user.name Test
 git -C "$tmp/seed" config user.email test@example.com

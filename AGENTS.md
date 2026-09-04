@@ -272,3 +272,13 @@ Read this before generating any UI so new screens look like they belong. The app
 - If requirements are ambiguous but the safe path is obvious, choose the conservative repo-native option and mention the assumption.
 - If a change could affect user data, auth, migrations, proxy behavior, or Docker deployment, slow down and call out the risk.
 - Leave the workspace cleaner than you found it, but do not "clean up" unrelated files.
+
+## Personal Deployment Branches
+
+- `upstream/dev` is the source of original Firefly Pico changes. `origin` is the `Jallermax/firefly-pico` fork.
+- `personal/deploy` is the stable deployable branch. It contains the latest merged `upstream/dev` plus personal features accepted for stable use.
+- `personal/extended-analytics` is the long-lived analytics input branch. `personal/experimental` is the deployable result of merging `personal/deploy` and `personal/extended-analytics`.
+- Run `.github/workflows/personal-sync.yml` manually or let its daily schedule invoke `scripts/sync-personal-branches.sh`. The script requires a clean checkout and composes both candidates with merges, without rebasing. The workflow tests and builds both candidates, then publishes both branches atomically without force only after every gate passes.
+- Put stable personal features in `personal/deploy`. Put experimental-only work in its named input branch, such as `personal/extended-analytics`; do not commit directly to `personal/experimental`.
+- If a merge conflicts, the workflow must stop without publishing. Resolve the candidate locally with rerere enabled, run the same focused tests and builds as the workflow, then push both verified branch tips atomically without force.
+- Deploy stable from an exact `personal/deploy` SHA or experimental from an exact `personal/experimental` SHA. Keep `/VERSION` as that raw SHA so deployment checks can verify the running image.
