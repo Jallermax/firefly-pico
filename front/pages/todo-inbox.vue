@@ -3,10 +3,6 @@
     <app-top-toolbar>
       <template v-if="appStore.isDesktopLayout && hasMarkerConfiguration" #right>
         <div class="todo-inbox-page-actions">
-          <van-button size="small" plain class="todo-inbox-action" :disabled="activeItems.length === 0 || isBatchRunning" :aria-pressed="areAllExpanded" @click="toggleAll">
-            <app-icon :icon="areAllExpanded ? TablerIconConstants.upArrow : TablerIconConstants.downArrow" :size="16" />
-            {{ areAllExpanded ? $t('todo_inbox.collapse_all') : $t('todo_inbox.expand_all') }}
-          </van-button>
           <van-button size="small" plain class="todo-inbox-action" :disabled="isLoading || activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
             <app-icon :icon="TablerIconConstants.booleanCheckOn" :size="17" />
             {{ $t('todo_inbox.mark_page_done') }}
@@ -24,10 +20,6 @@
     <template v-else>
       <van-cell-group v-if="!appStore.isDesktopLayout" inset class="todo-inbox-controls">
         <div class="todo-inbox-page-actions">
-          <van-button size="small" plain class="todo-inbox-action" :disabled="activeItems.length === 0 || isBatchRunning" :aria-pressed="areAllExpanded" @click="toggleAll">
-            <app-icon :icon="areAllExpanded ? TablerIconConstants.upArrow : TablerIconConstants.downArrow" :size="16" />
-            {{ areAllExpanded ? $t('todo_inbox.collapse_all') : $t('todo_inbox.expand_all') }}
-          </van-button>
           <van-button size="small" plain class="todo-inbox-action" :disabled="isLoading || activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
             <app-icon :icon="TablerIconConstants.booleanCheckOn" :size="17" />
             {{ $t('todo_inbox.mark_page_done') }}
@@ -68,7 +60,7 @@
             :is-queued="getState(item.id).isQueued"
             :error="getState(item.id).error"
             :receipt="receiptById[String(item.id)]"
-            @edit="editItem"
+            @edit="openEditor"
             @toggle="toggleExpanded"
             @done="onDone"
             @retry="onDone"
@@ -98,16 +90,34 @@
         @change="changePage"
       />
     </template>
+
+    <app-popup :show="editorOpen" :close-on-click-overlay="false" :popup-style="editorPopupStyle" @update:show="onEditorVisibilityChange">
+      <div class="todo-inbox-editor-header">
+        <strong>{{ $t(editorItem && Transaction.isSplitPayment(editorItem) ? 'transaction.title_split_details' : 'transaction.title_edit_transaction') }}</strong>
+        <van-button size="small" plain class="todo-inbox-action" :disabled="editorSaving || editorLoading" @click="closeEditor">{{ $t('todo_inbox.close_editor') }}</van-button>
+      </div>
+      <div class="todo-inbox-editor-body" :inert="editorSaving">
+        <van-loading v-if="editorLoading" class="todo-inbox-editor-loading" />
+        <transaction-form v-else-if="editorItem" ref="editorForm" v-model="editorItem" :disabled="editorSaving || editorUnconfirmed" @submit="onEditorSave" />
+      </div>
+      <div v-if="editorItem || editorError" class="todo-inbox-editor-footer">
+        <div v-if="editorError" class="todo-inbox-item-error" role="alert">{{ editorError }}</div>
+        <van-button v-if="editorItem && !Transaction.isSplitPayment(editorItem)" block type="primary" :loading="editorSaving" :disabled="editorUnconfirmed" @click="editorForm?.submit()">{{
+          $t('save')
+        }}</van-button>
+      </div>
+    </app-popup>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useTodoInbox } from '~/composables/useTodoInbox.js'
 import { useToolbar } from '~/composables/useToolbar.js'
 import RouteConstants from '~/constants/RouteConstants.js'
 import TablerIconConstants from '~/constants/TablerIconConstants.js'
 import { TUTORIAL_CONSTANTS } from '~/constants/TutorialConstants.js'
+import Transaction from '~/models/Transaction.js'
 
 const appStore = useAppStore()
 const { t } = useI18n()
@@ -120,7 +130,6 @@ const {
   markerName,
   hasMarkerConfiguration,
   expandedIds,
-  areAllExpanded,
   page,
   pageSize,
   totalPages,
@@ -137,10 +146,16 @@ const {
   loadPage,
   changePage,
   continuePage,
-  editItem,
-  refreshAfterEditor,
+  editorOpen,
+  editorItem,
+  editorSaving,
+  editorLoading,
+  editorError,
+  editorUnconfirmed,
+  openEditor,
+  saveEditor,
+  closeEditor,
   toggleExpanded,
-  toggleAll,
   doneItem,
   undoItem,
   markPageDone,
@@ -148,6 +163,13 @@ const {
 
 const showEmptyState = computed(() => isLoaded.value && !isLoading.value && !loadError.value && items.value.length === 0)
 const listElement = ref(null)
+const editorForm = ref(null)
+const editorPopupStyle = computed(() => ({
+  height: appStore.isDesktopLayout ? 'min(90vh, 780px)' : '94%',
+  maxHeight: '94vh',
+  width: appStore.isDesktopLayout ? 'min(940px, 92vw)' : undefined,
+  padding: 0,
+}))
 watch(
   () => items.value.map((item) => ({ id: String(item.id), pending: getState(item.id).isProcessing || getState(item.id).isQueued })),
   async (current, previous) => {
@@ -168,6 +190,18 @@ const toolbarSubtitle = computed(() =>
 
 const onDone = (item) => doneItem(item).catch(() => {})
 const onUndo = (item) => undoItem(item).catch(() => {})
+const onEditorVisibilityChange = (show) => {
+  if (!show) closeEditor()
+}
+const onEditorSave = async () => {
+  const row = listElement.value?.querySelector(`[data-todo-id="${editorItem.value?.id}"]`)
+  const anchor = row?.nextElementSibling
+  const top = anchor?.getBoundingClientRect().top
+  if (await saveEditor()) {
+    await nextTick()
+    if (anchor?.isConnected && top > 0 && top < window.innerHeight) window.scrollBy({ top: anchor.getBoundingClientRect().top - top, behavior: 'instant' })
+  }
+}
 
 useToolbar().init({
   title: t('todo_inbox.title'),
@@ -176,5 +210,4 @@ useToolbar().init({
 })
 
 onMounted(() => loadPage(1))
-onActivated(() => refreshAfterEditor())
 </script>

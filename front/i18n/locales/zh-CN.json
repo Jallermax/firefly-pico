@@ -33,6 +33,9 @@
   "todo": "待办",
   "todo_inbox": {
     "saving": "正在保存…",
+    "close_editor": "关闭",
+    "editor_changed": "这笔交易已在其他地方更改。请关闭并重新打开后再保存。",
+    "editor_unconfirmed": "无法确认是否已保存。请关闭以刷新交易，然后再试。",
     "restoring": "正在恢复…",
     "queued": "排队中",
     "source": "源码",

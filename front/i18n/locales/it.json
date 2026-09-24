@@ -35,6 +35,9 @@
   "todo": "Da fare",
   "todo_inbox": {
     "saving": "Salvataggio…",
+    "close_editor": "Chiudi",
+    "editor_changed": "Questa transazione è stata modificata altrove. Chiudila e riaprila prima di salvare.",
+    "editor_unconfirmed": "Impossibile confermare il salvataggio. Chiudi per aggiornare la transazione prima di riprovare.",
     "restoring": "Ripristino…",
     "queued": "In coda",
     "source": "Sorgente",

@@ -35,6 +35,9 @@
   "todo": "Pendiente",
   "todo_inbox": {
     "saving": "Guardando…",
+    "close_editor": "Cerrar",
+    "editor_changed": "Esta transacción cambió en otro lugar. Ciérrala y vuelve a abrirla antes de guardar.",
+    "editor_unconfirmed": "No se pudo confirmar el guardado. Cierra para actualizar la transacción antes de intentarlo de nuevo.",
     "restoring": "Restaurando…",
     "queued": "En espera",
     "source": "Fuente",

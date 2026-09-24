@@ -16,6 +16,25 @@ const markdown = new Marked({
 
 export const renderTodoNotes = (notes) => markdown.parse(notes ?? '')
 
+export const hasHiddenTodoReviewData = (splits, extraDateFields = [], profile = {}) =>
+  splits.length > 1 ||
+  splits.some((split) => {
+    const fieldVisible = (code) => profile.transactionListFieldsConfig?.find((field) => field.code === code)?.isVisible !== false
+    return (
+      (profile.tagsEnabled !== false && ((split.tags?.length ?? 0) > 4 || (!fieldVisible('tags') && split.tags?.length > 0))) ||
+      (profile.categoriesEnabled && ((!split.category && !split.category_name && split.type?.fireflyCode !== 'transfer') || (!fieldVisible('category') && (split.category || split.category_name)))) ||
+      (profile.budgetsEnabled && !fieldVisible('budget') && (split.budget || split.budget_name)) ||
+      (!fieldVisible('notes') && split.notes) ||
+      (profile.recurringTransactionsEnabled !== false && (split.bill_name || split.subscription_name)) ||
+      split.amountForeign ||
+      split.foreign_amount ||
+      extraDateFields.some((field) => split[field.code])
+    )
+  })
+
+export const hasClippedTodoReviewContent = (element, selector = '.max-2-lines, .ellipse-text, .app-badge') =>
+  [...(element?.querySelectorAll(selector) ?? [])].some((node) => node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1)
+
 export const getTodoReviewAmounts = (splits, locale) => {
   const groups = new Map()
   for (const split of splits) {

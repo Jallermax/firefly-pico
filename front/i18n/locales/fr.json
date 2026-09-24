@@ -35,6 +35,9 @@
   "todo": "A Faire",
   "todo_inbox": {
     "saving": "Enregistrement…",
+    "close_editor": "Fermer",
+    "editor_changed": "Cette transaction a été modifiée ailleurs. Fermez-la et rouvrez-la avant d'enregistrer.",
+    "editor_unconfirmed": "L'enregistrement n'a pas pu être confirmé. Fermez pour actualiser la transaction avant de réessayer.",
     "restoring": "Restauration…",
     "queued": "En attente",
     "source": "Source",

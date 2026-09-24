@@ -35,6 +35,9 @@
   "todo": "To-Do",
   "todo_inbox": {
     "saving": "Speichern…",
+    "close_editor": "Schließen",
+    "editor_changed": "Diese Transaktion wurde anderswo geändert. Schließe sie und öffne sie vor dem Speichern erneut.",
+    "editor_unconfirmed": "Das Speichern konnte nicht bestätigt werden. Schließe das Fenster, um die Transaktion vor einem neuen Versuch zu aktualisieren.",
     "restoring": "Wiederherstellen…",
     "queued": "Wartend",
     "source": "Quelltext",

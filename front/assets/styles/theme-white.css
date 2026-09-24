@@ -2295,8 +2295,7 @@ body {
     gap: 5px;
 }
 
-.todo-inbox-action.van-button:focus-visible,
-.todo-inbox-summary:focus-visible {
+.todo-inbox-action.van-button:focus-visible {
     outline: 2px solid var(--primary-action);
     outline-offset: -2px;
 }
@@ -2313,8 +2312,6 @@ body {
 
 .todo-inbox-list-wrapper,
 .todo-inbox-item,
-.todo-inbox-description,
-.todo-inbox-summary,
 .todo-inbox-note-panel {
     min-width: 0;
 }
@@ -2324,24 +2321,13 @@ body {
     background: var(--van-cell-background);
     box-shadow: rgba(149, 157, 165, 0.16) 0 3px 12px;
     overflow: hidden;
-}
-
-.todo-inbox-summary {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 5px 12px;
-    padding: 10px 12px;
-    cursor: pointer;
+    container: todo-inbox-row / inline-size;
 }
 
 .todo-inbox-date {
     color: var(--todo-muted);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
-}
-
-.todo-inbox-summary > .todo-inbox-date {
-    grid-column: 1 / -1;
 }
 
 .todo-inbox-title {
@@ -2360,13 +2346,6 @@ body {
 
 .todo-inbox-accounts .app-badge {
     font-size: 12px;
-}
-
-.todo-inbox-amounts {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 3px;
 }
 
 .todo-inbox-amount {
@@ -2389,6 +2368,28 @@ body {
 .todo-inbox-review-details {
     border-top: 1px solid var(--todo-divider);
 }
+
+.todo-inbox-details-clamped .todo-inbox-markdown,
+.todo-inbox-details-clamped .todo-inbox-note-source {
+    max-height: 12rem;
+    overflow: hidden;
+}
+
+.todo-inbox-review-row .van-cell__title { min-width: 0; }
+.todo-inbox-review-row.transaction-desktop-list { grid-template-columns: 19px minmax(74px, .5fr) minmax(0, 2fr) minmax(80px, .6fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .7fr); column-gap: 8px; }
+@container todo-inbox-row (max-width: 840px) {
+    .todo-inbox-review-row.transaction-desktop-list { grid-template-columns: 19px 74px minmax(0, 2fr) 80px minmax(0, 1fr); }
+    .todo-inbox-review-row .transaction-desktop-classification,
+    .todo-inbox-review-row .transaction-desktop-budget { display: none; }
+}
+.todo-inbox-item-desktop .todo-inbox-item-actions { border-inline-start: 0; border-top: 1px solid var(--todo-divider); flex-direction: row; }
+.todo-inbox-editor-header,
+.todo-inbox-editor-footer { flex-shrink: 0; padding: 12px; }
+.todo-inbox-editor-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--todo-divider); }
+.todo-inbox-editor-body { flex: 1; min-height: 0; overflow: auto; padding-top: 10px; }
+.todo-inbox-editor-footer { border-top: 1px solid var(--todo-divider); }
+.todo-inbox-editor-footer .todo-inbox-item-error { margin-bottom: 8px; }
+.todo-inbox-editor-loading { display: flex; justify-content: center; padding: 32px; }
 
 .todo-inbox-review-split {
     padding: 10px 12px;
@@ -2580,25 +2581,16 @@ body {
 }
 
 .todo-inbox-pagination { margin: 18px 16px; }
-.todo-inbox-item-desktop .todo-inbox-review-heading { display: flex; align-items: center; }
-.todo-inbox-item-desktop .todo-inbox-summary { flex: 1; grid-template-columns: 110px minmax(0, 1fr) minmax(90px, auto); align-items: center; }
-.todo-inbox-item-desktop .todo-inbox-summary > .todo-inbox-date { grid-column: auto; }
-.todo-inbox-item-desktop .todo-inbox-item-actions { border-top: 0; border-inline-start: 1px solid var(--todo-divider); gap: 2px; }
+.todo-inbox-item-desktop .todo-inbox-item-actions { gap: 2px; }
 .todo-inbox-item-desktop .todo-inbox-review-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: start; }
 .todo-inbox-item-desktop .todo-inbox-note-panel { border-inline-start: 1px solid var(--todo-divider); padding-inline-start: 12px; }
 .layout-desktop .todo-inbox-continue { bottom: 16px; }
 
 @media (max-width: 1100px) {
-    .todo-inbox-item-desktop .todo-inbox-summary { grid-template-columns: minmax(0, 1fr) auto; }
-    .todo-inbox-item-desktop .todo-inbox-summary > .todo-inbox-date { grid-column: 1 / -1; }
-    .todo-inbox-item-desktop .todo-inbox-item-actions { flex-direction: column; }
     .todo-inbox-item-desktop .todo-inbox-review-split { grid-template-columns: minmax(0, 1fr); }
     .todo-inbox-item-desktop .todo-inbox-note-panel { border-inline-start: 0; padding-inline-start: 0; }
 }
 
 @media (max-width: 380px) {
-    .todo-inbox-summary { grid-template-columns: minmax(0, 1fr); }
-    .todo-inbox-summary > .todo-inbox-date { grid-column: auto; }
-    .todo-inbox-amounts { align-items: flex-start; }
     .todo-inbox-receipt-amount { display: none; }
 }

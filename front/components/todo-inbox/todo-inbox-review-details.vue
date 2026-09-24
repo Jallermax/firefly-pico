@@ -60,7 +60,7 @@
       <div class="todo-inbox-note-panel">
         <div class="todo-inbox-note-heading">
           <span><app-icon :icon="TablerIconConstants.fieldText1" :size="15" />{{ $t('notes') }}</span>
-          <van-button v-if="split.notes" size="mini" plain class="todo-inbox-action" :aria-pressed="Boolean(sourceNotes[index])" @click="sourceNotes[index] = !sourceNotes[index]">
+          <van-button v-if="split.notes" size="mini" plain class="todo-inbox-action" :aria-pressed="Boolean(sourceNotes[index])" @click="toggleSourceNotes(index)">
             {{ sourceNotes[index] ? $t('todo_inbox.rendered') : $t('todo_inbox.source') }}
           </van-button>
         </div>
@@ -83,8 +83,13 @@ import { formatAmount } from '~/utils/AmountUtils.js'
 import { getTodoReviewAmounts, renderTodoNotes } from '~/utils/TodoReviewUtils.js'
 
 const props = defineProps({ transaction: { type: Object, required: true } })
+const emit = defineEmits(['notesViewChanged'])
 const profileStore = useProfileStore()
 const { locale } = useI18n()
 const splits = computed(() => Transaction.getSplits(props.transaction))
 const sourceNotes = ref({})
+const toggleSourceNotes = (index) => {
+  sourceNotes.value[index] = !sourceNotes.value[index]
+  emit('notesViewChanged')
+}
 </script>

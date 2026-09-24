@@ -33,7 +33,7 @@ const bundle = await build({
         const doubles = {
           'TagRepository.js': 'export default class { constructor() { return globalThis.todoTest.tagRepository } }',
           'TransactionRepository.js': 'export default class { constructor() { return globalThis.todoTest.transactionRepository } }',
-          'TransactionTransformer.js': 'export default { transformFromApi: x => x, transformFromApiList: x => x }',
+          'TransactionTransformer.js': 'export default { transformFromApi: x => x, transformFromApiList: x => x, transformToApi: x => ({ transactions: x.attributes.transactions }) }',
           'Tag.js': 'export default { getDisplayName: x => x.attributes.tag }',
           'UIUtils.js': 'export default { showConfirmation: async () => true, showToastSuccess() {}, showToastError() {} }',
         }
@@ -50,7 +50,10 @@ async function inboxWith(items, repository = {}) {
     app: { isDesktopLayout: false },
     tags: { tagTodo: { id: '1', attributes: { tag: 'todo' } } },
     tagRepository: { getTodoTransactions: async () => ({ ...response(items), data: { data: items, meta: { pagination: { current_page: 1, per_page: 50, total_pages: 1, total: items.length } } } }) },
-    transactionRepository: { getTodoTransaction: async (id) => response(items.find((item) => item.id === String(id))), updateTodoTags: async (id) => response(transaction(id, ['imported'])) },
+    transactionRepository: {
+      getTodoTransaction: async (id) => response(items.find((item) => item.id === String(id))),
+      updateTodoTransaction: async (id, data) => response({ ...items.find((item) => item.id === String(id)), attributes: { transactions: data.transactions } }),
+    },
   }
   const inbox = useTodoInbox()
   await inbox.loadPage()
@@ -138,7 +141,7 @@ test('batch queues every row before the first read finishes', async () => {
 
 test('failed saves restore the previous expansion state and expose an inline error', async () => {
   const item = transaction(1)
-  const inbox = await inboxWith([item], { updateTodoTags: async () => ({ status: 422, data: { message: 'Validation failed' } }) })
+  const inbox = await inboxWith([item], { updateTodoTransaction: async () => ({ status: 422, data: { message: 'Validation failed' } }) })
   inbox.toggleExpanded(item)
   await assert.rejects(inbox.doneItem(item))
   assert.equal(inbox.getState(1).isProcessing, false)
@@ -153,7 +156,7 @@ test('a timed-out save is reread and confirmed without a second write', async ()
   const item = transaction(1)
   const inbox = await inboxWith([item], {
     getTodoTransaction: async () => response(transaction(1, ++reads === 1 ? ['todo', 'imported'] : ['imported'])),
-    updateTodoTags: async () => {
+    updateTodoTransaction: async () => {
       writes++
       return { code: 'ECONNABORTED' }
     },
@@ -170,7 +173,7 @@ test('an unconfirmed timeout retains journal information for a safe retry and Un
   const item = transaction(1)
   const inbox = await inboxWith([item], {
     getTodoTransaction: async () => (++reads === 2 ? { status: 503 } : response(transaction(1, reads === 1 ? ['todo', 'imported'] : ['imported']))),
-    updateTodoTags: async () => {
+    updateTodoTransaction: async () => {
       writes++
       return { code: 'ECONNABORTED' }
     },
@@ -208,4 +211,84 @@ test('Done after Undo does not claim an unrelated completion as its own', async 
   globalThis.todoTest.transactionRepository.getTodoTransaction = async () => response(transaction(1, ['imported']))
   await inbox.doneItem(item)
   assert.deepEqual(inbox.receipts.value[0].journalIds, [])
+})
+
+test('popup editing fetches a fresh transaction and updates its row without reloading the page', async () => {
+  const item = transaction(1)
+  const inbox = await inboxWith([item])
+  let writes = 0
+  let listReads = 0
+  globalThis.todoTest.tagRepository.getTodoTransactions = async () => {
+    listReads++
+    throw new Error('list should not reload')
+  }
+  globalThis.todoTest.transactionRepository.updateTodoTransaction = async (id, data) => {
+    writes++
+    return response({ id, attributes: { transactions: data.transactions } })
+  }
+  await inbox.openEditor(item)
+  assert.equal(inbox.editorOpen.value, true)
+  inbox.editorItem.value.attributes.transactions[0].description = 'Corrected market'
+  assert.equal(await inbox.saveEditor(), true)
+  assert.equal(inbox.editorOpen.value, false)
+  assert.equal(inbox.items.value[0].attributes.transactions[0].description, 'Corrected market')
+  assert.equal(writes, 1)
+  assert.equal(listReads, 0)
+})
+
+test('popup save refuses to overwrite a transaction changed since opening', async () => {
+  const item = transaction(1)
+  const inbox = await inboxWith([item])
+  await inbox.openEditor(item)
+  inbox.editorItem.value.attributes.transactions[0].description = 'My change'
+  globalThis.todoTest.transactionRepository.getTodoTransaction = async () => response(transaction(1, ['todo', 'other change']))
+  let writes = 0
+  globalThis.todoTest.transactionRepository.updateTodoTransaction = async () => writes++
+  assert.equal(await inbox.saveEditor(), false)
+  assert.equal(writes, 0)
+  assert.equal(inbox.editorOpen.value, true)
+  assert.equal(inbox.editorError.value, 'todo_inbox.editor_changed')
+})
+
+test('editing away the TODO marker keeps a stable receipt without Undo', async () => {
+  const item = transaction(1)
+  const inbox = await inboxWith([item])
+  await inbox.openEditor(item)
+  inbox.editorItem.value.attributes.transactions[0].tags = ['imported']
+  inbox.editorItem.value.attributes.transactions[0].description = 'Corrected market'
+  assert.equal(await inbox.saveEditor(), true)
+  assert.deepEqual(inbox.receipts.value[0].journalIds, [])
+  assert.equal(inbox.remainingCount.value, 0)
+  assert.equal(inbox.items.value[0].attributes.transactions[0].description, 'Corrected market')
+})
+
+test('desktop review starts with visible details but keeps long notes collapsed', async () => {
+  const inbox = await inboxWith([transaction(1)])
+  globalThis.todoTest.app.isDesktopLayout = true
+  await inbox.loadPage()
+  assert.equal(inbox.expandedIds.value.size, 0)
+})
+
+test('a thrown edit write is held for reread before any retry', async () => {
+  const item = transaction(1)
+  const inbox = await inboxWith([item])
+  await inbox.openEditor(item)
+  let writes = 0
+  globalThis.todoTest.transactionRepository.updateTodoTransaction = async () => {
+    writes++
+    throw new Error('timeout')
+  }
+  assert.equal(await inbox.saveEditor(), false)
+  assert.equal(inbox.editorUnconfirmed.value, true)
+  assert.equal(await inbox.saveEditor(), false)
+  assert.equal(writes, 1)
+})
+
+test('a local payload error does not get mistaken for an uncertain server write', async () => {
+  const item = transaction(1)
+  const inbox = await inboxWith([item])
+  await inbox.openEditor(item)
+  inbox.editorItem.value.attributes = null
+  assert.equal(await inbox.saveEditor(), false)
+  assert.equal(inbox.editorUnconfirmed.value, false)
 })

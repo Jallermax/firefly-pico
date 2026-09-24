@@ -49,7 +49,7 @@
       </div>
     </div>
 
-    <template #right>
+    <template v-if="props.canDelete" #right>
       <van-button class="delete-button" square type="danger" text="Delete" @click="onDelete" />
     </template>
   </van-swipe-cell>
@@ -64,6 +64,7 @@ import { useClickWithoutSwipe } from '~/composables/useClickWithoutSwipe.js'
 
 const props = defineProps({
   value: Object,
+  canDelete: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['onEdit', 'onDelete'])

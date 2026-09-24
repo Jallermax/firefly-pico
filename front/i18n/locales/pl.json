@@ -35,6 +35,9 @@
   "todo": "Todo",
   "todo_inbox": {
     "saving": "Zapisywanie…",
+    "close_editor": "Zamknij",
+    "editor_changed": "Ta transakcja została zmieniona gdzie indziej. Zamknij ją i otwórz ponownie przed zapisaniem.",
+    "editor_unconfirmed": "Nie udało się potwierdzić zapisu. Zamknij okno, aby odświeżyć transakcję przed ponowną próbą.",
     "restoring": "Przywracanie…",
     "queued": "W kolejce",
     "source": "Źródło",

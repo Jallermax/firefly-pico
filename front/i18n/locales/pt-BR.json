@@ -35,6 +35,9 @@
   "todo": "A fazer",
   "todo_inbox": {
     "saving": "Salvando…",
+    "close_editor": "Fechar",
+    "editor_changed": "Esta transação foi alterada em outro lugar. Feche e abra novamente antes de salvar.",
+    "editor_unconfirmed": "Não foi possível confirmar o salvamento. Feche para atualizar a transação antes de tentar novamente.",
     "restoring": "Restaurando…",
     "queued": "Na fila",
     "source": "Fonte",

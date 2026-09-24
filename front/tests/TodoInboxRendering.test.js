@@ -6,7 +6,7 @@ import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { Button, Cell, Loading } from 'vant'
 
-async function renderItem(overrides = {}) {
+async function renderItem(overrides = {}, { desktop = true, needsExpansion = true } = {}) {
   const source = await readFile(new URL('../components/todo-inbox/todo-inbox-transaction-item.vue', import.meta.url), 'utf8')
   const { descriptor } = parse(source)
   const { compile: compileTemplate } = await import('@vue/compiler-dom')
@@ -17,8 +17,8 @@ async function renderItem(overrides = {}) {
     render,
     setup: () => ({
       props,
-      row: null,
-      appStore: { isDesktopLayout: true },
+      appStore: { isDesktopLayout: desktop },
+      needsExpansion,
       description: 'Harbor Market',
       amounts: [],
       dateFormatted: '09/01/2026 14:35',
@@ -34,7 +34,7 @@ async function renderItem(overrides = {}) {
   app.component('van-button', Button)
   app.component('van-loading', Loading)
   for (const name of ['app-icon', 'transaction-list-item-desktop', 'transaction-list-item', 'transaction-split-view', 'todo-inbox-review-details', 'transaction-split-badge', 'account-badge']) {
-    app.component(name, { render: () => null })
+    app.component(name, { render: () => Vue.h('span', name) })
   }
   return renderToString(app)
 }
@@ -68,4 +68,22 @@ test('an Undo failure keeps the receipt instead of duplicating the card', async 
   const html = await renderItem({ receipt: { id: '42', journalIds: ['101'] }, error: 'Try Undo again' })
   assert.match(html, /Try Undo again/)
   assert.doesNotMatch(html, /todo_inbox.collapse|todo_inbox.details/)
+})
+
+test('mobile review uses the shared transaction card and only offers Expand for hidden content', async () => {
+  const short = await renderItem({ isExpanded: false }, { desktop: false, needsExpansion: false })
+  assert.match(short, /transaction-list-item/)
+  assert.doesNotMatch(short, /todo_inbox.details/)
+  const long = await renderItem({ isExpanded: false }, { desktop: false, needsExpansion: true })
+  assert.match(long, /todo_inbox.details/)
+  assert.doesNotMatch(long, /todo-inbox-review-details/)
+})
+
+test('desktop review shows details by default and only offers Expand for overflowing notes', async () => {
+  const short = await renderItem({ isExpanded: false }, { desktop: true, needsExpansion: false })
+  assert.match(short, /transaction-list-item-desktop/)
+  assert.match(short, /todo-inbox-review-details/)
+  assert.doesNotMatch(short, /todo_inbox.details/)
+  const long = await renderItem({ isExpanded: false }, { desktop: true, needsExpansion: true })
+  assert.match(long, /todo_inbox.details/)
 })

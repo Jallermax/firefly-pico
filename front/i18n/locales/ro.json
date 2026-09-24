@@ -35,6 +35,9 @@
   "todo": "De făcut",
   "todo_inbox": {
     "saving": "Se salvează…",
+    "close_editor": "Închide",
+    "editor_changed": "Această tranzacție a fost modificată în altă parte. Închide-o și redeschide-o înainte de salvare.",
+    "editor_unconfirmed": "Salvarea nu a putut fi confirmată. Închide pentru a reîncărca tranzacția înainte de a încerca din nou.",
     "restoring": "Se restaurează…",
     "queued": "În așteptare",
     "source": "Sursă",

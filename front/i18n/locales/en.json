@@ -35,6 +35,9 @@
   "todo": "Todo",
   "todo_inbox": {
     "saving": "Saving…",
+    "close_editor": "Close",
+    "editor_changed": "This transaction changed elsewhere. Close and reopen it before saving.",
+    "editor_unconfirmed": "Could not confirm the save. Close to refresh the transaction before trying again.",
     "restoring": "Restoring…",
     "queued": "Queued",
     "source": "Source",

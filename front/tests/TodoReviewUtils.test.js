@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { renderTodoNotes, getTodoReviewAmounts } from '../utils/TodoReviewUtils.js'
+import * as TodoReviewUtils from '../utils/TodoReviewUtils.js'
+
+const { renderTodoNotes, getTodoReviewAmounts, hasHiddenTodoReviewData, hasClippedTodoReviewContent } = TodoReviewUtils
 
 test('renders markdown blocks, lists and tables without losing text', () => {
   const html = renderTodoNotes?.('## Order\n\n**Verified**\n\n- Milk\n- Bread\n\n```text\nvery long line\n```\n\n| Item | Cost |\n|---|---|\n| Milk | 4 |')
@@ -44,4 +46,21 @@ test('review totals retain exact decimals and separate currencies and transactio
     { key: 'income-EUR', type: 'income', text: '+5.25 EUR' },
     { key: 'transfer-USD', type: 'transfer', text: '3.00 USD' },
   ])
+})
+
+test('short mobile cards need no expansion, while extra tags, splits and review fields do', () => {
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['todo'], notes: 'Short note' }]), false)
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['one', 'two', 'three', 'four', 'five'] }]), true)
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['todo'], bill_name: 'Monthly rent' }]), true)
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['todo'] }, { tags: [] }]), true)
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['todo'], bill_name: 'Monthly rent' }], [], { recurringTransactionsEnabled: false }), false)
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['todo'], category: null, type: { fireflyCode: 'withdrawal' } }], [], { categoriesEnabled: true }), true)
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['todo'], notes: 'Short note' }], [], { transactionListFieldsConfig: [{ code: 'notes', isVisible: false }] }), true)
+})
+
+test('expand visibility follows actual clipped content instead of note length guesses', () => {
+  const row = { querySelectorAll: () => [{ scrollHeight: 36, clientHeight: 36, scrollWidth: 70, clientWidth: 70 }] }
+  assert.equal(hasClippedTodoReviewContent(row), false)
+  row.querySelectorAll = () => [{ scrollHeight: 54, clientHeight: 36, scrollWidth: 70, clientWidth: 70 }]
+  assert.equal(hasClippedTodoReviewContent(row), true)
 })

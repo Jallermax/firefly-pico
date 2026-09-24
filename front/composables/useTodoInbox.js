@@ -1,6 +1,5 @@
-import { cloneDeep, get } from 'lodash-es'
+import { cloneDeep, get, isEqual } from 'lodash-es'
 import { computed, reactive, ref } from 'vue'
-import RouteConstants from '~/constants/RouteConstants.js'
 import Tag from '~/models/Tag.js'
 import TagRepository from '~/repository/TagRepository.js'
 import TransactionRepository from '~/repository/TransactionRepository.js'
@@ -21,7 +20,6 @@ import {
 } from '~/utils/TodoTransactionUtils.js'
 
 export function useTodoInbox() {
-  const appStore = useAppStore()
   const tagStore = useTagStore()
   const { t } = useI18n()
   const tagRepository = new TagRepository()
@@ -41,7 +39,13 @@ export function useTodoInbox() {
   const batchProgress = ref(null)
   const batchResult = ref(null)
   const itemState = reactive({})
-  const wasEditing = ref(false)
+  const editorOpen = ref(false)
+  const editorItem = ref(null)
+  const editorSaving = ref(false)
+  const editorLoading = ref(false)
+  const editorError = ref(null)
+  const editorUnconfirmed = ref(false)
+  let editorOriginal = null
 
   const markerName = computed(() => Tag.getDisplayName(tagStore.tagTodo))
   const hasMarkerConfiguration = computed(() => Boolean(markerName.value))
@@ -50,7 +54,6 @@ export function useTodoInbox() {
   const remainingCount = computed(() => activeItems.value.length)
   const isAnyItemProcessing = computed(() => Object.values(itemState).some((state) => state.isProcessing || state.isQueued))
   const isPageLocked = computed(() => isTodoPageLocked(receipts.value, isBatchRunning.value, isAnyItemProcessing.value))
-  const areAllExpanded = computed(() => activeItems.value.length > 0 && activeItems.value.every((item) => expandedIds.value.has(String(item.id))))
 
   const getState = (id) => itemState[String(id)] ?? { isProcessing: false, isQueued: false, error: null }
 
@@ -106,7 +109,7 @@ export function useTodoInbox() {
     pageSize.value = result.pageSize
     totalPages.value = result.totalPages
     totalCount.value = result.totalCount
-    expandedIds.value = appStore.isDesktopLayout ? new Set(result.items.map((item) => String(item.id))) : new Set()
+    expandedIds.value = new Set()
     clearState()
     batchProgress.value = null
     batchResult.value = null
@@ -186,7 +189,7 @@ export function useTodoInbox() {
 
       const { journalIds, requestData } = buildTodoRemovalRequest(latestTransaction, markerName.value)
       setState(id, { pendingJournalIds: journalIds })
-      const updateResponse = await transactionRepository.updateTodoTags(id, requestData)
+      const updateResponse = await transactionRepository.updateTodoTransaction(id, requestData)
       let updatedTransaction = getResponseTransaction(updateResponse)
       if (!ResponseUtils.isSuccess(updateResponse)) {
         if (!updateResponse?.status || updateResponse.status >= 500) {
@@ -237,7 +240,7 @@ export function useTodoInbox() {
 
       let restoredTransaction = latestTransaction
       if (!restoration.isAlreadyRestored) {
-        const updateResponse = await transactionRepository.updateTodoTags(id, restoration.requestData)
+        const updateResponse = await transactionRepository.updateTodoTransaction(id, restoration.requestData)
         if (!ResponseUtils.isSuccess(updateResponse)) {
           throw new Error(getResponseError(updateResponse, 'todo_inbox.item_error'))
         }
@@ -319,22 +322,103 @@ export function useTodoInbox() {
     expandedIds.value = next
   }
 
-  const toggleAll = () => {
-    const activeIds = activeItems.value.map((item) => String(item.id))
-    expandedIds.value = areAllExpanded.value ? new Set([...expandedIds.value].filter((id) => !activeIds.includes(id))) : new Set([...expandedIds.value, ...activeIds])
-  }
-
-  const editItem = async (item) => {
-    wasEditing.value = true
-    await navigateTo(`${RouteConstants.ROUTE_TRANSACTION_ID}/${item.id}`)
-  }
-
-  const refreshAfterEditor = async () => {
-    if (!wasEditing.value) {
-      return false
+  const applyEditorResult = (item, rawTransaction) => {
+    const updatedItem = transformTransaction(rawTransaction)
+    const index = items.value.findIndex((current) => String(current.id) === String(item.id))
+    if (index >= 0) items.value.splice(index, 1, updatedItem)
+    if (!hasTodoMarker(rawTransaction, markerName.value)) {
+      addReceipt(updatedItem, [], 'todo_inbox.done')
     }
-    wasEditing.value = false
-    return await loadPage(page.value, { clearReceipts: true })
+  }
+
+  const openEditor = async (item) => {
+    if (isLoading.value || isBatchRunning.value || getState(item.id).isProcessing || getState(item.id).isQueued || receiptById.value[String(item.id)] || editorLoading.value || editorOpen.value)
+      return false
+    editorLoading.value = true
+    editorError.value = null
+    editorOpen.value = true
+    try {
+      const response = await transactionRepository.getTodoTransaction(item.id)
+      if (!ResponseUtils.isSuccess(response) || !getResponseTransaction(response)) throw new Error(getResponseError(response, 'todo_inbox.item_error'))
+      editorOriginal = cloneDeep(getResponseTransaction(response))
+      if (!hasTodoMarker(editorOriginal, markerName.value)) {
+        removeStaleItem(item, 'todo_inbox.completed_elsewhere')
+        editorOpen.value = false
+        return false
+      }
+      editorItem.value = transformTransaction(editorOriginal)
+      editorUnconfirmed.value = false
+      return true
+    } catch (error) {
+      setState(item.id, { error: error.message || t('todo_inbox.item_error') })
+      editorOpen.value = false
+      return false
+    } finally {
+      editorLoading.value = false
+    }
+  }
+
+  const saveEditor = async () => {
+    if (!editorOpen.value || !editorItem.value || editorSaving.value || editorUnconfirmed.value) return false
+    editorSaving.value = true
+    editorError.value = null
+    const item = editorItem.value
+    let sentWrite = false
+    try {
+      const latest = await transactionRepository.getTodoTransaction(item.id)
+      if (!ResponseUtils.isSuccess(latest) || !getResponseTransaction(latest)) throw new Error(getResponseError(latest, 'todo_inbox.item_error'))
+      if (!isEqual(getResponseTransaction(latest), editorOriginal)) {
+        editorError.value = t('todo_inbox.editor_changed')
+        return false
+      }
+      const requestData = TransactionTransformer.transformToApi(item)
+      sentWrite = true
+      const response = await transactionRepository.updateTodoTransaction(item.id, requestData)
+      if (!ResponseUtils.isSuccess(response)) {
+        if (!response?.status || response.status >= 500) {
+          editorUnconfirmed.value = true
+          editorError.value = t('todo_inbox.editor_unconfirmed')
+        } else {
+          editorError.value = getResponseError(response, 'todo_inbox.item_error')
+        }
+        return false
+      }
+      const saved = getResponseTransaction(response)
+      if (!saved) {
+        editorUnconfirmed.value = true
+        editorError.value = t('todo_inbox.editor_unconfirmed')
+        return false
+      }
+      applyEditorResult(item, saved)
+      editorOpen.value = false
+      editorItem.value = null
+      editorOriginal = null
+      return true
+    } catch (error) {
+      if (sentWrite) editorUnconfirmed.value = true
+      editorError.value = sentWrite ? t('todo_inbox.editor_unconfirmed') : error.message || t('todo_inbox.item_error')
+      return false
+    } finally {
+      editorSaving.value = false
+    }
+  }
+
+  const closeEditor = async () => {
+    if (editorSaving.value || editorLoading.value) return false
+    if (editorUnconfirmed.value && editorItem.value) {
+      const latest = await transactionRepository.getTodoTransaction(editorItem.value.id)
+      if (!ResponseUtils.isSuccess(latest) || !getResponseTransaction(latest)) {
+        editorError.value = t('todo_inbox.editor_unconfirmed')
+        return false
+      }
+      applyEditorResult(editorItem.value, getResponseTransaction(latest))
+    }
+    editorOpen.value = false
+    editorItem.value = null
+    editorOriginal = null
+    editorUnconfirmed.value = false
+    editorError.value = null
+    return true
   }
 
   return {
@@ -346,7 +430,6 @@ export function useTodoInbox() {
     markerName,
     hasMarkerConfiguration,
     expandedIds,
-    areAllExpanded,
     page,
     pageSize,
     totalPages,
@@ -363,10 +446,16 @@ export function useTodoInbox() {
     loadPage,
     changePage,
     continuePage,
-    editItem,
-    refreshAfterEditor,
+    editorOpen,
+    editorItem,
+    editorSaving,
+    editorLoading,
+    editorError,
+    editorUnconfirmed,
+    openEditor,
+    saveEditor,
+    closeEditor,
     toggleExpanded,
-    toggleAll,
     doneItem,
     undoItem,
     markPageDone,

@@ -55,7 +55,7 @@
       </template>
     </van-cell>
 
-    <template #right>
+    <template v-if="props.canDelete" #right>
       <van-button class="delete-button" square type="danger" text="Delete" @click="onDelete" />
     </template>
   </van-swipe-cell>
@@ -75,6 +75,7 @@ const props = defineProps({
   isDetailedMode: {
     default: true,
   },
+  canDelete: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['onEdit', 'onDelete'])
