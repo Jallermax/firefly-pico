@@ -60,8 +60,8 @@
     "remaining_items": "{count} remaining on this page",
     "page_context": "Page {page} of {total} · {count} remaining",
     "none": "None",
-    "empty": "Inbox is clear",
-    "empty_help": "No transactions currently carry the configured marker.",
+    "empty": "No TODOs in this period",
+    "empty_help": "Choose an older period to see earlier TODOs.",
     "load_error": "Could not load the TODO Inbox.",
     "item_error": "Could not update this transaction.",
     "marker_not_configured": "No TODO tag configured",
@@ -75,7 +75,9 @@
     "batch_progress": "{processed}/{total} processed · {successful} done · {failed} failed",
     "batch_result": "Page result: {successful} done · {failed} failed",
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "older": "Older",
+    "newer": "Newer"
   },
   "tags_select": "Select tags",
   "budget": "Budget",

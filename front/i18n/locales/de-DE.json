@@ -60,8 +60,8 @@
     "remaining_items": "{count} auf dieser Seite verbleibend",
     "page_context": "Seite {page} von {total} · {count} verbleibend",
     "none": "Keine",
-    "empty": "Posteingang ist leer",
-    "empty_help": "Keine Transaktionen tragen derzeit die konfigurierte Markierung.",
+    "empty": "Keine TODOs in diesem Zeitraum",
+    "empty_help": "Wähle einen älteren Zeitraum, um frühere TODOs zu sehen.",
     "load_error": "Der TODO-Posteingang konnte nicht geladen werden.",
     "item_error": "Diese Transaktion konnte nicht aktualisiert werden.",
     "marker_not_configured": "Kein TODO-Tag konfiguriert",
@@ -75,7 +75,9 @@
     "batch_progress": "{processed}/{total} verarbeitet · {successful} erledigt · {failed} fehlgeschlagen",
     "batch_result": "Seitenergebnis: {successful} erledigt · {failed} fehlgeschlagen",
     "previous": "Zurück",
-    "next": "Weiter"
+    "next": "Weiter",
+    "older": "Älter",
+    "newer": "Neuer"
   },
   "tags_select": "Tags auswählen",
   "budget": "Budget",

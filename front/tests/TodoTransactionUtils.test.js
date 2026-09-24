@@ -8,12 +8,23 @@ import {
   buildTodoTransactionsPath,
   getActiveTodoItems,
   getSafeTodoPage,
+  getTodoDateRange,
   getTodoJournalIds,
   hasTodoMarker,
   hasTodoMarkerOnJournals,
   isTodoPageLocked,
   runWithConcurrency,
 } from '../utils/TodoTransactionUtils.js'
+
+test('TODO date ranges cover adjacent 90-day periods without gaps', () => {
+  const today = new Date(2026, 8, 24)
+  const current = getTodoDateRange(0, today)
+  const older = getTodoDateRange(1, today)
+
+  assert.deepEqual(current, { start: '2026-06-27', end: '2026-09-24' })
+  assert.equal(older.end, '2026-06-26')
+  assert.equal(older.start, '2026-03-29')
+})
 
 const makeTransaction = () => ({
   id: '42',

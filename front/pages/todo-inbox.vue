@@ -89,6 +89,11 @@
         :next-text="$t('todo_inbox.next')"
         @change="changePage"
       />
+      <div v-if="isLoaded" class="todo-inbox-page-actions todo-inbox-period-navigation">
+        <van-button size="small" plain class="todo-inbox-action" :disabled="periodIndex === 0 || isPageLocked || isLoading || editorOpen" @click="newerPeriod">{{ $t('todo_inbox.newer') }}</van-button>
+        <span>{{ periodLabel }}</span>
+        <van-button size="small" plain class="todo-inbox-action" :disabled="isPageLocked || isLoading || editorOpen" @click="olderPeriod">{{ $t('todo_inbox.older') }}</van-button>
+      </div>
     </template>
 
     <app-popup :show="editorOpen" :close-on-click-overlay="false" :popup-style="editorPopupStyle" @update:show="onEditorVisibilityChange">
@@ -118,8 +123,10 @@ import RouteConstants from '~/constants/RouteConstants.js'
 import TablerIconConstants from '~/constants/TablerIconConstants.js'
 import { TUTORIAL_CONSTANTS } from '~/constants/TutorialConstants.js'
 import Transaction from '~/models/Transaction.js'
+import DateUtils from '~/utils/DateUtils.js'
 
 const appStore = useAppStore()
+const profileStore = useProfileStore()
 const { t } = useI18n()
 const {
   items,
@@ -131,6 +138,8 @@ const {
   hasMarkerConfiguration,
   expandedIds,
   page,
+  periodIndex,
+  periodRange,
   pageSize,
   totalPages,
   totalCount,
@@ -145,6 +154,8 @@ const {
   getState,
   loadPage,
   changePage,
+  olderPeriod,
+  newerPeriod,
   continuePage,
   editorOpen,
   editorItem,
@@ -184,9 +195,11 @@ watch(
     if (anchor.isConnected) window.scrollBy({ top: anchor.getBoundingClientRect().top - top, behavior: 'instant' })
   },
 )
-const toolbarSubtitle = computed(() =>
-  hasMarkerConfiguration.value ? `${markerName.value} · ${t('todo_inbox.all_history')} · ${t('todo_inbox.remaining_items', { count: remainingCount.value })}` : null,
+const periodLabel = computed(
+  () =>
+    `${DateUtils.stringFromTo(periodRange.value.start, DateUtils.FORMAT_ENGLISH_DATE, profileStore.dateFormat)}–${DateUtils.stringFromTo(periodRange.value.end, DateUtils.FORMAT_ENGLISH_DATE, profileStore.dateFormat)}`,
 )
+const toolbarSubtitle = computed(() => (hasMarkerConfiguration.value ? `${markerName.value} · ${periodLabel.value} · ${t('todo_inbox.remaining_items', { count: remainingCount.value })}` : null))
 
 const onDone = (item) => doneItem(item).catch(() => {})
 const onUndo = (item) => undoItem(item).catch(() => {})

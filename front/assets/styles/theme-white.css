@@ -2581,6 +2581,7 @@ body {
 }
 
 .todo-inbox-pagination { margin: 18px 16px; }
+.todo-inbox-period-navigation { justify-content: center; margin: 12px 16px; color: var(--todo-muted); font-size: 12px; }
 .todo-inbox-item-desktop .todo-inbox-item-actions { gap: 2px; }
 .todo-inbox-item-desktop .todo-inbox-review-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: start; }
 .todo-inbox-item-desktop .todo-inbox-note-panel { border-inline-start: 1px solid var(--todo-divider); padding-inline-start: 12px; }

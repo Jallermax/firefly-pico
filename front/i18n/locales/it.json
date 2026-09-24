@@ -60,8 +60,8 @@
     "remaining_items": "{count} rimanenti in questa pagina",
     "page_context": "Pagina {page} di {total} · {count} rimanenti",
     "none": "Nessuno",
-    "empty": "La posta è vuota",
-    "empty_help": "Nessuna transazione contiene attualmente il marcatore configurato.",
+    "empty": "Nessun TODO in questo periodo",
+    "empty_help": "Scegli un periodo precedente per vedere i TODO più vecchi.",
     "load_error": "Impossibile caricare la posta TODO.",
     "item_error": "Impossibile aggiornare questa transazione.",
     "marker_not_configured": "Nessun tag TODO configurato",
@@ -75,7 +75,9 @@
     "batch_progress": "{processed}/{total} elaborate · {successful} completate · {failed} non riuscite",
     "batch_result": "Risultato pagina: {successful} completate · {failed} non riuscite",
     "previous": "Precedente",
-    "next": "Successiva"
+    "next": "Successiva",
+    "older": "Più vecchi",
+    "newer": "Più recenti"
   },
   "tags_select": "Seleziona i tag",
   "budget": "Budget",

@@ -14,7 +14,8 @@
     </div>
     <template v-else>
       <div ref="reviewRow" class="todo-inbox-review-row" :class="{ 'transaction-desktop-list': appStore.isDesktopLayout }">
-        <component :is="appStore.isDesktopLayout ? 'transaction-list-item-desktop' : 'transaction-list-item'" :value="props.value" :can-delete="false" @on-edit="emit('edit', props.value)" />
+        <transaction-list-item-desktop v-if="appStore.isDesktopLayout" :value="props.value" :can-delete="false" @on-edit="emit('edit', props.value)" />
+        <transaction-list-item v-else :value="props.value" :can-delete="false" @on-edit="emit('edit', props.value)" />
       </div>
       <div v-if="props.error" class="todo-inbox-item-error" role="alert">
         <span>{{ props.error }}</span>

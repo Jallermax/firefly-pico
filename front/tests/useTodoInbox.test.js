@@ -71,6 +71,33 @@ test('loads complete groups when the tag endpoint returns only matching splits',
   assert.deepEqual(inbox.items.value[0].attributes.transactions, complete.attributes.transactions)
 })
 
+test('loads bounded TODO periods and keeps older transactions reachable', async () => {
+  const item = transaction(1)
+  const inbox = await inboxWith([item])
+  const queries = []
+  globalThis.todoTest.tagRepository.getTodoTransactions = async (_tag, options) => {
+    queries.push(options)
+    return response([item])
+  }
+
+  const currentRange = inbox.periodRange.value
+  assert.equal(await inbox.olderPeriod(), true)
+  assert.equal(inbox.periodIndex.value, 1)
+  assert.equal(inbox.page.value, 1)
+  assert.equal(queries[0].end < currentRange.start, true)
+  assert.equal(await inbox.newerPeriod(), true)
+  assert.equal(inbox.periodIndex.value, 0)
+  assert.deepEqual({ start: queries[1].start, end: queries[1].end }, inbox.periodRange.value)
+})
+
+test('completed rows block changing TODO periods until Continue', async () => {
+  const item = transaction(1)
+  const inbox = await inboxWith([item])
+  await inbox.doneItem(item)
+  assert.equal(await inbox.olderPeriod(), false)
+  assert.equal(inbox.periodIndex.value, 0)
+})
+
 test('does not show partial transaction details if loading a complete group fails', async () => {
   const inbox = await inboxWith([])
   globalThis.todoTest.tagRepository.getTodoTransactions = async () => response([transaction(1)])

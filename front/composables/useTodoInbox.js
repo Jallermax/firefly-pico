@@ -13,6 +13,7 @@ import {
   buildTodoRestoreRequest,
   getActiveTodoItems,
   getSafeTodoPage,
+  getTodoDateRange,
   hasTodoMarker,
   hasTodoMarkerOnJournals,
   isTodoPageLocked,
@@ -29,6 +30,9 @@ export function useTodoInbox() {
   const receipts = ref([])
   const expandedIds = ref(new Set())
   const page = ref(1)
+  const periodIndex = ref(0)
+  const periodToday = new Date()
+  const periodRange = computed(() => getTodoDateRange(periodIndex.value, periodToday))
   const pageSize = ref(TODO_PAGE_SIZE)
   const totalPages = ref(1)
   const totalCount = ref(0)
@@ -75,6 +79,7 @@ export function useTodoInbox() {
     const response = await tagRepository.getTodoTransactions(tagStore.tagTodo, {
       page: requestedPage,
       pageSize: TODO_PAGE_SIZE,
+      ...periodRange.value,
     })
     if (!ResponseUtils.isSuccess(response)) {
       throw new Error(getResponseError(response, 'todo_inbox.load_error'))
@@ -315,6 +320,18 @@ export function useTodoInbox() {
     return await loadPage(newPage)
   }
 
+  const changePeriod = async (nextIndex) => {
+    if (nextIndex < 0 || isPageLocked.value || isLoading.value || editorOpen.value) return false
+    periodIndex.value = nextIndex
+    page.value = 1
+    items.value = []
+    expandedIds.value = new Set()
+    return await loadPage(1)
+  }
+
+  const olderPeriod = () => changePeriod(periodIndex.value + 1)
+  const newerPeriod = () => changePeriod(periodIndex.value - 1)
+
   const toggleExpanded = (item) => {
     const id = String(item.id)
     const next = new Set(expandedIds.value)
@@ -431,6 +448,8 @@ export function useTodoInbox() {
     hasMarkerConfiguration,
     expandedIds,
     page,
+    periodIndex,
+    periodRange,
     pageSize,
     totalPages,
     totalCount,
@@ -445,6 +464,8 @@ export function useTodoInbox() {
     getState,
     loadPage,
     changePage,
+    olderPeriod,
+    newerPeriod,
     continuePage,
     editorOpen,
     editorItem,

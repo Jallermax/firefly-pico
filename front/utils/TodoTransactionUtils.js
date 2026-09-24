@@ -1,5 +1,13 @@
+import { format, subDays } from 'date-fns'
+
 export const TODO_PAGE_SIZE = 50
 export const TODO_BATCH_CONCURRENCY = 3
+export const TODO_PERIOD_DAYS = 90
+
+export const getTodoDateRange = (periodIndex, today = new Date()) => {
+  const end = subDays(today, periodIndex * TODO_PERIOD_DAYS)
+  return { start: format(subDays(end, TODO_PERIOD_DAYS - 1), 'yyyy-MM-dd'), end: format(end, 'yyyy-MM-dd') }
+}
 
 const getSplits = (transaction) => transaction?.attributes?.transactions ?? []
 const getTags = (split) => split?.tags ?? []

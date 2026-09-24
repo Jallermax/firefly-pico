@@ -60,8 +60,8 @@
     "remaining_items": "Осталось на этой странице: {count}",
     "page_context": "Страница {page} из {total} · осталось: {count}",
     "none": "Нет",
-    "empty": "Входящие пусты",
-    "empty_help": "Сейчас ни у одной транзакции нет настроенного маркера.",
+    "empty": "В этом периоде нет TODO",
+    "empty_help": "Выберите более ранний период, чтобы увидеть старые TODO.",
     "load_error": "Не удалось загрузить входящие TODO.",
     "item_error": "Не удалось обновить эту транзакцию.",
     "marker_not_configured": "Тег TODO не настроен",
@@ -75,7 +75,9 @@
     "batch_progress": "Обработано {processed}/{total} · готово: {successful} · ошибок: {failed}",
     "batch_result": "Результат страницы: готово {successful} · ошибок {failed}",
     "previous": "Назад",
-    "next": "Вперёд"
+    "next": "Вперёд",
+    "older": "Ранее",
+    "newer": "Позднее"
   },
   "tags_select": "Выберите теги",
   "budget": "Бюджет",

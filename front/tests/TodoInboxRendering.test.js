@@ -87,3 +87,13 @@ test('desktop review shows details by default and only offers Expand for overflo
   const long = await renderItem({ isExpanded: false }, { desktop: true, needsExpansion: true })
   assert.match(long, /todo_inbox.details/)
 })
+
+test('shared transaction rows are statically resolvable for Nuxt auto-import', async () => {
+  const source = await readFile(new URL('../components/todo-inbox/todo-inbox-transaction-item.vue', import.meta.url), 'utf8')
+  const { descriptor } = parse(source)
+  const { compile } = await import('@vue/compiler-dom')
+  const { code } = compile(descriptor.template.content, { mode: 'function', prefixIdentifiers: true })
+
+  assert.match(code, /resolveComponent\("transaction-list-item-desktop"\)/)
+  assert.match(code, /resolveComponent\("transaction-list-item"\)/)
+})

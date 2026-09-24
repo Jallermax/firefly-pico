@@ -60,8 +60,8 @@
     "remaining_items": "{count} restantes sur cette page",
     "page_context": "Page {page} sur {total} · {count} restantes",
     "none": "Aucun",
-    "empty": "La boîte est vide",
-    "empty_help": "Aucune transaction ne porte actuellement le marqueur configuré.",
+    "empty": "Aucun TODO sur cette période",
+    "empty_help": "Choisissez une période antérieure pour voir les anciens TODOs.",
     "load_error": "Impossible de charger la boîte TODO.",
     "item_error": "Impossible de mettre à jour cette transaction.",
     "marker_not_configured": "Aucun tag TODO configuré",
@@ -75,7 +75,9 @@
     "batch_progress": "{processed}/{total} traitées · {successful} terminées · {failed} échouées",
     "batch_result": "Résultat de la page : {successful} terminées · {failed} échouées",
     "previous": "Précédent",
-    "next": "Suivant"
+    "next": "Suivant",
+    "older": "Plus anciens",
+    "newer": "Plus récents"
   },
   "tags_select": "Selectionner les étiquettes",
   "budget": "Budget",

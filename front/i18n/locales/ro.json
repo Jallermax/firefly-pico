@@ -60,8 +60,8 @@
     "remaining_items": "{count} rămase pe această pagină",
     "page_context": "Pagina {page} din {total} · {count} rămase",
     "none": "Nimic",
-    "empty": "Inboxul este gol",
-    "empty_help": "Nicio tranzacție nu are momentan marcajul configurat.",
+    "empty": "Niciun TODO în această perioadă",
+    "empty_help": "Alege o perioadă anterioară pentru a vedea TODO-uri mai vechi.",
     "load_error": "Inboxul TODO nu a putut fi încărcat.",
     "item_error": "Această tranzacție nu a putut fi actualizată.",
     "marker_not_configured": "Nu este configurată nicio etichetă TODO",
@@ -75,7 +75,9 @@
     "batch_progress": "{processed}/{total} procesate · {successful} gata · {failed} eșuate",
     "batch_result": "Rezultatul paginii: {successful} gata · {failed} eșuate",
     "previous": "Înapoi",
-    "next": "Înainte"
+    "next": "Înainte",
+    "older": "Mai vechi",
+    "newer": "Mai noi"
   },
   "tags_select": "Selectează etichete",
   "budget": "Buget",

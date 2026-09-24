@@ -60,8 +60,8 @@
     "remaining_items": "Pozostało na tej stronie: {count}",
     "page_context": "Strona {page} z {total} · pozostało: {count}",
     "none": "Brak",
-    "empty": "Skrzynka jest pusta",
-    "empty_help": "Żadna transakcja nie ma obecnie skonfigurowanego znacznika.",
+    "empty": "Brak TODO w tym okresie",
+    "empty_help": "Wybierz wcześniejszy okres, aby zobaczyć starsze TODO.",
     "load_error": "Nie udało się wczytać skrzynki TODO.",
     "item_error": "Nie udało się zaktualizować tej transakcji.",
     "marker_not_configured": "Nie skonfigurowano tagu TODO",
@@ -75,7 +75,9 @@
     "batch_progress": "Przetworzono {processed}/{total} · gotowe: {successful} · błędy: {failed}",
     "batch_result": "Wynik strony: gotowe {successful} · błędy {failed}",
     "previous": "Poprzednia",
-    "next": "Następna"
+    "next": "Następna",
+    "older": "Starsze",
+    "newer": "Nowsze"
   },
   "tags_select": "Wybierz tagi",
   "budget": "Budżet",

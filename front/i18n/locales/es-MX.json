@@ -60,8 +60,8 @@
     "remaining_items": "{count} restantes en esta página",
     "page_context": "Página {page} de {total} · {count} restantes",
     "none": "Ninguno",
-    "empty": "La bandeja está vacía",
-    "empty_help": "Ninguna transacción tiene actualmente el marcador configurado.",
+    "empty": "No hay TODOs en este período",
+    "empty_help": "Elige un período anterior para ver TODOs más antiguos.",
     "load_error": "No se pudo cargar la bandeja TODO.",
     "item_error": "No se pudo actualizar esta transacción.",
     "marker_not_configured": "No hay etiqueta TODO configurada",
@@ -75,7 +75,9 @@
     "batch_progress": "{processed}/{total} procesadas · {successful} listas · {failed} fallidas",
     "batch_result": "Resultado de la página: {successful} listas · {failed} fallidas",
     "previous": "Anterior",
-    "next": "Siguiente"
+    "next": "Siguiente",
+    "older": "Más antiguos",
+    "newer": "Más recientes"
   },
   "tags_select": "Selecciona etiquetas",
   "budget": "Presupuesto",
