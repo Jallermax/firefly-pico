@@ -18,6 +18,8 @@ async function renderItem(overrides = {}, { desktop = true, needsExpansion = tru
     setup: () => ({
       props,
       appStore: { isDesktopLayout: desktop },
+      reviewDisplay: desktop || props.isExpanded,
+      hasReviewContext: false,
       needsExpansion,
       description: 'Harbor Market',
       amounts: [],
@@ -33,7 +35,7 @@ async function renderItem(overrides = {}, { desktop = true, needsExpansion = tru
   app.component('van-cell', Cell)
   app.component('van-button', Button)
   app.component('van-loading', Loading)
-  for (const name of ['app-icon', 'transaction-list-item-desktop', 'transaction-list-item', 'transaction-split-view', 'todo-inbox-review-details', 'transaction-split-badge', 'account-badge']) {
+  for (const name of ['app-icon', 'transaction-list-item-desktop', 'transaction-list-item', 'transaction-split-view', 'transaction-split-badge', 'account-badge']) {
     app.component(name, { render: () => Vue.h('span', name) })
   }
   return renderToString(app)
@@ -79,10 +81,10 @@ test('mobile review uses the shared transaction card and only offers Expand for 
   assert.doesNotMatch(long, /todo-inbox-review-details/)
 })
 
-test('desktop review shows details by default and only offers Expand for overflowing notes', async () => {
+test('desktop review keeps the shared row and only offers Expand for overflowing notes', async () => {
   const short = await renderItem({ isExpanded: false }, { desktop: true, needsExpansion: false })
   assert.match(short, /transaction-list-item-desktop/)
-  assert.match(short, /todo-inbox-review-details/)
+  assert.doesNotMatch(short, /todo-inbox-review-details/)
   assert.doesNotMatch(short, /todo_inbox.details/)
   const long = await renderItem({ isExpanded: false }, { desktop: true, needsExpansion: true })
   assert.match(long, /todo_inbox.details/)
@@ -96,4 +98,14 @@ test('shared transaction rows are statically resolvable for Nuxt auto-import', a
 
   assert.match(code, /resolveComponent\("transaction-list-item-desktop"\)/)
   assert.match(code, /resolveComponent\("transaction-list-item"\)/)
+})
+
+test('review expansion stays within the existing transaction row', async () => {
+  const source = await readFile(new URL('../components/todo-inbox/todo-inbox-transaction-item.vue', import.meta.url), 'utf8')
+  const { descriptor } = parse(source)
+  const { compile } = await import('@vue/compiler-dom')
+  const { code } = compile(descriptor.template.content, { mode: 'function', prefixIdentifiers: true })
+
+  assert.doesNotMatch(code, /resolveComponent\("todo-inbox-review-details"\)/)
+  assert.match(code, /"review-display":/)
 })
