@@ -2329,6 +2329,7 @@ body {
     padding: 2px 8px;
 }
 
+.todo-inbox-review-row .transaction-list-item-todo { border: 0 !important; }
 .todo-inbox-review-row .van-cell__title { min-width: 0; }
 .todo-inbox-review-row.transaction-desktop-list { grid-template-columns: 19px minmax(74px, .5fr) minmax(0, 2fr) minmax(80px, .6fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .7fr); column-gap: 8px; }
 .todo-inbox-review-row .transaction-review-display { align-items: start; }
