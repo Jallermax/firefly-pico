@@ -3,9 +3,9 @@
     <app-top-toolbar>
       <template v-if="hasMarkerConfiguration" #right>
         <div class="todo-inbox-page-actions">
-          <van-button size="small" plain class="todo-inbox-action" :disabled="isLoading || isListLocked" @click="dateFilters?.show()">
+          <van-button size="small" plain class="todo-inbox-action" :aria-label="$t('filters.transaction_filters')" :disabled="isLoading || isListLocked" @click="dateFilters?.show()">
             <app-icon :icon="TablerIconConstants.search" :size="17" />
-            {{ $t('filters.transaction_filters') }}
+            <span v-if="appStore.isDesktopLayout">{{ $t('filters.transaction_filters') }}</span>
           </van-button>
           <van-button v-if="hasExpandableItems && appStore.isDesktopLayout" size="small" plain class="todo-inbox-action" :disabled="isLoading" @click="toggleAllExpanded">
             <app-icon :icon="allExpanded ? TablerIconConstants.upArrow : TablerIconConstants.downArrow" :size="16" />
