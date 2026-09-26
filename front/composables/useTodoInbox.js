@@ -12,11 +12,10 @@ import {
   buildTodoRemovalRequest,
   buildTodoRestoreRequest,
   getActiveTodoItems,
-  getSafeTodoPage,
   getTodoDateRange,
+  getTodoDateWindows,
   hasTodoMarker,
   hasTodoMarkerOnJournals,
-  isTodoPageLocked,
   runWithConcurrency,
 } from '~/utils/TodoTransactionUtils.js'
 
@@ -29,17 +28,16 @@ export function useTodoInbox() {
   const items = ref([])
   const receipts = ref([])
   const expandedIds = ref(new Set())
-  const page = ref(1)
-  const periodIndex = ref(0)
-  const periodToday = new Date()
-  const periodRange = computed(() => getTodoDateRange(periodIndex.value, periodToday))
-  const pageSize = ref(TODO_PAGE_SIZE)
-  const totalPages = ref(1)
-  const totalCount = ref(0)
+  const expandableIds = ref(new Set())
+  const seenIds = ref(new Set())
+  const dateRange = ref(getTodoDateRange(0))
+  const isFinished = ref(false)
+  const isRefreshing = ref(false)
   const isLoading = ref(false)
   const isLoaded = ref(false)
   const loadError = ref(null)
   const isBatchRunning = ref(false)
+  const isConfirmingBatch = ref(false)
   const batchProgress = ref(null)
   const batchResult = ref(null)
   const itemState = reactive({})
@@ -50,14 +48,26 @@ export function useTodoInbox() {
   const editorError = ref(null)
   const editorUnconfirmed = ref(false)
   let editorOriginal = null
+  let failedLoad = null
 
   const markerName = computed(() => Tag.getDisplayName(tagStore.tagTodo))
   const hasMarkerConfiguration = computed(() => Boolean(markerName.value))
   const receiptById = computed(() => Object.fromEntries(receipts.value.map((receipt) => [String(receipt.id), receipt])))
   const activeItems = computed(() => getActiveTodoItems(items.value, receipts.value))
   const remainingCount = computed(() => activeItems.value.length)
+  const expandableItems = computed(() => activeItems.value.filter((item) => expandableIds.value.has(String(item.id)) && !getState(item.id).isProcessing && !getState(item.id).isQueued))
+  const hasExpandableItems = computed(() => expandableItems.value.length > 0)
+  const allExpanded = computed(() => hasExpandableItems.value && expandableItems.value.every((item) => expandedIds.value.has(String(item.id))))
+  const setExpandable = (item, canExpand) => {
+    const next = new Set(expandableIds.value)
+    canExpand ? next.add(String(item.id)) : next.delete(String(item.id))
+    expandableIds.value = next
+  }
+  const toggleAllExpanded = () => {
+    expandedIds.value = allExpanded.value ? new Set() : new Set(expandableItems.value.map((item) => String(item.id)))
+  }
   const isAnyItemProcessing = computed(() => Object.values(itemState).some((state) => state.isProcessing || state.isQueued))
-  const isPageLocked = computed(() => isTodoPageLocked(receipts.value, isBatchRunning.value, isAnyItemProcessing.value))
+  const isListLocked = computed(() => isBatchRunning.value || isConfirmingBatch.value || isAnyItemProcessing.value || editorOpen.value)
 
   const getState = (id) => itemState[String(id)] ?? { isProcessing: false, isQueued: false, error: null }
 
@@ -75,77 +85,83 @@ export function useTodoInbox() {
 
   const transformTransaction = (transaction) => TransactionTransformer.transformFromApi(cloneDeep(transaction))
 
-  const fetchPage = async (requestedPage) => {
-    const response = await tagRepository.getTodoTransactions(tagStore.tagTodo, {
-      page: requestedPage,
-      pageSize: TODO_PAGE_SIZE,
-      ...periodRange.value,
-    })
-    if (!ResponseUtils.isSuccess(response)) {
-      throw new Error(getResponseError(response, 'todo_inbox.load_error'))
+  const fetchMore = async (range, knownIds) => {
+    const windows = getTodoDateWindows(range)
+    const candidates = []
+    let finished = false
+    // TODO membership changes after Done and Undo. Rescan IDs rather than advancing a stale offset.
+    for (const [windowIndex, window] of windows.entries()) {
+      let requestedPage = 1
+      let lastPage = 1
+      do {
+        const response = await tagRepository.getTodoTransactions(tagStore.tagTodo, { page: requestedPage, pageSize: TODO_PAGE_SIZE, ...window, showLoading: false })
+        if (!ResponseUtils.isSuccess(response)) throw new Error(getResponseError(response, 'todo_inbox.load_error'))
+        const rows = get(response, 'data.data', [])
+        lastPage = Math.max(1, Number(get(response, 'data.meta.pagination.total_pages', 1)) || 1)
+        const unseen = rows.filter((item) => !knownIds.has(String(item.id)))
+        const available = TODO_PAGE_SIZE - candidates.length
+        for (const item of unseen.slice(0, available)) {
+          if (knownIds.has(String(item.id))) continue
+          knownIds.add(String(item.id))
+          candidates.push(item)
+        }
+        finished = windowIndex === windows.length - 1 && requestedPage >= lastPage && unseen.length <= available
+        if (candidates.length >= TODO_PAGE_SIZE) break
+        requestedPage += 1
+      } while (requestedPage <= lastPage)
+      if (candidates.length >= TODO_PAGE_SIZE) break
     }
-
-    const responseBody = get(response, 'data', {})
-    const pagination = get(responseBody, 'meta.pagination', {})
-    // The tag endpoint can omit unmarked splits from a transaction group.
-    const results = await runWithConcurrency(get(responseBody, 'data', []), TODO_BATCH_CONCURRENCY, async (item) => {
+    // Only new groups need detail reads; the tag endpoint can omit their unmarked splits.
+    const results = await runWithConcurrency(candidates, TODO_BATCH_CONCURRENCY, async (item) => {
       const detail = await transactionRepository.getTodoTransaction(item.id)
-      if (!ResponseUtils.isSuccess(detail) || !getResponseTransaction(detail)) {
-        throw new Error(getResponseError(detail, 'todo_inbox.load_error'))
-      }
-      return getResponseTransaction(detail)
+      if (get(detail, 'status') === 404) return null
+      if (!ResponseUtils.isSuccess(detail) || !getResponseTransaction(detail)) throw new Error(getResponseError(detail, 'todo_inbox.load_error'))
+      const transaction = getResponseTransaction(detail)
+      return hasTodoMarker(transaction, markerName.value) ? transaction : null
     })
     const failure = results.find((result) => result.status === 'rejected')
-    if (failure) {
-      throw failure.reason
-    }
-    return {
-      items: TransactionTransformer.transformFromApiList(cloneDeep(results.map((result) => result.value))),
-      page: Number(get(pagination, 'current_page', requestedPage)) || requestedPage,
-      pageSize: Number(get(pagination, 'per_page', TODO_PAGE_SIZE)) || TODO_PAGE_SIZE,
-      totalPages: Math.max(1, Number(get(pagination, 'total_pages', 1)) || 1),
-      totalCount: Math.max(0, Number(get(pagination, 'total', 0)) || 0),
-    }
+    if (failure) throw failure.reason
+    return { items: TransactionTransformer.transformFromApiList(cloneDeep(results.map((result) => result.value).filter(Boolean))), finished, seenIds: knownIds }
   }
 
-  const applyPage = (result, { clearReceipts = false } = {}) => {
-    items.value = result.items
-    page.value = result.page
-    pageSize.value = result.pageSize
-    totalPages.value = result.totalPages
-    totalCount.value = result.totalCount
-    expandedIds.value = new Set()
-    clearState()
-    batchProgress.value = null
-    batchResult.value = null
-    if (clearReceipts) {
-      receipts.value = []
-    }
-  }
-
-  const loadPage = async (requestedPage = page.value, options = {}) => {
-    if (!hasMarkerConfiguration.value || isLoading.value || isAnyItemProcessing.value) {
-      return false
-    }
-
+  const loadMore = async ({ refresh = false, range = dateRange.value } = {}) => {
+    if (!hasMarkerConfiguration.value || isLoading.value || isListLocked.value) return false
     isLoading.value = true
     loadError.value = null
     try {
-      let result = await fetchPage(Math.max(1, Number(requestedPage) || 1))
-      const safePage = getSafeTodoPage(requestedPage, result.totalPages)
-      if (safePage !== result.page) {
-        result = await fetchPage(safePage)
+      const result = await fetchMore(range, new Set(refresh ? [] : seenIds.value))
+      if (refresh) {
+        items.value = result.items
+        dateRange.value = { ...range }
+        expandedIds.value = new Set()
+        expandableIds.value = new Set(result.items.map((item) => String(item.id)).filter((id) => expandableIds.value.has(id)))
+        clearState()
+        receipts.value = []
+        batchProgress.value = null
+        batchResult.value = null
+      } else {
+        items.value = [...items.value, ...result.items]
       }
-      applyPage(result, options)
+      isFinished.value = result.finished
+      seenIds.value = result.seenIds
       isLoaded.value = true
+      failedLoad = null
       return true
     } catch (error) {
-      loadError.value = error.message || t('todo_inbox.load_error')
+      failedLoad = { refresh, range: { ...range } }
+      loadError.value = error instanceof RangeError ? t('todo_inbox.invalid_dates') : error.message || t('todo_inbox.load_error')
       isLoaded.value = true
       return false
     } finally {
       isLoading.value = false
+      isRefreshing.value = false
     }
+  }
+  const retryLoad = () => loadMore(failedLoad ?? {})
+  const refreshList = async (range = dateRange.value) => {
+    const result = await loadMore({ refresh: true, range })
+    isRefreshing.value = false
+    return result
   }
 
   const removeStaleItem = (item, messageKey) => {
@@ -275,12 +291,18 @@ export function useTodoInbox() {
 
   const markPageDone = async () => {
     const targets = [...activeItems.value]
-    if (isLoading.value || targets.length === 0 || isBatchRunning.value || isAnyItemProcessing.value) {
+    if (isLoading.value || targets.length === 0 || isListLocked.value) {
       return false
     }
 
-    const confirmed = await UIUtils.showConfirmation(t('todo_inbox.confirm_title'), t('todo_inbox.confirm_message', { count: targets.length, marker: markerName.value }))
-    if (!confirmed || isLoading.value || isBatchRunning.value || isAnyItemProcessing.value) {
+    isConfirmingBatch.value = true
+    let confirmed
+    try {
+      confirmed = await UIUtils.showConfirmation(t('todo_inbox.confirm_title'), t('todo_inbox.confirm_message', { count: targets.length, marker: markerName.value }))
+    } finally {
+      isConfirmingBatch.value = false
+    }
+    if (!confirmed || isLoading.value || isListLocked.value) {
       return false
     }
 
@@ -306,32 +328,6 @@ export function useTodoInbox() {
     }
   }
 
-  const continuePage = async () => {
-    if (isBatchRunning.value || isAnyItemProcessing.value || receipts.value.length === 0) {
-      return false
-    }
-    return await loadPage(page.value, { clearReceipts: true })
-  }
-
-  const changePage = async (newPage) => {
-    if (isPageLocked.value) {
-      return false
-    }
-    return await loadPage(newPage)
-  }
-
-  const changePeriod = async (nextIndex) => {
-    if (nextIndex < 0 || isPageLocked.value || isLoading.value || editorOpen.value) return false
-    periodIndex.value = nextIndex
-    page.value = 1
-    items.value = []
-    expandedIds.value = new Set()
-    return await loadPage(1)
-  }
-
-  const olderPeriod = () => changePeriod(periodIndex.value + 1)
-  const newerPeriod = () => changePeriod(periodIndex.value - 1)
-
   const toggleExpanded = (item) => {
     const id = String(item.id)
     const next = new Set(expandedIds.value)
@@ -345,11 +341,22 @@ export function useTodoInbox() {
     if (index >= 0) items.value.splice(index, 1, updatedItem)
     if (!hasTodoMarker(rawTransaction, markerName.value)) {
       addReceipt(updatedItem, [], 'todo_inbox.done')
+    } else if (rawTransaction.attributes.transactions.every((split) => split.date && (split.date.slice(0, 10) < dateRange.value.start || split.date.slice(0, 10) > dateRange.value.end))) {
+      addReceipt(updatedItem, [], 'todo_inbox.outside_dates')
     }
   }
 
   const openEditor = async (item) => {
-    if (isLoading.value || isBatchRunning.value || getState(item.id).isProcessing || getState(item.id).isQueued || receiptById.value[String(item.id)] || editorLoading.value || editorOpen.value)
+    if (
+      isLoading.value ||
+      isConfirmingBatch.value ||
+      isBatchRunning.value ||
+      getState(item.id).isProcessing ||
+      getState(item.id).isQueued ||
+      receiptById.value[String(item.id)] ||
+      editorLoading.value ||
+      editorOpen.value
+    )
       return false
     editorLoading.value = true
     editorError.value = null
@@ -447,26 +454,25 @@ export function useTodoInbox() {
     markerName,
     hasMarkerConfiguration,
     expandedIds,
-    page,
-    periodIndex,
-    periodRange,
-    pageSize,
-    totalPages,
-    totalCount,
+    hasExpandableItems,
+    allExpanded,
+    setExpandable,
+    toggleAllExpanded,
+    dateRange,
+    isFinished,
+    isRefreshing,
     isLoading,
     isLoaded,
     loadError,
-    isPageLocked,
+    isListLocked,
     isAnyItemProcessing,
     isBatchRunning,
     batchProgress,
     batchResult,
     getState,
-    loadPage,
-    changePage,
-    olderPeriod,
-    newerPeriod,
-    continuePage,
+    loadMore,
+    retryLoad,
+    refreshList,
     editorOpen,
     editorItem,
     editorSaving,

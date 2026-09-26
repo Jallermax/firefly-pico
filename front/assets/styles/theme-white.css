@@ -2345,7 +2345,7 @@ body {
 .todo-inbox-item:not(.todo-inbox-item-expanded) .todo-inbox-review-row .notes-markdown { max-height: 3.3em; overflow: hidden; }
 .todo-inbox-review-row .transaction-review-display .notes-markdown { max-height: none; overflow: visible; }
 .todo-inbox-review-row .transaction-review-display .transaction-desktop-notes { display: block; white-space: normal; max-height: 12rem; overflow: hidden; line-height: 1.5; user-select: text; }
-.todo-inbox-item-expanded .transaction-desktop-notes { max-height: none; }
+.todo-inbox-item-expanded .todo-inbox-review-row .transaction-review-display .transaction-desktop-notes { max-height: none; }
 .todo-inbox-review-row .transaction-review-display .transaction-desktop-notes > * { display: block; margin: 4px 0; }
 .todo-inbox-review-row .transaction-review-display .transaction-desktop-notes li { display: list-item; }
 .todo-inbox-review-row .transaction-review-display .transaction-desktop-notes ul,

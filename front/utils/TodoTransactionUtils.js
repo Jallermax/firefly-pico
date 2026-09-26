@@ -1,4 +1,4 @@
-import { format, subDays } from 'date-fns'
+import { format, isValid, parseISO, subDays } from 'date-fns'
 
 export const TODO_PAGE_SIZE = 50
 export const TODO_BATCH_CONCURRENCY = 3
@@ -7,6 +7,26 @@ export const TODO_PERIOD_DAYS = 90
 export const getTodoDateRange = (periodIndex, today = new Date()) => {
   const end = subDays(today, periodIndex * TODO_PERIOD_DAYS)
   return { start: format(subDays(end, TODO_PERIOD_DAYS - 1), 'yyyy-MM-dd'), end: format(end, 'yyyy-MM-dd') }
+}
+
+export const getTodoDateWindows = ({ start, end }) => {
+  if (!isValid(parseISO(start ?? '')) || !isValid(parseISO(end ?? '')) || start > end) throw new RangeError('Invalid TODO date range')
+  const windows = []
+  let currentEnd = end
+  while (currentEnd >= start) {
+    const currentStart = format(subDays(parseISO(currentEnd), TODO_PERIOD_DAYS - 1), 'yyyy-MM-dd')
+    windows.push({ start: currentStart < start ? start : currentStart, end: currentEnd })
+    currentEnd = format(subDays(parseISO(windows.at(-1).start), 1), 'yyyy-MM-dd')
+  }
+  return windows
+}
+
+export const getTodoFilterDateRange = ({ dateStart, dateEnd }, today = new Date()) => {
+  if ((dateStart && !isValid(dateStart)) || (dateEnd && !isValid(dateEnd))) throw new RangeError('Invalid TODO date range')
+  const defaults = getTodoDateRange(0, today)
+  const range = { start: dateStart ? format(dateStart, 'yyyy-MM-dd') : defaults.start, end: dateEnd ? format(dateEnd, 'yyyy-MM-dd') : defaults.end }
+  if (range.start > range.end) throw new RangeError('Invalid TODO date range')
+  return range
 }
 
 const getSplits = (transaction) => transaction?.attributes?.transactions ?? []

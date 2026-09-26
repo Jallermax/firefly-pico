@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import * as TodoUtils from '../utils/TodoTransactionUtils.js'
 import {
   TODO_BATCH_CONCURRENCY,
   TODO_PAGE_SIZE,
@@ -15,6 +16,21 @@ import {
   isTodoPageLocked,
   runWithConcurrency,
 } from '../utils/TodoTransactionUtils.js'
+
+test('selected dates are queried in bounded windows without gaps or overlapping days', () => {
+  assert.deepEqual(TodoUtils.getTodoDateWindows?.({ start: '2026-03-01', end: '2026-09-26' }), [
+    { start: '2026-06-29', end: '2026-09-26' },
+    { start: '2026-03-31', end: '2026-06-28' },
+    { start: '2026-03-01', end: '2026-03-30' },
+  ])
+  assert.deepEqual(TodoUtils.getTodoDateWindows?.({ start: '2026-09-26', end: '2026-09-26' }), [{ start: '2026-09-26', end: '2026-09-26' }])
+})
+
+test('date-filter input rejects invalid dates before formatting and defaults cleared fields', () => {
+  assert.throws(() => TodoUtils.getTodoFilterDateRange?.({ dateStart: new Date('invalid') }), RangeError)
+  assert.deepEqual(TodoUtils.getTodoFilterDateRange?.({}, new Date(2026, 8, 26)), { start: '2026-06-29', end: '2026-09-26' })
+  assert.throws(() => TodoUtils.getTodoFilterDateRange({ dateStart: new Date(2026, 9, 1), dateEnd: new Date(2026, 8, 1) }), RangeError)
+})
 
 test('TODO date ranges cover adjacent 90-day periods without gaps', () => {
   const today = new Date(2026, 8, 24)

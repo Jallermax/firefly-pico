@@ -1,9 +1,25 @@
 <template>
   <div class="app-form todo-inbox-page" :class="{ empty: showEmptyState || !hasMarkerConfiguration }">
     <app-top-toolbar>
-      <template v-if="appStore.isDesktopLayout && hasMarkerConfiguration" #right>
+      <template v-if="hasMarkerConfiguration" #right>
         <div class="todo-inbox-page-actions">
-          <van-button size="small" plain class="todo-inbox-action" :disabled="isLoading || activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
+          <van-button size="small" plain class="todo-inbox-action" :disabled="isLoading || isListLocked" @click="dateFilters?.show()">
+            <app-icon :icon="TablerIconConstants.search" :size="17" />
+            {{ $t('filters.transaction_filters') }}
+          </van-button>
+          <van-button v-if="hasExpandableItems && appStore.isDesktopLayout" size="small" plain class="todo-inbox-action" :disabled="isLoading" @click="toggleAllExpanded">
+            <app-icon :icon="allExpanded ? TablerIconConstants.upArrow : TablerIconConstants.downArrow" :size="16" />
+            {{ $t(allExpanded ? 'todo_inbox.collapse_all' : 'todo_inbox.expand_all') }}
+          </van-button>
+          <van-button
+            v-if="appStore.isDesktopLayout"
+            size="small"
+            plain
+            class="todo-inbox-action"
+            :disabled="isLoading || activeItems.length === 0 || isAnyItemProcessing"
+            :loading="isBatchRunning"
+            @click="markPageDone"
+          >
             <app-icon :icon="TablerIconConstants.booleanCheckOn" :size="17" />
             {{ $t('todo_inbox.mark_page_done') }}
           </van-button>
@@ -20,6 +36,10 @@
     <template v-else>
       <van-cell-group v-if="!appStore.isDesktopLayout" inset class="todo-inbox-controls">
         <div class="todo-inbox-page-actions">
+          <van-button v-if="hasExpandableItems" size="small" plain class="todo-inbox-action" :disabled="isLoading" @click="toggleAllExpanded">
+            <app-icon :icon="allExpanded ? TablerIconConstants.upArrow : TablerIconConstants.downArrow" :size="16" />
+            {{ $t(allExpanded ? 'todo_inbox.collapse_all' : 'todo_inbox.expand_all') }}
+          </van-button>
           <van-button size="small" plain class="todo-inbox-action" :disabled="isLoading || activeItems.length === 0 || isAnyItemProcessing" :loading="isBatchRunning" @click="markPageDone">
             <app-icon :icon="TablerIconConstants.booleanCheckOn" :size="17" />
             {{ $t('todo_inbox.mark_page_done') }}
@@ -44,56 +64,36 @@
       <div v-if="loadError" class="todo-inbox-load-error">
         <app-icon :icon="TablerIconConstants.close" :size="20" />
         <span>{{ loadError }}</span>
-        <van-button size="small" plain type="danger" :loading="isLoading" @click="loadPage(page)">{{ $t('todo_inbox.retry') }}</van-button>
+        <van-button size="small" plain type="danger" :loading="isLoading" @click="retryLoad()">{{ $t('todo_inbox.retry') }}</van-button>
       </div>
 
       <empty-list v-else-if="showEmptyState" :title="$t('todo_inbox.empty')" :subtitle="$t('todo_inbox.empty_help')" />
 
-      <div v-else-if="items.length > 0" class="todo-inbox-list-wrapper">
-        <div ref="listElement" class="todo-inbox-list" :inert="isLoading" :aria-busy="isLoading">
-          <todo-inbox-transaction-item
-            v-for="item in items"
-            :key="item.id"
-            :value="item"
-            :is-expanded="expandedIds.has(String(item.id))"
-            :is-processing="getState(item.id).isProcessing"
-            :is-queued="getState(item.id).isQueued"
-            :error="getState(item.id).error"
-            :receipt="receiptById[String(item.id)]"
-            @edit="openEditor"
-            @toggle="toggleExpanded"
-            @done="onDone"
-            @retry="onDone"
-            @undo="onUndo"
-          />
-        </div>
-      </div>
-
-      <div v-if="receipts.length > 0" class="todo-inbox-continue">
-        <span>{{ $t('todo_inbox.continue_help') }}</span>
-        <van-button type="primary" size="small" :loading="isLoading" :disabled="isBatchRunning || isAnyItemProcessing" @click="continuePage">
-          {{ $t('todo_inbox.continue') }}
-        </van-button>
-      </div>
-
-      <van-pagination
-        v-if="isLoaded && !loadError && totalPages > 1"
-        class="todo-inbox-pagination"
-        :model-value="page"
-        :total-items="totalCount"
-        :items-per-page="pageSize"
-        :page-count="totalPages"
-        :mode="appStore.isDesktopLayout ? 'multi' : 'simple'"
-        :disabled="isPageLocked || isLoading"
-        :prev-text="$t('todo_inbox.previous')"
-        :next-text="$t('todo_inbox.next')"
-        @change="changePage"
-      />
-      <div v-if="isLoaded" class="todo-inbox-page-actions todo-inbox-period-navigation">
-        <van-button size="small" plain class="todo-inbox-action" :disabled="periodIndex === 0 || isPageLocked || isLoading || editorOpen" @click="newerPeriod">{{ $t('todo_inbox.newer') }}</van-button>
-        <span>{{ periodLabel }}</span>
-        <van-button size="small" plain class="todo-inbox-action" :disabled="isPageLocked || isLoading || editorOpen" @click="olderPeriod">{{ $t('todo_inbox.older') }}</van-button>
-      </div>
+      <van-pull-refresh v-model="isRefreshing" :disabled="isLoading || isListLocked || dateFilterOpen" @refresh="refreshList()">
+        <van-list :loading="isLoading" :finished="isFinished || isListLocked || dateFilterOpen || !!loadError" :immediate-check="false" @load="onLoadMore">
+          <div v-if="items.length > 0" class="todo-inbox-list-wrapper">
+            <div ref="listElement" class="todo-inbox-list" :inert="isLoading" :aria-busy="isLoading">
+              <todo-inbox-transaction-item
+                v-for="item in items"
+                :key="item.id"
+                :value="item"
+                :is-expanded="expandedIds.has(String(item.id))"
+                :is-processing="getState(item.id).isProcessing"
+                :is-queued="getState(item.id).isQueued"
+                :error="getState(item.id).error"
+                :receipt="receiptById[String(item.id)]"
+                @edit="openEditor"
+                @toggle="toggleExpanded"
+                @expansion="setExpandable"
+                @done="onDone"
+                @retry="onDone"
+                @undo="onUndo"
+              />
+            </div>
+          </div>
+        </van-list>
+      </van-pull-refresh>
+      <transaction-filters ref="dateFilters" v-model="filters" dates-only @update:show="dateFilterOpen = $event" />
     </template>
 
     <app-popup :show="editorOpen" :close-on-click-overlay="false" :popup-style="editorPopupStyle" @update:show="onEditorVisibilityChange">
@@ -124,39 +124,41 @@ import TablerIconConstants from '~/constants/TablerIconConstants.js'
 import { TUTORIAL_CONSTANTS } from '~/constants/TutorialConstants.js'
 import Transaction from '~/models/Transaction.js'
 import DateUtils from '~/utils/DateUtils.js'
+import UIUtils from '~/utils/UIUtils.js'
+import TransactionFilterUtils from '~/utils/TransactionFilterUtils.js'
+import { getActiveFilters, getFiltersFromURL, saveToUrl } from '~/utils/FilterUtils.js'
+import { getTodoFilterDateRange } from '~/utils/TodoTransactionUtils.js'
 
 const appStore = useAppStore()
 const profileStore = useProfileStore()
 const { t } = useI18n()
 const {
   items,
-  receipts,
   receiptById,
   activeItems,
   remainingCount,
   markerName,
   hasMarkerConfiguration,
   expandedIds,
-  page,
-  periodIndex,
-  periodRange,
-  pageSize,
-  totalPages,
-  totalCount,
+  hasExpandableItems,
+  allExpanded,
+  setExpandable,
+  toggleAllExpanded,
+  dateRange,
+  isFinished,
+  isRefreshing,
   isLoading,
   isLoaded,
   loadError,
-  isPageLocked,
+  isListLocked,
   isAnyItemProcessing,
   isBatchRunning,
   batchProgress,
   batchResult,
   getState,
-  loadPage,
-  changePage,
-  olderPeriod,
-  newerPeriod,
-  continuePage,
+  loadMore,
+  retryLoad,
+  refreshList,
   editorOpen,
   editorItem,
   editorSaving,
@@ -195,11 +197,11 @@ watch(
     if (anchor.isConnected) window.scrollBy({ top: anchor.getBoundingClientRect().top - top, behavior: 'instant' })
   },
 )
-const periodLabel = computed(
+const dateRangeLabel = computed(
   () =>
-    `${DateUtils.stringFromTo(periodRange.value.start, DateUtils.FORMAT_ENGLISH_DATE, profileStore.dateFormat)}–${DateUtils.stringFromTo(periodRange.value.end, DateUtils.FORMAT_ENGLISH_DATE, profileStore.dateFormat)}`,
+    `${DateUtils.stringFromTo(dateRange.value.start, DateUtils.FORMAT_ENGLISH_DATE, profileStore.dateFormat)}–${DateUtils.stringFromTo(dateRange.value.end, DateUtils.FORMAT_ENGLISH_DATE, profileStore.dateFormat)}`,
 )
-const toolbarSubtitle = computed(() => (hasMarkerConfiguration.value ? `${markerName.value} · ${periodLabel.value} · ${t('todo_inbox.remaining_items', { count: remainingCount.value })}` : null))
+const toolbarSubtitle = computed(() => (hasMarkerConfiguration.value ? `${markerName.value} · ${dateRangeLabel.value} · ${t('todo_inbox.remaining_items', { count: remainingCount.value })}` : null))
 
 const onDone = (item) => doneItem(item).catch(() => {})
 const onUndo = (item) => undoItem(item).catch(() => {})
@@ -222,5 +224,39 @@ useToolbar().init({
   backRoute: RouteConstants.ROUTE_DASHBOARD,
 })
 
-onMounted(() => loadPage(1))
+const dateFilters = ref(null)
+const dateFilterOpen = ref(false)
+const onLoadMore = () => {
+  if (!dateFilterOpen.value) return loadMore()
+}
+const filters = ref({ dateStart: DateUtils.stringToDate(dateRange.value.start), dateEnd: DateUtils.stringToDate(dateRange.value.end) })
+watch(filters, async (selection) => {
+  let range
+  try {
+    range = getTodoFilterDateRange(selection)
+  } catch {
+    UIUtils.showToastError(t('todo_inbox.invalid_dates'))
+    return
+  }
+  if (await refreshList(range)) {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }
+})
+const dateFilterDefinitions = [TransactionFilterUtils.filters.dateAfter, TransactionFilterUtils.filters.dateBefore]
+watch(dateRange, (range) => saveToUrl(getActiveFilters(dateFilterDefinitions, { dateStart: DateUtils.stringToDate(range.start), dateEnd: DateUtils.stringToDate(range.end) })))
+onMounted(async () => {
+  const selection = getFiltersFromURL(dateFilterDefinitions)
+  try {
+    getTodoFilterDateRange(selection)
+  } catch {
+    UIUtils.showToastError(t('todo_inbox.invalid_dates'))
+    await refreshList()
+    return
+  }
+  if (selection.dateStart || selection.dateEnd) {
+    filters.value = { ...filters.value, ...selection }
+  } else {
+    await refreshList()
+  }
+})
 </script>

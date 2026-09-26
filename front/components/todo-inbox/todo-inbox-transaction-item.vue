@@ -67,7 +67,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import TablerIconConstants from '~/constants/TablerIconConstants.js'
 import { transactionExtraDateFieldList } from '~/constants/TransactionConstants.js'
 import Transaction from '~/models/Transaction.js'
@@ -83,7 +83,7 @@ const props = defineProps({
   error: { type: String, default: null },
   receipt: { type: Object, default: null },
 })
-const emit = defineEmits(['edit', 'toggle', 'done', 'undo', 'retry'])
+const emit = defineEmits(['edit', 'toggle', 'done', 'undo', 'retry', 'expansion'])
 const appStore = useAppStore()
 const profileStore = useProfileStore()
 const { locale } = useI18n()
@@ -112,8 +112,10 @@ let resizeObserver
 
 const measure = () => {
   if (props.receipt || props.isProcessing || props.isQueued) return
-  isClipped.value = hasClippedTodoReviewContent(reviewRow.value, appStore.isDesktopLayout ? '.transaction-desktop-notes' : undefined)
+  isClipped.value = hasClippedTodoReviewContent(reviewRow.value)
 }
+
+watch(needsExpansion, (canExpand) => emit('expansion', props.value, canExpand), { immediate: true })
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(measure)
@@ -121,5 +123,8 @@ onMounted(() => {
   nextTick(measure)
 })
 onUpdated(measure)
-onBeforeUnmount(() => resizeObserver?.disconnect())
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  emit('expansion', props.value, false)
+})
 </script>

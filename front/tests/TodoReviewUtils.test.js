@@ -58,6 +58,13 @@ test('short mobile cards need no expansion, while extra tags, splits and review 
   assert.equal(hasHiddenTodoReviewData([{ tags: ['todo'], notes: 'Short note' }], [], { transactionListFieldsConfig: [{ code: 'notes', isVisible: false }] }), true)
 })
 
+test('a one-line note still needs expansion when a visible tag name was shortened', () => {
+  assert.equal(hasHiddenTodoReviewData([{ notes: 'Short note', tags: [{ attributes: { tag: 'groceries/food' } }, { attributes: { tag: 'smart-processor/to-review' } }] }]), true)
+  assert.equal(hasHiddenTodoReviewData([{ tags: [{ attributes: { tag: 'groceries' } }] }]), false)
+  assert.equal(hasHiddenTodoReviewData([{ tags: ['smart-processor/to-review'] }], [], { tagsEnabled: false }), false)
+  assert.equal(hasHiddenTodoReviewData([{ tags: [undefined, null] }]), false)
+})
+
 test('expand visibility follows actual clipped content instead of note length guesses', () => {
   const row = { querySelectorAll: () => [{ scrollHeight: 36, clientHeight: 36, scrollWidth: 70, clientWidth: 70 }] }
   assert.equal(hasClippedTodoReviewContent(row), false)

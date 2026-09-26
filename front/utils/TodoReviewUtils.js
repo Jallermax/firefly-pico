@@ -21,7 +21,10 @@ export const hasHiddenTodoReviewData = (splits, extraDateFields = [], profile = 
   splits.some((split) => {
     const fieldVisible = (code) => profile.transactionListFieldsConfig?.find((field) => field.code === code)?.isVisible !== false
     return (
-      (profile.tagsEnabled !== false && ((split.tags?.length ?? 0) > 4 || (!fieldVisible('tags') && split.tags?.length > 0))) ||
+      (profile.tagsEnabled !== false &&
+        ((split.tags?.length ?? 0) > 4 ||
+          split.tags?.some((tag) => (typeof tag === 'string' ? tag : (tag?.attributes?.tag ?? '')).length > 10) ||
+          (!fieldVisible('tags') && split.tags?.length > 0))) ||
       (profile.categoriesEnabled && ((!split.category && !split.category_name && split.type?.fireflyCode !== 'transfer') || (!fieldVisible('category') && (split.category || split.category_name)))) ||
       (profile.budgetsEnabled && !fieldVisible('budget') && (split.budget || split.budget_name)) ||
       (!fieldVisible('notes') && split.notes) ||
