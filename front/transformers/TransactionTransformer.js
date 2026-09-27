@@ -64,7 +64,7 @@ export default class TransactionTransformer extends ApiTransformer {
 
   static transformToApi(item) {
     const profileStore = useProfileStore()
-    const id = get(item, 'data.id')
+    const id = get(item, 'id') ?? get(item, 'data.id')
 
     const transactions = item.attributes.transactions.map((transaction) => {
       const accountSource = get(transaction, 'accountSource')
@@ -81,7 +81,7 @@ export default class TransactionTransformer extends ApiTransformer {
         category_id: get(transaction, 'category.id') ?? null,
         budget_id: get(transaction, 'budget.id') ?? 0,
         date: DateUtils.dateToString(transaction.date, DateUtils.FORMAT_ENGLISH_DATE_HOUR_MINUTE),
-        type: Transaction.getTransactionTypeForAccounts({ source: accountSource, destination: accountDestination }).fireflyCode,
+        type: get(transaction, 'type.fireflyCode') ?? Transaction.getTransactionTypeForAccounts({ source: accountSource, destination: accountDestination }).fireflyCode,
       }
 
       // Send null when unset so clearing an extra date in the form also clears it in Firefly
