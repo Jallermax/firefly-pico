@@ -89,4 +89,4 @@ axios.interceptors.response.use(
   },
 )
 
-export default defineNuxtPlugin((nuxtApp) => {})
+export default defineNuxtPlugin(() => {})

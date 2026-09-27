@@ -81,7 +81,7 @@ export class TransactionRepository {
   async getTodoTransaction(id) {
     return response(data.find((item) => item.id === id))
   }
-  async updateTodoTags(id, request) {
+  async updateTodoTransaction(id, request) {
     const shouldFail = mode.fail
     await pause()
     if (shouldFail) return { status: 422, data: { message: 'Test save failed. Your transaction was not changed.' } }

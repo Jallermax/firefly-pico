@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import * as TodoUtils from '../utils/TodoTransactionUtils.js'
 import {
   TODO_BATCH_CONCURRENCY,
   TODO_PAGE_SIZE,
@@ -7,17 +8,37 @@ import {
   buildTodoRestoreRequest,
   buildTodoTransactionsPath,
   getActiveTodoItems,
-  getSafeTodoPage,
+  getDefaultTodoDateRange,
   getTodoJournalIds,
   hasTodoMarker,
   hasTodoMarkerOnJournals,
-  isTodoPageLocked,
   runWithConcurrency,
 } from '../utils/TodoTransactionUtils.js'
+
+test('selected dates are queried in bounded windows without gaps or overlapping days', () => {
+  assert.deepEqual(TodoUtils.getTodoDateWindows({ start: '2026-03-01', end: '2026-09-26' }), [
+    { start: '2026-06-29', end: '2026-09-26' },
+    { start: '2026-03-31', end: '2026-06-28' },
+    { start: '2026-03-01', end: '2026-03-30' },
+  ])
+  assert.deepEqual(TodoUtils.getTodoDateWindows({ start: '2026-09-26', end: '2026-09-26' }), [{ start: '2026-09-26', end: '2026-09-26' }])
+})
+
+test('date-filter input rejects invalid dates before formatting and defaults cleared fields', () => {
+  assert.throws(() => TodoUtils.getTodoFilterDateRange({ dateStart: new Date('invalid') }), RangeError)
+  assert.deepEqual(TodoUtils.getTodoFilterDateRange({}, new Date(2026, 8, 26)), { start: '2026-06-29', end: '2026-09-26' })
+  assert.throws(() => TodoUtils.getTodoFilterDateRange({ dateStart: new Date(2026, 9, 1), dateEnd: new Date(2026, 8, 1) }), RangeError)
+})
+
+test('default TODO dates cover the last 90 days including today', () => {
+  assert.deepEqual(getDefaultTodoDateRange(new Date(2026, 8, 24)), { start: '2026-06-27', end: '2026-09-24' })
+  assert.deepEqual(getDefaultTodoDateRange(new Date(2024, 2, 1)), { start: '2023-12-03', end: '2024-03-01' })
+})
 
 const makeTransaction = () => ({
   id: '42',
   attributes: {
+    group_title: 'Weekly shop',
     transactions: [
       { transaction_journal_id: '101', tags: ['todo', 'imported'] },
       { transaction_journal_id: '102', tags: ['groceries'] },
@@ -26,17 +47,15 @@ const makeTransaction = () => ({
   },
 })
 
-test('builds a minimal removal request for marked journals only', () => {
+test('removes the marker while retaining unmarked journals in the replacement list', () => {
   const result = buildTodoRemovalRequest(makeTransaction(), 'todo')
 
   assert.deepEqual(result.journalIds, ['101', '103'])
   assert.deepEqual(result.requestData, {
-    apply_rules: true,
-    fire_webhooks: true,
-    transactions: [
-      { transaction_journal_id: '101', tags: ['imported'] },
-      { transaction_journal_id: 103, tags: ['family'] },
-    ],
+    apply_rules: false,
+    fire_webhooks: false,
+    group_title: 'Weekly shop',
+    transactions: [{ transaction_journal_id: '101', tags: ['imported'] }, { transaction_journal_id: '102' }, { transaction_journal_id: 103, tags: ['family'] }],
   })
 })
 
@@ -71,9 +90,10 @@ test('restores the marker to surviving original journals without replacing curre
   assert.deepEqual(result.missingJournalIds, ['103'])
   assert.equal(result.isAlreadyRestored, false)
   assert.deepEqual(result.requestData, {
-    apply_rules: true,
-    fire_webhooks: true,
-    transactions: [{ transaction_journal_id: '101', tags: ['imported', 'new-tag', 'todo'] }],
+    apply_rules: false,
+    fire_webhooks: false,
+    group_title: 'Weekly shop',
+    transactions: [{ transaction_journal_id: '101', tags: ['imported', 'new-tag', 'todo'] }, { transaction_journal_id: '102' }],
   })
 })
 
@@ -110,21 +130,11 @@ test('prefers the tag ID so hierarchical marker names stay one path segment', ()
   assert.equal(buildTodoTransactionsPath(tag), 'api/tags/314/transactions')
 })
 
-test('filters completed receipts from active items and locks their offset page', () => {
+test('filters completed receipts from active items', () => {
   const items = [{ id: '42' }, { id: '43' }]
   const receipts = [{ id: '42' }]
 
   assert.deepEqual(getActiveTodoItems(items, receipts), [{ id: '43' }])
-  assert.equal(isTodoPageLocked(receipts, false), true)
-  assert.equal(isTodoPageLocked([], true), true)
-  assert.equal(isTodoPageLocked([], false, true), true)
-  assert.equal(isTodoPageLocked([], false), false)
-})
-
-test('clamps a shifted offset page to the current valid range', () => {
-  assert.equal(getSafeTodoPage(4, 3), 3)
-  assert.equal(getSafeTodoPage(2, 5), 2)
-  assert.equal(getSafeTodoPage(0, 0), 1)
 })
 
 test('limits concurrent workers while preserving result order', async () => {

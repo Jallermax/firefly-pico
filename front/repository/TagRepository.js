@@ -11,13 +11,17 @@ export default class TagRepository extends BaseRepository {
     return await axios.post(`${this.getUrl()}/${id}/total`)
   }
 
-  async getTodoTransactions(tag, { page = 1, pageSize = TODO_PAGE_SIZE, showLoading = true } = {}) {
+  async getTodoTransactions(tag, { page = 1, pageSize = TODO_PAGE_SIZE, start, end, showLoading = true } = {}) {
     const appStore = useAppStore()
     const path = buildTodoTransactionsPath(tag)
     const url = this.getUrlForRequest({
       url: `${appStore.picoBackendURL}/${path}`,
       page,
       pageSize,
+      filters: [
+        { field: 'start', value: start },
+        { field: 'end', value: end },
+      ],
     })
     return await axios.get(url, { showLoading, showErrorToast: false })
   }

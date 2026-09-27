@@ -30,7 +30,7 @@ export default class TransactionRepository extends BaseRepository {
     })
   }
 
-  async updateTodoTags(id, requestData) {
+  async updateTodoTransaction(id, requestData) {
     return await axios.put(`${this.getUrl()}/${id}`, requestData, {
       showLoading: false,
       showErrorToast: false,
