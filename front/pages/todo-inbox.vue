@@ -96,7 +96,7 @@
       <transaction-filters ref="dateFilters" v-model="filters" dates-only @update:show="dateFilterOpen = $event" />
     </template>
 
-    <app-popup :show="editorOpen" :close-on-click-overlay="false" :popup-style="editorPopupStyle" @update:show="onEditorVisibilityChange">
+    <app-popup :show="editorOpen" :close-on-click-overlay="false" :popup-style="editorPopupStyle" @click-overlay="closeEditor" @update:show="onEditorVisibilityChange">
       <div class="todo-inbox-editor-header">
         <strong>{{ $t(editorItem && Transaction.isSplitPayment(editorItem) ? 'transaction.title_split_details' : 'transaction.title_edit_transaction') }}</strong>
         <van-button size="small" plain class="todo-inbox-action" :disabled="editorSaving || editorLoading" @click="closeEditor">{{ $t('todo_inbox.close_editor') }}</van-button>
@@ -178,6 +178,9 @@ const showEmptyState = computed(() => isLoaded.value && !isLoading.value && !loa
 const listElement = ref(null)
 const editorForm = ref(null)
 const editorPopupStyle = computed(() => ({
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
   height: appStore.isDesktopLayout ? 'min(90vh, 780px)' : '94%',
   maxHeight: '94vh',
   width: appStore.isDesktopLayout ? 'min(940px, 92vw)' : undefined,
