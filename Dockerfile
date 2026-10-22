@@ -1,7 +1,7 @@
 FROM composer:2.2 AS composer_base
 
 #-----------------------------------------------------------------
-FROM alpine:3.22 AS base
+FROM alpine:3.24 AS base
 
 #Install packages
 RUN apk add --no-cache \
@@ -11,33 +11,33 @@ RUN apk add --no-cache \
     npm \
     redis \
     supervisor \
-    php82 \
-    php82-session \
-    php82-ctype \
-    php82-fpm \
-    php82-pdo \
-    php82-opcache \
-    php82-zip \
-    php82-phar \
-    php82-iconv \
-    php82-cli \
-    php82-curl \
-    php82-openssl \
-    php82-mbstring \
-    php82-tokenizer \
-    php82-fileinfo \
-    php82-json \
-    php82-xml \
-    php82-xmlwriter \
-    php82-simplexml \
-    php82-dom \
-    php82-pdo_mysql \
-    php82-pdo_pgsql \
-    php82-pdo_sqlite \
-    php82-pcntl \
-    php82-posix \
-    php82-tokenizer
-RUN ln -s /usr/bin/php82 /usr/bin/php
+    php84 \
+    php84-session \
+    php84-ctype \
+    php84-fpm \
+    php84-pdo \
+    php84-opcache \
+    php84-zip \
+    php84-phar \
+    php84-iconv \
+    php84-cli \
+    php84-curl \
+    php84-openssl \
+    php84-mbstring \
+    php84-tokenizer \
+    php84-fileinfo \
+    php84-json \
+    php84-xml \
+    php84-xmlwriter \
+    php84-simplexml \
+    php84-dom \
+    php84-pdo_mysql \
+    php84-pdo_pgsql \
+    php84-pdo_sqlite \
+    php84-pcntl \
+    php84-posix \
+    php84-tokenizer
+RUN ln -s /usr/bin/php84 /usr/bin/php
 
 #-----------------------------------------------------------------
 FROM base AS build-container
@@ -116,8 +116,8 @@ RUN mkdir -p /tmp/supervisor /tmp/crontabs && chown -R www-data:www-data /tmp/su
 
 # Configure PHP
 RUN mkdir -p /run/php/ && touch /run/php/php8.2-fpm.pid && chown -R www-data:www-data /run/php
-RUN mkdir -p /var/log/php82 && chown -R www-data:www-data /var/log/php82
-COPY docker/conf/php-fpm/ /etc/php82/
+RUN mkdir -p /var/log/php84 && chown -R www-data:www-data /var/log/php84
+COPY docker/conf/php-fpm/ /etc/php84/
 
 # Configure redis (backs the Horizon job queue)
 COPY docker/conf/redis/redis.conf /etc/redis-pico.conf
