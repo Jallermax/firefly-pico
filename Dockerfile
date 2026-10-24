@@ -70,7 +70,8 @@ ARG APP_REVISION
 ARG APP_COMMIT_SHA
 RUN echo "${APP_REVISION:-$APP_VERSION}" > /var/www/html/VERSION
 RUN echo "$APP_VERSION" > /var/www/html/UPSTREAM_VERSION
-RUN tar --owner=www-data --group=www-data --exclude=.git -czf /tmp/app-back.tar.gz .
+#Frontend dependencies are already installed here; package them only through the frontend archive
+RUN tar --owner=www-data --group=www-data --exclude=.git --exclude=./front -czf /tmp/app-back.tar.gz .
 
 #Configure frontend - Step 2: Copy source and build
 WORKDIR /var/www/html/front
@@ -115,7 +116,7 @@ COPY docker/conf/supervisor/ /etc/supervisor.d/
 RUN mkdir -p /tmp/supervisor /tmp/crontabs && chown -R www-data:www-data /tmp/supervisor /tmp/crontabs
 
 # Configure PHP
-RUN mkdir -p /run/php/ && touch /run/php/php8.2-fpm.pid && chown -R www-data:www-data /run/php
+RUN mkdir -p /run/php/ && touch /run/php/php8.4-fpm.pid && chown -R www-data:www-data /run/php
 RUN mkdir -p /var/log/php84 && chown -R www-data:www-data /var/log/php84
 COPY docker/conf/php-fpm/ /etc/php84/
 

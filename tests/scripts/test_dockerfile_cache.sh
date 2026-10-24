@@ -26,6 +26,8 @@ back_archive_line=$(grep -n -m1 'app-back.tar.gz' "$dockerfile" | cut -d: -f1 ||
 [ -n "$commit_arg_line" ] || fail 'commit SHA build argument is missing'
 [ -n "$frontend_version_line" ] || fail 'upstream version and personal commit SHA are not embedded separately'
 [ -n "$upstream_version_line" ] || fail 'upstream release channel is not available to the backend'
+[ "$npm_ci_line" -lt "$revision_arg_line" ] || fail 'APP_REVISION invalidates the frontend dependency cache'
+[ "$npm_ci_line" -lt "$commit_arg_line" ] || fail 'APP_COMMIT_SHA invalidates the frontend dependency cache'
 [ "$npm_ci_line" -lt "$version_line" ] || fail 'APP_VERSION invalidates the frontend dependency cache'
 [ "$npm_ci_line" -lt "$upstream_version_line" ] || fail 'upstream version invalidates the frontend dependency cache'
 [ "$upstream_version_line" -lt "$back_archive_line" ] || fail 'upstream version is missing from the backend runtime archive'
@@ -36,5 +38,7 @@ if grep -q '^RUN npm prune' "$dockerfile"; then
   fail 'runtime packaging repeats a dependency-tree rewrite after every build'
 fi
 grep -q -- '--exclude=\./node_modules' "$dockerfile" || fail 'root frontend dependencies are included in the runtime image'
+
+node --test "$repo_root/tests/scripts/DockerRuntimeArchives.test.mjs"
 
 echo 'PASS: commit version changes preserve dependency layers and runtime packaging excludes the build tree'
