@@ -1,0 +1,104 @@
+name: Check personal Docker candidates
+
+on:
+  pull_request:
+    branches: [personal/deploy]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - docker/**
+      - scripts/sync-personal-branches.sh
+      - tests/scripts/**
+      - .github/workflows/personal-build-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: [stable, experimental]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compose both candidates without publishing
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin '+refs/heads/personal/*:refs/remotes/origin/personal/*'
+          git remote add upstream https://github.com/cioraneanu/firefly-pico.git
+          git fetch upstream '+refs/heads/dev:refs/remotes/upstream/dev' --tags
+          STABLE_REF=HEAD bash scripts/sync-personal-branches.sh
+          git switch sync-${{ matrix.candidate }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Check cache boundaries and conflict handling
+        run: |
+          set -euo pipefail
+          bash tests/scripts/test_dockerfile_cache.sh
+          bash tests/scripts/test_personal_sync_workflow.sh
+          bash tests/scripts/test_sync_personal_branches.sh
+
+      - name: Test frontend and backend
+        run: |
+          set -euo pipefail
+          npm ci --prefix front --ignore-scripts --no-audit --no-fund
+          node --test front/tests/*.test.js
+          if [ '${{ matrix.candidate }}' = experimental ]; then
+            node --test front/tests/repository/*.test.js front/tests/stores/*.test.js front/tests/utils/*.test.js
+          fi
+          composer install --working-dir=back --no-interaction --prefer-dist --no-progress
+          cd back
+          php artisan test --filter VersionControllerTest
+
+      - name: Build and verify the runtime image
+        run: |
+          set -euo pipefail
+          revision=$(git rev-parse HEAD)
+          version=$(git describe --tags --match '*-dev' --abbrev=0 upstream/dev)
+          docker build --tag pico-check \
+            --build-arg APP_VERSION="$version" \
+            --build-arg APP_REVISION="$revision" \
+            --build-arg APP_COMMIT_SHA="$revision" .
+          docker create --name pico-check --network none \
+            --env NGINX_PORT=8080 --env APP_ENV=production --env APP_DEBUG=false pico-check
+          docker cp pico-check:/var/www/html/front/.output front/.output
+          bash tests/scripts/verify_built_version.sh "$revision" "$version"
+          docker start pico-check
+          docker exec --env EXPECTED_REVISION="$revision" --env EXPECTED_VERSION="$version" pico-check sh -ec '
+            test "$(cat /var/www/html/VERSION)" = "$EXPECTED_REVISION"
+            test "$(cat /var/www/html/UPSTREAM_VERSION)" = "$EXPECTED_VERSION"
+            test ! -d /var/www/html/front/node_modules
+            test -d /var/www/html/front/.output/server/node_modules
+            php-fpm84 -t
+          '
+          for attempt in $(seq 1 30); do
+            if docker exec pico-check wget -q --spider http://127.0.0.1:8080/; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs pico-check
+          exit 1
+
+      - name: Remove test container
+        if: always()
+        run: docker rm --force pico-check 2>/dev/null || true
