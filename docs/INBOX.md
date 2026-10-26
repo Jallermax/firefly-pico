@@ -11,7 +11,3 @@ that already exists, or dropped with Maxim's yes. The rule sessions follow is th
 of `AGENTS.md`; the cross-project dashboard counts what is here.
 
 ## Entries
-
-- 2026-10-22 security: rotate the Firefly personal access token that the retro's wave 1 left
-  open. Which token it is and where it is used are not recorded, so this is not yet a story;
-  confirm both with Maxim before promoting it, and never name a secret's location in an item.

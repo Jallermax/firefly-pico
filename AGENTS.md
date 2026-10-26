@@ -286,11 +286,12 @@ Read this before generating any UI so new screens look like they belong. The app
 
 ## Items
 
-Status lives in item files, never in prose. The cross-project dashboard in the swarm
-repo (`scripts/dashboard/`) reads them from every branch and worktree of this repo and
-lists item errors there, so this repo has no generator and no hook for them. Item files
-belong to the personal branches (`personal/deploy` is the trunk), never to upstream-bound
-history.
+An item's status lives only in its own file's frontmatter. The cross-project dashboard in
+the swarm repo (`scripts/dashboard/`) reads item files from every branch and worktree of
+this repo and lists item errors there, so this repo has no generator and no hook for them.
+Item files belong to the personal branches (`personal/deploy` is the trunk), never to
+upstream-bound history. This fork is public on GitHub: never record security work, or
+anything that names a credential, host or address, in an item or the inbox.
 
 | class | home | id |
 |---|---|---|
@@ -318,10 +319,11 @@ updated: 2026-10-26
 ---
 ```
 
-Decisions use PROPOSED, ACCEPTED or SUPERSEDED; features add OUT_OF_SCOPE; questions use
-OPEN, NEEDS_FRAMING or ANSWERED, and an OPEN question also carries `options:` (at least
-two), `recommendation:` and `cost-if-wrong:`. An item with no owner and no open blocker
-is Ready. A DONE story carries `verified: 'YYYY-MM-DD | command | result'` from a run
-that day, or `unproven-since: <date>`. When Maxim says park, keep, later or inbox, or
-raises something outside the task in hand, append one bullet to `docs/INBOX.md` in the
-same turn (`- YYYY-MM-DD area: what was seen`) and do not start the work.
+Decisions use PROPOSED, ACCEPTED or SUPERSEDED; features use PLANNED, IN_PROGRESS, DONE,
+DEFERRED, SUPERSEDED or OUT_OF_SCOPE; questions use OPEN, NEEDS_FRAMING or ANSWERED, and
+an OPEN question also carries `options:` (at least two), `recommendation:` and
+`cost-if-wrong:`. A PLANNED story with no owner and no open blocker is Ready. A DONE story
+carries `verified: 'YYYY-MM-DD | command | result'` from a run that day, or
+`unproven-since: <date>`. When Maxim says park, keep, later or inbox, or raises something
+outside the task in hand, append one bullet to `docs/INBOX.md` in the same turn
+(`- YYYY-MM-DD area: what was seen`) and do not start the work.
