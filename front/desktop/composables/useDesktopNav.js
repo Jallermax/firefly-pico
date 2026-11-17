@@ -31,7 +31,7 @@ export function useDesktopNav() {
           { label: t('analytics.title'), icon: IconChartLine, to: RouteConstants.ROUTE_ANALYTICS },
           { label: t('toolbar.transactions'), icon: IconCoins, to: RouteConstants.ROUTE_TRANSACTION_LIST },
           { label: t('accounts'), icon: IconBuildingBank, to: RouteConstants.ROUTE_ACCOUNT_LIST },
-          { label: t('todo_page.title'), icon: IconListCheck, to: RouteConstants.ROUTE_TODO, count: todoStore.visibleTodoList.length, hidden: !profileStore.tagsEnabled },
+          { label: t('todo_page.title'), icon: IconListCheck, to: RouteConstants.ROUTE_TODO, count: todoStore.todoCountLabel, hidden: !profileStore.tagsEnabled },
         ],
       },
       {
