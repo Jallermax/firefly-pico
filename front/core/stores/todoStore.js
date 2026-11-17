@@ -66,6 +66,11 @@ export const useTodoStore = defineStore('todo', () => {
 
   // Rows hidden behind a pending Undo delete are not shown or counted
   const visibleTodoList = computed(() => withoutDeleted(todoList.value))
+  const todoCountLabel = computed(() => {
+    const count = visibleTodoList.value.length
+    if (isFinished.value) return count
+    return count ? `${count}+` : null
+  })
   const visibleDoneList = computed(() => withoutDeleted(doneList.value))
   const totalCount = computed(() => visibleTodoList.value.length + visibleDoneList.value.length)
 
@@ -251,6 +256,7 @@ export const useTodoStore = defineStore('todo', () => {
     todoList,
     doneList,
     visibleTodoList,
+    todoCountLabel,
     visibleDoneList,
     isLoading,
     isFinished,
