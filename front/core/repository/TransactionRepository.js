@@ -25,8 +25,18 @@ export default class TransactionRepository extends BaseRepository {
   }
 
   async getTodoTransaction(id, connection) {
-    const response = await axios.get(`${connection.picoBackendURL}/${this.endpoint}/${id}`, { connection, showLoading: false, showErrorToast: false })
+    const response = await this.getTodoTransactionResponse(id, connection)
     return get(response, 'data.data')
+  }
+
+  async getTodoTransactionResponse(id, connection) {
+    return await axios.get(`${connection.picoBackendURL}/${this.endpoint}/${id}`, { connection, showLoading: false, showErrorToast: false })
+  }
+
+  async searchTodoTransactions(query, { page, pageSize }, connection) {
+    const url = this.getUrlForRequest({ url: `${connection.picoBackendURL}/api/search/transactions`, filters: [{ field: 'query', value: query }], page, pageSize })
+    const response = await axios.get(url, { connection, showLoading: false, showErrorToast: false })
+    return response?.status === 200 ? response.data : undefined
   }
 
   async updateTodoTags(id, data, connection) {
