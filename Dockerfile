@@ -56,7 +56,6 @@ RUN composer install --no-dev --no-scripts --no-autoloader
 COPY back/ .
 RUN mv .env.example .env
 RUN composer dump-autoload --no-dev --optimize
-RUN php artisan key:generate
 
 #Configure frontend - Step 1: Install dependencies
 WORKDIR /var/www/html/front

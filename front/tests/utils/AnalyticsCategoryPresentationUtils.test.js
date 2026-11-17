@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '../../utils/AnalyticsCategoryPresentationUtils.js'
-import * as CategoryPresentation from '../../utils/AnalyticsCategoryPresentationUtils.js'
+import { buildCategoryReadyPresentation, buildCategorySummaryPresentation, decorateCategoryChartPoint } from '../../core/utils/AnalyticsCategoryPresentationUtils.js'
+import * as CategoryPresentation from '../../core/utils/AnalyticsCategoryPresentationUtils.js'
 
 const summaries = [
   {
@@ -278,7 +278,7 @@ test('category ready presentation keeps unavailable amounts blocking without own
 })
 
 test('category card renders unavailable amounts as a blocking warning before empty results', () => {
-  const component = readFileSync(new URL('../../components/analytics/analytics-category-spending.vue', import.meta.url), 'utf8')
+  const component = readFileSync(new URL('../../shared/components/analytics/analytics-category-spending.vue', import.meta.url), 'utf8')
   const template = component.slice(0, component.indexOf('<script setup>'))
 
   assert.ok(template.indexOf('v-else-if="readyPresentation.isBlocked"') < template.indexOf("analyticsStore.categoryState.status === 'empty'"))

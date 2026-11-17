@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildDefinedOccurrences, detectRecurringCandidates, enrichRecurringCandidatesFromEvidence, matchRecurringOccurrences, mergeRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
+import { buildDefinedOccurrences, detectRecurringCandidates, enrichRecurringCandidatesFromEvidence, matchRecurringOccurrences, mergeRecurringCandidates } from '../../core/utils/AnalyticsRecurringUtils.js'
 
 const entry = ({
   id,

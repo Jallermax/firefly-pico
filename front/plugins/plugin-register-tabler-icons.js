@@ -76,6 +76,7 @@ import {
   IconLanguage,
   IconX,
   IconArrowNarrowRight,
+  IconListCheck,
 } from '@tabler/icons-vue'
 
 export default defineNuxtPlugin((nuxtApp) => {
@@ -85,6 +86,7 @@ export default defineNuxtPlugin((nuxtApp) => {
   nuxtApp.vueApp.component('IconSquareRounded', IconSquareRounded)
   nuxtApp.vueApp.component('IconCodeCircle', IconCodeCircle)
   nuxtApp.vueApp.component('IconReplace', IconReplace)
+  nuxtApp.vueApp.component('IconListCheck', IconListCheck)
   nuxtApp.vueApp.component('IconCarambola', IconCarambola)
   nuxtApp.vueApp.component('IconChartLine', IconChartLine)
   nuxtApp.vueApp.component('IconDelta', IconDelta)

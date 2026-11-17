@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
+import { buildAnalyticsLedger } from '../../core/utils/AnalyticsLedgerUtils.js'
 
 const account = ({ id, type, role = null, includeNetWorth = true, balance = '0' }) => ({
   id,
@@ -281,7 +281,7 @@ test('reports unavailable FX and unknown endpoints without inventing zero values
 })
 
 test('keeps transformed local purchase and refund calendar dates in a UTC-positive timezone', () => {
-  const ledgerUrl = new URL('../../utils/AnalyticsLedgerUtils.js', import.meta.url).href
+  const ledgerUrl = new URL('../../core/utils/AnalyticsLedgerUtils.js', import.meta.url).href
   const script = `
     import { buildAnalyticsLedger } from ${JSON.stringify(ledgerUrl)}
 

@@ -6,9 +6,9 @@ import {
   classifyForecastFlowAmounts,
   projectMetricForecast as projectMetricForecastCore,
   summarizeProjectedSources,
-} from '../../utils/AnalyticsForecastUtils.js'
-import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
-import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../../utils/AnalyticsRecurringUtils.js'
+} from '../../core/utils/AnalyticsForecastUtils.js'
+import { buildAnalyticsLedger } from '../../core/utils/AnalyticsLedgerUtils.js'
+import { buildDefinedOccurrences, detectRecurringCandidates, mergeRecurringCandidates } from '../../core/utils/AnalyticsRecurringUtils.js'
 
 const endpoint = (id, kind, includeNetWorth = !['revenue', 'expense'].includes(kind)) => ({ id, attributes: { name: id, include_net_worth: includeNetWorth } })
 
@@ -3481,7 +3481,7 @@ test('rejects conflicting duplicate budget plans deterministically without selec
 })
 
 test('exports the normalized actual-flow classifier used by daily projections', async () => {
-  const module = await import('../../utils/AnalyticsForecastUtils.js')
+  const module = await import('../../core/utils/AnalyticsForecastUtils.js')
   assert.equal(typeof module.classifyForecastFlowAmounts, 'function')
   const result = module.classifyForecastFlowAmounts({
     entry: {

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import axios from 'axios'
-import BaseRepository from '../../repository/BaseRepository.js'
-import SubscriptionRepository from '../../repository/SubscriptionRepository.js'
-import TransactionLinkRepository from '../../repository/TransactionLinkRepository.js'
-import TransactionLinkTypeRepository from '../../repository/TransactionLinkTypeRepository.js'
+import BaseRepository from '../../core/repository/BaseRepository.js'
+import SubscriptionRepository from '../../core/repository/SubscriptionRepository.js'
+import TransactionLinkRepository from '../../core/repository/TransactionLinkRepository.js'
+import TransactionLinkTypeRepository from '../../core/repository/TransactionLinkTypeRepository.js'
 
 test('merged result forwards page size to every sequential page', async () => {
   const calls = []

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import RouteConstants from '../../constants/RouteConstants.js'
-import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../utils/ChartUtils.js'
-import * as ChartUtils from '../../utils/ChartUtils.js'
-import { buildFinancialTrendChartSeries, limitMoneyFlowGraphDetail } from '../../utils/AnalyticsUtils.js'
+import RouteConstants from '../../core/constants/RouteConstants.js'
+import { buildLineChartGeometry, nearestChartPointIndex, nearestPointIndex, resolveMoneyFlowPresentation } from '../../core/utils/ChartUtils.js'
+import * as ChartUtils from '../../core/utils/ChartUtils.js'
+import { buildFinancialTrendChartSeries, limitMoneyFlowGraphDetail } from '../../core/utils/AnalyticsUtils.js'
 
 test('line geometry shares one x scale and keeps zero in range when needed', () => {
   const geometry = buildLineChartGeometry({
@@ -296,12 +296,12 @@ test('balance forecasts route actual IDs while category forecasts open details b
 })
 
 test('balance and category consumers wire the real route constant and transaction ID filter into their decisions', () => {
-  for (const file of ['../../components/analytics/analytics-balance-trends.vue', '../../components/analytics/analytics-category-spending.vue']) {
+  for (const file of ['../../shared/components/analytics/analytics-balance-trends.vue', '../../shared/components/analytics/analytics-category-spending.vue']) {
     const component = readFileSync(new URL(file, import.meta.url), 'utf8')
     assert.match(component, /route:\s*RouteConstants\.ROUTE_TRANSACTION_LIST/)
     assert.match(component, /toUrl:\s*TransactionFilterUtils\.filters\.id\.toUrl/)
   }
-  const category = readFileSync(new URL('../../components/analytics/analytics-category-spending.vue', import.meta.url), 'utf8')
+  const category = readFileSync(new URL('../../shared/components/analytics/analytics-category-spending.vue', import.meta.url), 'utf8')
   assert.match(category, /selection\.actualRoute/)
   assert.match(category, /analytics\.flow\.view_transactions/)
 })
@@ -598,8 +598,8 @@ test('money flow presentation distinguishes empty, full, condensed, stale, missi
 })
 
 test('mobile money flow typography remains readable inside an inset card', () => {
-  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
-  const darkCss = readFileSync(new URL('../../assets/styles/theme-dark.css', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
+  const darkCss = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
   const ruleBody = (css, selector) => {
     const start = css.indexOf(`${selector} {`)
     assert.notEqual(start, -1, `missing ${selector}`)
@@ -613,8 +613,8 @@ test('mobile money flow typography remains readable inside an inset card', () =>
     const renderedFontSize = mobileFontSize * ((viewportWidth - 32 - horizontalPadding * 2) / 360)
     assert.ok(renderedFontSize >= 12, `${viewportWidth}px renders ${renderedFontSize}px flow text`)
   }
-  assert.match(ruleBody(whiteCss, '.analytics-flow-node-amount'), /fill:\s*var\(--van-text-color\)/)
-  assert.match(ruleBody(darkCss, '.van-theme-dark .analytics-flow-node-amount'), /fill:\s*var\(--van-text-color\)/)
+  assert.match(ruleBody(whiteCss, '.analytics-flow-node-amount'), /fill:\s*var\(--analytics-text\)/)
+  assert.match(ruleBody(darkCss, '.theme-dark .analytics-flow-node-amount'), /fill:\s*var\(--analytics-text\)/)
 })
 
 const layeredGeometryGraph = {
@@ -808,12 +808,12 @@ test('money flow item details expose independent source, destination, bridge, an
 })
 
 test('reduced Other nodes retain their semantic colors', () => {
-  const component = readFileSync(new URL('../../components/analytics/analytics-money-flow.vue', import.meta.url), 'utf8')
+  const component = readFileSync(new URL('../../shared/components/analytics/analytics-money-flow.vue', import.meta.url), 'utf8')
 
   assert.equal(typeof ChartUtils.resolveMoneyFlowSemanticColor, 'function')
   assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherExpenseCategory' }), 'var(--expense2)')
   assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherSavingsDeposit' }), 'var(--income2)')
-  assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherDebtPaid' }), 'var(--van-warning-color)')
+  assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherDebtPaid' }), 'var(--analytics-warning-color)')
   assert.equal(ChartUtils.resolveMoneyFlowSemanticColor({ kind: 'otherIncome' }), 'var(--transfer2)')
   assert.match(component, /color: resolveMoneyFlowSemanticColor\(node\)/)
   assert.match(component, /color: resolveMoneyFlowSemanticColor\(link\)/)
@@ -1004,8 +1004,8 @@ test('dense narrow desktop flow expands an intrinsic scrollable full-detail canv
     }
   }
 
-  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
-  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const component = readFileSync(new URL('../../shared/components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
   assert.match(component, /class="analytics-flow-viewport"/)
   assert.match(component, /width: `\$\{layout\.width\}px`/)
   assert.match(whiteCss, /\.analytics-flow-viewport\s*\{[^}]*overflow-x:\s*auto/s)
@@ -1177,8 +1177,8 @@ test('dense mobile condensation expands an intrinsic canvas for eleven unremovab
     }
   }
 
-  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
-  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const component = readFileSync(new URL('../../shared/components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
   assert.match(component, /width: `\$\{layout\.width\}px`/)
   assert.match(whiteCss, /\.analytics-flow-viewport\s*\{[^}]*overflow-x:\s*auto/s)
   assert.match(whiteCss, /\.analytics-flow-mobile \.analytics-flow-svg\s*\{[^}]*max-width:\s*none/s)
@@ -1244,8 +1244,8 @@ test('crowded 390px flow condenses outer details without discarding their select
 })
 
 test('layered flow renderer uses filled ribbons and accessible patterns', () => {
-  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
-  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const component = readFileSync(new URL('../../shared/components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
 
   assert.match(component, /<path[^>]*:d="ribbon\.path" :fill="linkColor\(ribbon\)"/)
   assert.match(component, /id="analytics-flow-refund-pattern"/)
@@ -1258,7 +1258,7 @@ test('layered flow renderer uses filled ribbons and accessible patterns', () => 
 })
 
 test('layered flow renderer repairs interaction from a stable target signature without selecting anything', () => {
-  const component = readFileSync(new URL('../../components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
+  const component = readFileSync(new URL('../../shared/components/charts/layered-money-flow-chart.vue', import.meta.url), 'utf8')
 
   assert.match(
     component,
@@ -1491,7 +1491,7 @@ test('money flow value and percentage formatting use the selected locale consist
 })
 
 test('money flow card uses the layered graph, persisted detail control, and one exact-details popup', () => {
-  const component = readFileSync(new URL('../../components/analytics/analytics-money-flow.vue', import.meta.url), 'utf8')
+  const component = readFileSync(new URL('../../shared/components/analytics/analytics-money-flow.vue', import.meta.url), 'utf8')
 
   assert.match(component, /<layered-money-flow-chart/)
   assert.doesNotMatch(component, /<money-flow-chart/)
@@ -1500,7 +1500,7 @@ test('money flow card uses the layered graph, persisted detail control, and one 
   assert.match(component, /@select-link="openDetails"/)
   assert.match(component, /<details class="analytics-flow-exact-values"/)
   assert.match(component, /v-for="link in fullLinks"/)
-  assert.equal(component.match(/<app-popup/g)?.length, 1)
+  assert.equal(component.match(/<analytics-dialog v-model="detailsVisible"/g)?.length, 1)
   assert.match(component, /resolveMoneyFlowItemDetails/)
   assert.match(component, /selectedItemDetails\.sourcePercent/)
   assert.match(component, /selectedItemDetails\.destinationPercent/)
@@ -1515,7 +1515,7 @@ test('money flow card uses the layered graph, persisted detail control, and one 
 })
 
 test('money flow detail popup keeps long drilldowns inside a bounded scroll region', () => {
-  const whiteCss = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const whiteCss = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
   const ruleBody = (selector) => {
     const start = whiteCss.indexOf(`${selector} {`)
     assert.notEqual(start, -1, `missing ${selector}`)

@@ -2,8 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import * as AnalyticsCashUseUtils from '../../utils/AnalyticsCashUseUtils.js'
-import { projectLineChartSelection } from '../../utils/ChartUtils.js'
+import * as AnalyticsCashUseUtils from '../../core/utils/AnalyticsCashUseUtils.js'
+import { projectLineChartSelection } from '../../core/utils/ChartUtils.js'
 
 const { buildCashUseSeries, buildCashUseVisualStyles } = AnalyticsCashUseUtils
 
@@ -154,8 +154,8 @@ test('Cash Use renders overflow variants with one shared chart and legend dash e
     useLayers: Array.from({ length: 700 }, (_, index) => ({ id: `category:${index + 1}`, kind: 'expenseCategory' })),
     sourceBands: [],
   })
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
-  const css = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const css = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
   const expected = [
     ['category:41', 'stroke-01-01', '1 1'],
     ['category:241', 'stroke-06-01', '6 1'],
@@ -174,11 +174,11 @@ test('Cash Use renders overflow variants with one shared chart and legend dash e
     assert.match(css, new RegExp(`\\[data-pattern-variant\\$='-${String(gap).padStart(2, '0')}'\\]\\s*\\{\\s*--pattern-variant-gap:\\s*${gap}px;\\s*\\}`), `${id} gap`)
   }
   assert.match(chart, /:stroke-dasharray="layer\.strokeDasharray"/)
-  assert.match(chart, /const areaStroke = \(item\) => \(item\.strokeDasharray \? 'var\(--van-text-color\)' : null\)/)
+  assert.match(chart, /const areaStroke = \(item\) => \(item\.strokeDasharray \? 'var\(--analytics-text\)' : null\)/)
   assert.match(css, /\.analytics-cash-use-legend-marker\[data-pattern-variant\^='stroke-'\]::after/)
   assert.match(
     css,
-    /repeating-linear-gradient\(90deg, var\(--van-text-color\) 0 var\(--pattern-variant-dash\), transparent var\(--pattern-variant-dash\) calc\(var\(--pattern-variant-dash\) \+ var\(--pattern-variant-gap\)\)\)/,
+    /repeating-linear-gradient\(90deg, var\(--analytics-text\) 0 var\(--pattern-variant-dash\), transparent var\(--pattern-variant-dash\) calc\(var\(--pattern-variant-dash\) \+ var\(--pattern-variant-gap\)\)\)/,
   )
 })
 
@@ -1022,7 +1022,7 @@ test('combination target resolver selects the topmost painted boundary', () => {
 })
 
 test('Cash Use painted refund overlays resolve through the logical composite series', () => {
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
   const target = AnalyticsCashUseUtils.resolveCombinationChartTarget({
     bounds: { left: 0, top: 0, width: 360, height: 240 },
     viewBox: { width: 360, height: 240 },
@@ -1041,9 +1041,9 @@ test('Cash Use painted refund overlays resolve through the logical composite ser
 })
 
 test('Cash Use painted refund overlays retain the logical composite descriptor', () => {
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
-  const legend = readFileSync(new URL('../../components/charts/analytics-cash-use-legend.vue', import.meta.url), 'utf8')
-  const monthRow = readFileSync(new URL('../../components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const legend = readFileSync(new URL('../../shared/components/charts/analytics-cash-use-legend.vue', import.meta.url), 'utf8')
+  const monthRow = readFileSync(new URL('../../shared/components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
   const descriptor = { color: 'rebeccapurple', pattern: 'refund', patternVariant: 'dash', markerKind: 'area', legendOrdinal: 12 }
   const series = AnalyticsCashUseUtils.buildCashUseRefundCoverageSeries({ descriptor })
 
@@ -1353,8 +1353,8 @@ test('Cash Use projected qualifiers retain structured evidence without becoming 
     { activation: 'pointer', transactionIds: ['actual-purchase', 'actual-refund'], route: '/transactions/list?id=actual-purchase,actual-refund', forecastOnly: false },
   )
 
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
-  const monthRow = readFileSync(new URL('../../components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const monthRow = readFileSync(new URL('../../shared/components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
   assert.match(chart, /\$\{description\.label\} · \$\{description\.monthLabel\}: \$\{description\.valueLabel\}/)
   assert.match(monthRow, /projectCashUseProjectedQualifiers/)
   assert.match(monthRow, /analytics\.daily_forecast\.source_id/)
@@ -1599,9 +1599,9 @@ test('combination interaction hydrates already-pinned legacy chart state before 
 })
 
 test('combination chart and card wire accessible interaction targets and exact evidence navigation', () => {
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
-  const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
-  const styles = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const card = readFileSync(new URL('../../shared/components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
 
   assert.match(chart, /buildCombinationAreaGeometry/)
   assert.match(chart, /resolveCombinationChartTarget/)
@@ -1655,7 +1655,7 @@ test('combination chart and card wire accessible interaction targets and exact e
 })
 
 test('Cash Use legend debt and horizontal gradients use renderable color-stop grammar', () => {
-  const styles = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
 
   assert.doesNotMatch(styles, /var\(--legend-color\)\s+3px\s+4px\s+6px/)
   assert.match(styles, /data-pattern='debt'[\s\S]*transparent 0 3px, var\(--legend-color\) 3px 4px, transparent 4px 6px/)
@@ -1663,8 +1663,8 @@ test('Cash Use legend debt and horizontal gradients use renderable color-stop gr
 })
 
 test('Cash Use v2 series-month selection renders only its compact positioned callout', () => {
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
-  const styles = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
 
   assert.match(chart, /v-if="!legendItems\.length && selectionMode === 'area' && activeAreaLabel" class="analytics-combination-area-label"/)
   assert.match(chart, /v-if="legendItems\.length && displaySelection\.mode === 'seriesMonth'" class="analytics-combination-series-month-callout" :style="areaLabelPosition"/)
@@ -1672,8 +1672,8 @@ test('Cash Use v2 series-month selection renders only its compact positioned cal
 })
 
 test('cash use consumes the page-level Savings view without rendering a duplicate control', () => {
-  const page = readFileSync(new URL('../../pages/analytics/index.vue', import.meta.url), 'utf8')
-  const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+  const page = readFileSync(new URL('../../mobile/pages/analytics/index.vue', import.meta.url), 'utf8')
+  const card = readFileSync(new URL('../../shared/components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
 
   assert.equal(page.match(/<analytics-savings-view-control\b/g)?.length ?? 0, 1)
   assert.doesNotMatch(card, /v-model="analyticsStore\.savingsView"/)
@@ -1681,7 +1681,7 @@ test('cash use consumes the page-level Savings view without rendering a duplicat
 })
 
 test('analytics interaction inventory keeps every compact control at least 44px tall', () => {
-  const css = readFileSync(new URL('../../assets/styles/theme-white.css', import.meta.url), 'utf8')
+  const css = readFileSync(new URL('../../assets/styles/analytics.css', import.meta.url), 'utf8')
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selectors, declarations]) => ({
     selectors: selectors
       .split(',')
@@ -1696,10 +1696,9 @@ test('analytics interaction inventory keeps every compact control at least 44px 
     return Math.max(Number(minHeight ?? 0), Number(height ?? 0)) || null
   }
   const interactiveSelectors = [
-    '.analytics-card .van-button',
-    '.analytics-page .analytics-card .app-tabs-item',
-    '.analytics-page .app-tabs.analytics-page-switch .app-tabs-item',
-    '.analytics-page .analytics-savings-view-control .app-tabs-item',
+     '.analytics-page .analytics-button',
+     '.analytics-page .analytics-tab',
+     '.analytics-page .analytics-flow-account-selector',
     '.analytics-metric-facet-button',
     '.analytics-metric-facet-row',
     '.analytics-category-facet-button',
@@ -1715,10 +1714,10 @@ test('analytics interaction inventory keeps every compact control at least 44px 
 })
 
 test('new analytics tablists expose distinct localized accessible names', () => {
-  const cashUse = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
-  const daily = readFileSync(new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url), 'utf8')
-  const pageSwitch = readFileSync(new URL('../../components/analytics/analytics-page-switch.vue', import.meta.url), 'utf8')
-  const savings = readFileSync(new URL('../../components/analytics/analytics-savings-view-control.vue', import.meta.url), 'utf8')
+  const cashUse = readFileSync(new URL('../../shared/components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+  const daily = readFileSync(new URL('../../shared/components/analytics/analytics-daily-forecast.vue', import.meta.url), 'utf8')
+  const pageSwitch = readFileSync(new URL('../../shared/components/analytics/analytics-page-switch.vue', import.meta.url), 'utf8')
+  const savings = readFileSync(new URL('../../shared/components/analytics/analytics-savings-view-control.vue', import.meta.url), 'utf8')
 
   assert.match(cashUse, /v-model="analyticsStore\.cashUseMode"[^>]+aria-label="\$t\('analytics\.cash_use\.mode_label'\)"/)
   assert.match(cashUse, /v-model="analyticsStore\.balancePeriod"[^>]+aria-label="\$t\('analytics\.cash_use\.history_window_label'\)"/)
@@ -1740,7 +1739,7 @@ test('new analytics tablists expose distinct localized accessible names', () => 
 })
 
 test('combination chart scopes every SVG paint server to its component instance', () => {
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
   const definitions = [...chart.matchAll(/<pattern\s+:id="paintId\('([^']+)'\)"/g)].map(([, name]) => name)
   const references = [...chart.matchAll(/paintUrl\('([^']+)'\)/g)].map(([, name]) => name)
 
@@ -1754,9 +1753,9 @@ test('combination chart scopes every SVG paint server to its component instance'
 })
 
 test('Cash Use chart source wires exact v2 legend, selected segment, and pinned month evidence contracts', () => {
-  const chart = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
-  const legend = readFileSync(new URL('../../components/charts/analytics-cash-use-legend.vue', import.meta.url), 'utf8')
-  const monthRow = readFileSync(new URL('../../components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
+  const chart = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const legend = readFileSync(new URL('../../shared/components/charts/analytics-cash-use-legend.vue', import.meta.url), 'utf8')
+  const monthRow = readFileSync(new URL('../../shared/components/charts/analytics-cash-use-month-row.vue', import.meta.url), 'utf8')
 
   assert.match(legend, /<button[\s\S]*type="button"[\s\S]*analytics-cash-use-legend-item/)
   assert.match(legend, /class="analytics-cash-use-legend-item"/)
@@ -1808,7 +1807,7 @@ test('Cash Use chart source wires exact v2 legend, selected segment, and pinned 
 })
 
 test('Cash Use card uses one ordered Top 5, Top 10, or All projection across chart and interactive legend', () => {
-  const card = readFileSync(new URL('../../components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
+  const card = readFileSync(new URL('../../shared/components/analytics/analytics-cash-use.vue', import.meta.url), 'utf8')
   const detailSeries = [
     { detailLevel: 5, expected: ['category:category-1', 'category:category-2', 'category:category-3', 'category:category-4', 'category:category-5', 'category:other'] },
     {

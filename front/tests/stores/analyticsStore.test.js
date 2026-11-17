@@ -7,10 +7,10 @@ import { createSSRApp, h, nextTick, reactive, ref } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { compileScript, parse as parseSfc } from '@vue/compiler-sfc'
 import { format, subMonths } from 'date-fns'
-import { createAnalyticsStore, summarizeUnavailableEvidence } from '../../stores/analyticsStoreFactory.js'
-import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
-import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
-import { projectLineChartSelection } from '../../utils/ChartUtils.js'
+import { createAnalyticsStore, summarizeUnavailableEvidence } from '../../core/stores/analyticsStoreFactory.js'
+import { reconstructBalanceSeries } from '../../core/utils/AnalyticsBalanceUtils.js'
+import { buildAnalyticsLedger } from '../../core/utils/AnalyticsLedgerUtils.js'
+import { projectLineChartSelection } from '../../core/utils/ChartUtils.js'
 
 const currency = (id, code, decimalPlaces = 2) => ({ id, attributes: { code, decimal_places: decimalPlaces, default: code === 'USD' } })
 const usd = currency('usd', 'USD')
@@ -307,42 +307,12 @@ const renderAnalyticsCard = async (path, context) => {
       () =>
         h('div', slots.default?.()),
   }
-  for (const name of ['van-cell-group', 'van-loading', 'van-button', 'app-icon', 'app-popup', 'analytics-category-facet', 'multi-series-line-chart', 'analytics-combination-chart'])
+  for (const name of ['app-icon', 'analytics-category-facet', 'multi-series-line-chart', 'analytics-combination-chart'])
     app.component(name, slotStub)
-  app.component('app-tabs', {
-    props: ['items'],
-    setup:
-      (props, { attrs }) =>
-      () =>
-        h(
-          'div',
-          { ...attrs, class: 'app-tabs-test', role: 'tablist' },
-          (props.items ?? []).map((item) => h('button', { 'data-value': String(item.value) }, item.label)),
-        ),
-  })
-  app.component('app-select', {
-    props: ['label', 'list', 'modelValue', 'search', 'getDisplayValue', 'isMultiSelect', 'hasSearch'],
-    setup: (props) => () =>
-      h('div', { class: 'app-select-test', 'data-multi-select': String(props.isMultiSelect), 'data-search': String(props.hasSearch), 'data-search-value': props.search }, [
-        h('span', props.label),
-        ...(props.modelValue ?? []).map((item) => h('span', { class: 'app-select-selected-test' }, props.getDisplayValue?.(item))),
-        ...(props.list ?? []).map((item) => h('span', { class: 'app-select-option-test' }, props.getDisplayValue?.(item))),
-      ]),
-  })
-  app.component('app-boolean', {
-    props: ['label'],
-    setup:
-      (props, { attrs }) =>
-      () =>
-        h('button', { class: 'app-boolean-test', disabled: attrs.disabled }, props.label),
-  })
-  app.component('app-field', {
-    props: ['label', 'modelValue'],
-    setup:
-      (props, { attrs }) =>
-      () =>
-        h('label', { class: 'app-field-test', 'data-inputmode': attrs.inputmode }, [props.label, h('input', { value: props.modelValue })]),
-  })
+  const analyticsTemplate = (name) =>
+    parseSfc(readFileSync(new URL(`../../shared/components/analytics/${name}.vue`, import.meta.url), 'utf8')).descriptor.template.content
+  app.component('analytics-tabs', { props: ['items', 'modelValue'], template: analyticsTemplate('analytics-tabs') })
+  app.component('analytics-dialog', { props: ['title', 'modelValue'], setup: (props) => ({ open: Vue.computed(() => props.modelValue) }), template: analyticsTemplate('analytics-dialog') })
   app.component('layered-money-flow-chart', {
     props: ['graph'],
     setup: (props) => () => h('div', { class: 'layered-money-flow-chart-test', 'data-node-labels': (props.graph?.nodes ?? []).map(({ label }) => label).join('|') }),
@@ -353,7 +323,7 @@ const renderAnalyticsCard = async (path, context) => {
 }
 
 const loadAnalyticsDailyOverviewComponent = () => {
-  const source = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-overview.vue', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../../shared/components/analytics/analytics-daily-forecast-overview.vue', import.meta.url), 'utf8')
   const compiled = compileScript(parseSfc(source).descriptor, {
     id: 'daily-overview-real-sfc',
     inlineTemplate: true,
@@ -374,7 +344,7 @@ const loadAnalyticsDailyOverviewComponent = () => {
   return factory(...Object.values(scope))
 }
 const loadAnalyticsDailyDetailsComponent = ({ navigateTo = async () => {} } = {}) => {
-  const source = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../../shared/components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
   const compiled = compileScript(parseSfc(source).descriptor, {
     id: 'daily-details-real-sfc',
     inlineTemplate: true,
@@ -400,7 +370,7 @@ const loadAnalyticsDailyDetailsComponent = ({ navigateTo = async () => {} } = {}
   return factory(...Object.values(scope))
 }
 const loadAnalyticsDailyPageComponent = () => {
-  const source = readFileSync(new URL('../../pages/analytics/daily-forecast.vue', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../../mobile/pages/analytics/daily-forecast.vue', import.meta.url), 'utf8')
   const compiled = compileScript(parseSfc(source).descriptor, {
     id: 'daily-page-real-sfc',
     inlineTemplate: true,
@@ -1850,7 +1820,7 @@ for (const [source, configureFailure] of [
 }
 
 test('category keeps refund-source retry visible with blocking amount evidence', async () => {
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-category-spending.vue', {
+  const html = await renderAnalyticsCard('../../shared/components/analytics/analytics-category-spending.vue', {
     analyticsStore: {
       categoryState: { status: 'partial', error: null, isStale: true, sourceErrors: [{ source: 'transactionLinks' }] },
       selectedCategoryIds: [],
@@ -1870,7 +1840,7 @@ test('category keeps refund-source retry visible with blocking amount evidence',
 })
 
 test('cash use keeps refund-source retry visible with blocking audit evidence', async () => {
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-cash-use.vue', {
+  const html = await renderAnalyticsCard('../../shared/components/analytics/analytics-cash-use.vue', {
     analyticsStore: { selectedCategoryIds: [], balancePeriod: 3, cashUseMode: 'spending', cashUseDetail: 5, retryCashUse: () => {} },
     facetItems: [],
     modeItems: [],
@@ -1896,7 +1866,10 @@ test('cash use keeps refund-source retry visible with blocking audit evidence', 
 })
 
 test('money flow keeps refund-source retry visible with blocking audit evidence', async () => {
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', {
+  const html = await renderAnalyticsCard('../../shared/components/analytics/analytics-money-flow.vue', {
+    selectedPassThroughNames: [],
+    selectedPassThroughAccounts: [],
+    filteredEligiblePassThroughAccounts: [],
     analyticsStore: { graphDetail: 5, flowState: { status: 'partial', error: null, isStale: true, sourceErrors: [{ source: 'transactionLinks' }] }, retryFlow: () => {} },
     detailItems: [],
     canPrevious: false,
@@ -1955,6 +1928,7 @@ const moneyFlowControlContext = (overrides = {}) => {
       { label: 'Minimum amount', value: 'threshold' },
     ],
     selectedPassThroughAccounts: [payrollAccount],
+    selectedPassThroughNames: ['Payroll clearing'],
     passThroughAccountSearch: '',
     filteredEligiblePassThroughAccounts: analyticsStoreContext.eligiblePassThroughAccounts,
     accountDisplayName: (account) => account?.attributes?.name,
@@ -2007,23 +1981,23 @@ const moneyFlowControlContext = (overrides = {}) => {
 }
 
 test('renders all Money flow controls, the threshold currency field, named searchable roles, and localized final graph order', async () => {
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', moneyFlowControlContext())
+  const html = await renderAnalyticsCard('../../shared/components/analytics/analytics-money-flow.vue', moneyFlowControlContext())
 
   for (const label of ['Amount', 'Type, then amount', 'Top 5', 'Top 10', 'All', 'Minimum amount']) assert.match(html, new RegExp(`>${label}<`))
   assert.match(html, /analytics-flow-order-control/)
   assert.match(html, /analytics-flow-threshold-control/)
   assert.match(html, /Minimum amount.*USD/)
   assert.match(html, /analytics-flow-pass-through-control/)
-  assert.match(html, /data-multi-select="true"/)
-  assert.match(html, /data-search="true"/)
+  assert.match(html, /<input[^>]*type="search"/)
+  assert.match(html, /type="button" class="analytics-category-facet-row" aria-pressed="true"/)
   assert.match(html, /Payroll clearing/)
   assert.doesNotMatch(html, /payroll-internal-id/)
   assert.match(html, /data-node-labels="Income\|Refunds\|Existing funds\|New debt"/)
   assert.match(html, /Type, then amount · Minimum amount 25 USD · Pass-through: Payroll clearing/)
-  assert.match(html, /<div(?=[^>]*role="tablist")(?=[^>]*aria-label="Order")[^>]*>/)
+  assert.match(html, /<div(?=[^>]*role="group")(?=[^>]*aria-label="Order")[^>]*>/)
 })
 
-test('filters the real Money flow account selector from its bound search model', async () => {
+test('renders the Money flow account selector with the search value and filtered accounts', async () => {
   const otherAccount = { id: 'other-internal-id', attributes: { name: 'Everyday checking' } }
   const context = moneyFlowControlContext({
     analyticsStore: { eligiblePassThroughAccounts: [otherAccount] },
@@ -2032,33 +2006,34 @@ test('filters the real Money flow account selector from its bound search model',
   context.analyticsStore.eligiblePassThroughAccounts = [context.selectedPassThroughAccounts[0], otherAccount]
   context.filteredEligiblePassThroughAccounts = [context.selectedPassThroughAccounts[0]]
 
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', context)
+  const html = await renderAnalyticsCard('../../shared/components/analytics/analytics-money-flow.vue', context)
 
-  assert.match(html, /data-search-value="pay"/)
+  assert.match(html, /<input(?=[^>]*type="search")(?=[^>]*value="pay")[^>]*>/)
   assert.match(html, /Payroll clearing/)
   assert.doesNotMatch(html, /Everyday checking/)
 })
 
 test('shows the minimum-amount field only in threshold mode and disables treatment with no selected role', async () => {
-  const thresholdHtml = await renderAnalyticsCard('../../components/analytics/analytics-money-flow.vue', moneyFlowControlContext())
+  const thresholdHtml = await renderAnalyticsCard('../../shared/components/analytics/analytics-money-flow.vue', moneyFlowControlContext())
   const topFiveHtml = await renderAnalyticsCard(
-    '../../components/analytics/analytics-money-flow.vue',
+    '../../shared/components/analytics/analytics-money-flow.vue',
     moneyFlowControlContext({
       analyticsStore: { graphDetail: 5, moneyFlowPassThroughEnabled: false },
       selectedPassThroughAccounts: [],
+      selectedPassThroughNames: [],
       passThroughSwitchDisabled: true,
       flowSettingsNote: 'Amount · Top 5 · Pass-through: None',
     }),
   )
 
-  assert.match(thresholdHtml, /app-field-test/)
-  assert.doesNotMatch(topFiveHtml, /app-field-test/)
-  assert.match(topFiveHtml, /app-boolean-test" disabled/)
+  assert.match(thresholdHtml, /<input[^>]*inputmode="decimal"/)
+  assert.doesNotMatch(topFiveHtml, /<input[^>]*inputmode="decimal"/)
+  assert.match(topFiveHtml, /<input[^>]*type="checkbox"[^>]*disabled/)
 })
 
 test('renders generic unclassified evidence without a pass-through warning or recovery action', async () => {
   const html = await renderAnalyticsCard(
-    '../../components/analytics/analytics-money-flow.vue',
+    '../../shared/components/analytics/analytics-money-flow.vue',
     moneyFlowControlContext({
       presentation: { showAudit: true, reason: 'unclassified', showEmpty: false, showGraph: false },
       stateLabel: 'Unclassified activity',
@@ -2095,7 +2070,7 @@ test('renders generic unclassified evidence without a pass-through warning or re
 
 test('renders exact unsupported evidence separately while retaining the ordinary unclassified blocker after treatment is disabled', async () => {
   const enabledHtml = await renderAnalyticsCard(
-    '../../components/analytics/analytics-money-flow.vue',
+    '../../shared/components/analytics/analytics-money-flow.vue',
     moneyFlowControlContext({
       presentation: { showAudit: true, reason: 'unclassified', showEmpty: false, showGraph: false },
       stateLabel: 'Unclassified activity',
@@ -2115,7 +2090,7 @@ test('renders exact unsupported evidence separately while retaining the ordinary
     }),
   )
   const disabledHtml = await renderAnalyticsCard(
-    '../../components/analytics/analytics-money-flow.vue',
+    '../../shared/components/analytics/analytics-money-flow.vue',
     moneyFlowControlContext({
       analyticsStore: { moneyFlowPassThroughEnabled: false },
       presentation: { showAudit: true, reason: 'unclassified', showEmpty: false, showGraph: false },
@@ -2152,7 +2127,7 @@ test('renders exact unsupported evidence separately while retaining the ordinary
 
 test('keeps pass-through account audit, reallocation, exact rows, and actual transaction evidence visible', async () => {
   const html = await renderAnalyticsCard(
-    '../../components/analytics/analytics-money-flow.vue',
+    '../../shared/components/analytics/analytics-money-flow.vue',
     moneyFlowControlContext({
       flow: {
         nodes: [],
@@ -2466,7 +2441,7 @@ test('uses subscription-linked history to classify definitions whose endpoint fi
 })
 
 test('analytics warnings summarize projected audit evidence without rendering every daily evidence ID', async () => {
-  const cashUseHtml = await renderAnalyticsCard('../../components/analytics/analytics-cash-use.vue', {
+  const cashUseHtml = await renderAnalyticsCard('../../shared/components/analytics/analytics-cash-use.vue', {
     analyticsStore: { selectedCategoryIds: [], balancePeriod: 3, cashUseMode: 'spending', cashUseDetail: 5, retryCashUse: () => {} },
     facetItems: [],
     modeItems: [],
@@ -2486,7 +2461,7 @@ test('analytics warnings summarize projected audit evidence without rendering ev
     projectedUnavailableIds: ['projected:variable:should-not-render'],
     projectedUnavailableSummary: { count: 23, previewIds: ['defined:subscription:rent'], omittedCount: 22 },
   })
-  const dailyHtml = await renderAnalyticsCard('../../components/analytics/analytics-daily-forecast.vue', {
+  const dailyHtml = await renderAnalyticsCard('../../shared/components/analytics/analytics-daily-forecast.vue', {
     analyticsStore: { dailyForecastMonths: 6, retryDailyForecast: () => {} },
     monthTitle: 'August 2026',
     periodItems: [],
@@ -3384,7 +3359,7 @@ test('keeps completed Cash use visible when only account-dependent forecast metr
 })
 
 test('renders projected Cash use uncertainty beside retained chart content', async () => {
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-cash-use.vue', {
+  const html = await renderAnalyticsCard('../../shared/components/analytics/analytics-cash-use.vue', {
     analyticsStore: { selectedCategoryIds: [], balancePeriod: 6, cashUseMode: 'full', cashUseDetail: 5, retryCashUse: () => {} },
     facetItems: [],
     modeItems: [],
@@ -3625,11 +3600,11 @@ test('normalizes active JSON API budget plans for forecast envelopes without cha
 })
 
 test('keeps the daily card and combination-chart selection contract exact without inventing projected transaction routes', () => {
-  const dailyPath = new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url)
+  const dailyPath = new URL('../../shared/components/analytics/analytics-daily-forecast.vue', import.meta.url)
   const dailySource = existsSync(dailyPath) ? readFileSync(dailyPath, 'utf8') : ''
-  const overviewSource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-overview.vue', import.meta.url), 'utf8')
-  const detailsSource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
-  const chartSource = readFileSync(new URL('../../components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
+  const overviewSource = readFileSync(new URL('../../shared/components/analytics/analytics-daily-forecast-overview.vue', import.meta.url), 'utf8')
+  const detailsSource = readFileSync(new URL('../../shared/components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
+  const chartSource = readFileSync(new URL('../../shared/components/charts/analytics-combination-chart.vue', import.meta.url), 'utf8')
 
   assert.match(detailsSource, /TransactionFilterUtils\.filters\.id\.toUrl/)
   assert.match(detailsSource, /RouteConstants\.ROUTE_TRANSACTION_LIST/)
@@ -3647,7 +3622,7 @@ test('keeps the daily card and combination-chart selection contract exact withou
   assert.match(dailySource, /ROUTE_ANALYTICS_DAILY_FORECAST/)
   assert.match(dailySource, /partialInputCount/)
   assert.match(dailySource, /Math\.max\(1,\s*unavailableEvidenceSummary\.value\.count/)
-  assert.match(readFileSync(new URL('../../pages/analytics/daily-forecast.vue', import.meta.url), 'utf8'), /Math\.max\(1,\s*analyticsStore\.dailyForecastState\.unavailableEvidenceSummary\.count/)
+  assert.match(readFileSync(new URL('../../mobile/pages/analytics/daily-forecast.vue', import.meta.url), 'utf8'), /Math\.max\(1,\s*analyticsStore\.dailyForecastState\.unavailableEvidenceSummary\.count/)
   assert.doesNotMatch(dailySource, /analytics-daily-forecast-partial-badge/)
   assert.match(chartSource, /series\.barGroups/)
   assert.match(chartSource, /point\?\.showInTooltip !== false/)
@@ -3666,12 +3641,12 @@ test('keeps the daily card and combination-chart selection contract exact withou
 })
 
 test('keeps Analytics compact and routes Daily Forecast details to its own page', () => {
-  const compactPath = new URL('../../components/analytics/analytics-daily-forecast.vue', import.meta.url)
-  const overviewPath = new URL('../../components/analytics/analytics-daily-forecast-overview.vue', import.meta.url)
-  const analyticsIndexPath = new URL('../../pages/analytics/index.vue', import.meta.url)
-  const detailPagePath = new URL('../../pages/analytics/daily-forecast.vue', import.meta.url)
+  const compactPath = new URL('../../shared/components/analytics/analytics-daily-forecast.vue', import.meta.url)
+  const overviewPath = new URL('../../shared/components/analytics/analytics-daily-forecast-overview.vue', import.meta.url)
+  const analyticsIndexPath = new URL('../../mobile/pages/analytics/index.vue', import.meta.url)
+  const detailPagePath = new URL('../../mobile/pages/analytics/daily-forecast.vue', import.meta.url)
   const compactSource = readFileSync(compactPath, 'utf8')
-  const routeSource = readFileSync(new URL('../../constants/RouteConstants.js', import.meta.url), 'utf8')
+  const routeSource = readFileSync(new URL('../../core/constants/RouteConstants.js', import.meta.url), 'utf8')
 
   assert.equal(existsSync(overviewPath), true)
   assert.equal(existsSync(analyticsIndexPath), true)
@@ -3682,7 +3657,7 @@ test('keeps Analytics compact and routes Daily Forecast details to its own page'
   assert.match(compactSource, /open_full_forecast/)
   assert.doesNotMatch(compactSource, /analytics-daily-forecast-disclosures|bundle_details|variable_envelope|analytics-daily-forecast-details/)
   const detailPageSource = readFileSync(detailPagePath, 'utf8')
-  const detailSource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
+  const detailSource = readFileSync(new URL('../../shared/components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
   assert.match(detailPageSource, /dailyForecast\.dateKeys\.includes/)
   assert.match(detailPageSource, /navigateTo\([\s\S]*?ROUTE_ANALYTICS_DAILY_FORECAST[\s\S]*?query:[\s\S]*?date[\s\S]*?replace:\s*true/)
   assert.equal((detailSource.match(/<h2 class="analytics-daily-forecast-section-title">/g) ?? []).length, 5)
@@ -3714,7 +3689,7 @@ test('keeps Daily Forecast day selection optional and synchronizes chart selecti
 })
 
 test('renders explainable dated events and an explicitly undated non-navigable variable envelope', async () => {
-  const html = await renderAnalyticsCard('../../components/analytics/analytics-daily-forecast-details.vue', {
+  const html = await renderAnalyticsCard('../../shared/components/analytics/analytics-daily-forecast-details.vue', {
     analyticsStore: { dailyForecastMonths: 6, retryDailyForecast: () => {} },
     monthTitle: 'August 2026',
     periodItems: [],
@@ -4222,7 +4197,7 @@ test('enables exact actual evidence only when one or more transaction IDs exist'
 })
 
 test('keeps the explainable Daily Forecast source contract material, expandable, routable, and retryable', () => {
-  const dailySource = readFileSync(new URL('../../components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
+  const dailySource = readFileSync(new URL('../../shared/components/analytics/analytics-daily-forecast-details.vue', import.meta.url), 'utf8')
 
   assert.match(dailySource, /props\.forecast\.eventSummaries/)
   assert.match(dailySource, /props\.forecast\.variableEnvelope\.items/)
@@ -4231,7 +4206,7 @@ test('keeps the explainable Daily Forecast source contract material, expandable,
   assert.match(dailySource, /analytics\.daily_forecast\.undated_estimate/)
   assert.match(dailySource, /entry\.sourceKind === 'actual'/)
   assert.match(dailySource, /TransactionFilterUtils\.filters\.id\.toUrl/)
-  assert.match(dailySource, /v-if="state\.sourceErrors\?\.length"[\s\S]*?<van-button[^>]+@click="\$emit\('retry'\)"/)
+  assert.match(dailySource, /v-if="state\.sourceErrors\?\.length"[\s\S]*?<button[^>]+@click="\$emit\('retry'\)"/)
 
   const requiredKeys = [
     'scheduled_events',

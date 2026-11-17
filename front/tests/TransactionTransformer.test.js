@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL('../transformers/TransactionTransformer.js', import.meta.url))],
+  entryPoints: [fileURLToPath(new URL('../core/transformers/TransactionTransformer.js', import.meta.url))],
   bundle: true,
   write: false,
   format: 'esm',

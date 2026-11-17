@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import * as AnalyticsUtils from '../../utils/AnalyticsUtils.js'
+import * as AnalyticsUtils from '../../core/utils/AnalyticsUtils.js'
 import {
   ANALYTICS_UNCATEGORIZED_ID,
   buildFinancialTrendChartSeries,
@@ -17,7 +17,7 @@ import {
   summarizeBalanceMovements,
   summarizeCategoryWindow,
   summarizeTotalExpenseWindow,
-} from '../../utils/AnalyticsUtils.js'
+} from '../../core/utils/AnalyticsUtils.js'
 
 const withoutTransactionIds = (point) => {
   const copy = { ...point }
@@ -130,7 +130,7 @@ const card = typedAccount({ type: 'asset', role: 'ccAsset' })
 const expense = typedAccount({ type: 'expense' })
 
 const ledgerBucketInTimezone = ({ timeZone, dateParts }) => {
-  const analyticsUrl = new URL('../../utils/AnalyticsUtils.js', import.meta.url).href
+  const analyticsUrl = new URL('../../core/utils/AnalyticsUtils.js', import.meta.url).href
   const script = `
     import { buildCategoryLedger } from ${JSON.stringify(analyticsUrl)}
 

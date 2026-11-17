@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { reconstructBalanceSeries } from '../../utils/AnalyticsBalanceUtils.js'
-import { buildAnalyticsLedger } from '../../utils/AnalyticsLedgerUtils.js'
+import { reconstructBalanceSeries } from '../../core/utils/AnalyticsBalanceUtils.js'
+import { buildAnalyticsLedger } from '../../core/utils/AnalyticsLedgerUtils.js'
 
 const account = ({
   id,

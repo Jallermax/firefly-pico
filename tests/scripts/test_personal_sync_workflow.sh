@@ -16,7 +16,15 @@ grep -q 'workflow_dispatch:' "$workflow" || fail 'manual trigger is missing'
 grep -q 'cron:.*0 6 \* \* \*' "$workflow" || fail 'daily 06:00 UTC trigger is missing'
 grep -q 'contents: write' "$workflow" || fail 'contents write permission is missing'
 grep -q 'scripts/sync-personal-branches.sh' "$workflow" || fail 'tested composition script is not used'
-grep -q 'TodoReviewUtils.test.js' "$workflow" || fail 'TODO Inbox tests are not gated'
+for candidate in stable experimental; do
+  awk -v branch="sync-$candidate" '
+    $0 ~ "git switch " branch "[[:space:]]*$" { selected = 1; next }
+    /git switch sync-/ { selected = 0 }
+    selected && /bash tests\/scripts\/test_dockerfile_cache\.sh/ { checked = 1 }
+    END { exit !checked }
+  ' "$workflow" || fail "Dockerfile is not validated on the $candidate candidate"
+done
+grep -q 'TodoTagUpdate.test.js' "$workflow" || fail 'TODO Inbox tests are not gated'
 grep -q 'VersionLinks.test.js' "$workflow" || fail 'personal version links are not gated'
 grep -q 'NUXT_PUBLIC_COMMIT_SHA=' "$workflow" || fail 'candidate builds do not embed their exact commit SHA'
 grep -q 'NUXT_PUBLIC_VERSION=' "$workflow" || fail 'candidate builds do not embed the merged upstream dev version'
@@ -26,7 +34,7 @@ grep -q 'path: back/vendor' "$workflow" || fail 'backend dependencies are not ca
 grep -q "hashFiles('back/composer.json', 'back/composer.lock')" "$workflow" || fail 'backend cache does not include Composer autoload configuration'
 grep -q 'php artisan test --filter VersionControllerTest' "$workflow" || fail 'backend release-channel behavior is not gated before publishing'
 grep -q 'tests/scripts/verify_built_version.sh' "$workflow" || fail 'compiled version links are not verified'
-grep -q 'AnalyticsForecastUtils.test.js' "$workflow" || fail 'analytics tests are not gated'
+grep -q 'npm run test:analytics' "$workflow" || fail 'analytics tests are not gated'
 [ "$(grep -c 'npm run build' "$workflow")" -eq 2 ] || fail 'both candidates must build'
 grep -q 'uses: actions/setup-node@v4' "$workflow" || fail 'Node setup and npm cache are missing'
 grep -q 'cache: npm' "$workflow" || fail 'npm download cache is missing'
