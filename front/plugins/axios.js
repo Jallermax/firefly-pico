@@ -1,5 +1,8 @@
 import axios from 'axios'
 import { get } from 'lodash-es'
+import { IconSettings } from '@tabler/icons-vue'
+import RouteConstants from '~/core/constants/RouteConstants'
+import { demoAdapter } from '~/core/demo/DemoBackend.js'
 
 axios.interceptors.request.use(
   (config) => {
@@ -13,19 +16,20 @@ axios.interceptors.request.use(
     config.showLoading = config.showLoading !== false
     config.showLoading && loadingStore.addActiveRequest({ id: requestId, controller })
 
-    let authToken = appStore.authToken
-    if (!appStore.hasAuthToken) {
-      UIUtils.showToastError('No personal access token...')
+    const { authToken, picoBackendHeaders } = config.connection ?? appStore
+    if (!authToken) {
+      showNoTokenToast()
       controller.abort()
     }
 
-    appStore.picoBackendHeaders?.forEach(({ key, value }) => {
+    picoBackendHeaders?.forEach(({ key, value }) => {
       if (key?.trim()) {
         config.headers[key.trim()] = value
       }
     })
     config.headers['Authorization'] = `Bearer ${authToken}`
     config.timeout = config.timeout || appStore.queryTimeout
+    if (appStore.isDemoMode) config.adapter = demoAdapter
     return config
   },
   (error) => {
@@ -33,18 +37,27 @@ axios.interceptors.request.use(
   },
 )
 
+// One toast for the burst of requests a page fires without a token, with a shortcut to Setup (token or demo mode)
+let noTokenToast = null
+const showNoTokenToast = () => {
+  if (noTokenToast) return
+  const { t } = useNuxtApp().$i18n
+  const action = { label: t('settings.setup_entry'), icon: IconSettings, onClick: () => navigateTo(RouteConstants.ROUTE_SETTINGS_SETUP) }
+  noTokenToast = UIUtils.showToast(t('settings.setup.no_token'), 'danger', 6000, { action, onClose: () => (noTokenToast = null) })
+}
+
 const MAX_RETRIES = 1
 
 const retryRequest = async (error) => {
-  if (error.config?.retryOnTimeout === false) return
   let errorMessage = get(error, 'response.data.message') ?? get(error, 'message') ?? ''
 
   const isTimeout = error.code === 'ECONNABORTED' || errorMessage.includes('timeout') || errorMessage.includes('Failed to connect to')
-  if (!isTimeout) {
+  const config = error.config
+  // Only reads are retried: a write that timed out may still have gone through, a retry would repeat it
+  if (!isTimeout || config?.method !== 'get') {
     return
   }
 
-  const config = error.config
   if (!config?.retry) {
     config.retry = 0
   }
@@ -78,14 +91,17 @@ axios.interceptors.response.use(
   },
   async function (error) {
     let errorMessage = get(error, 'response.data.message') ?? get(error, 'message')
-    let showErrorToast = error.config?.showErrorToast !== false
+    // Requests cancelled on purpose (no token, leaving the page) need no toast
+    let showErrorToast = error.config?.showErrorToast !== false && !axios.isCancel(error)
     errorMessage && showErrorToast && UIUtils.showToastError(`Error: ${errorMessage}`, 4000)
 
-    await retryRequest(error)
+    // The retry gets its own requestId on the same config: remember this one first
+    const requestId = error.config?.requestId
+    const retryResponse = await retryRequest(error)
 
     const loadingStore = useLoadingStore()
-    error.config?.showLoading && loadingStore.removeActiveRequest(error.config?.requestId)
-    return Promise.resolve(error.response)
+    error.config?.showLoading && loadingStore.removeActiveRequest(requestId)
+    return Promise.resolve(retryResponse ?? error.response)
   },
 )
 

@@ -1,0 +1,80 @@
+<template>
+  <div class="mx-page">
+    <app-top-toolbar />
+
+    <app-form @submit="onSave">
+      <main class="mx-body has-save">
+        <app-card>
+          <account-select v-model="defaultAccountSource" :label="$t('settings.transactions.default_form_values.default_source_account')" />
+
+          <account-select v-model="defaultAccountDestination" :label="$t('settings.transactions.default_form_values.default_destination_account')" />
+
+          <category-select v-model="defaultCategory" :label="$t('settings.transactions.default_form_values.default_category')" />
+
+          <tag-select v-model="defaultTags" :label="$t('settings.transactions.default_form_values.default_tags')" />
+
+          <tag-select v-model="autoAddedTags" :label="$t('settings.transactions.default_form_values.auto_tags')" />
+
+          <currency-select v-model="defaultForeignCurrency" :label="$t('settings.transactions.default_form_values.foreign_currency')" />
+
+          <div class="mx-hr" />
+          <app-boolean v-model="defaultTransactionTimeAtMidnight" :label="$t('settings.transactions.default_form_values.set_default_time_to_midnight')" />
+        </app-card>
+      </main>
+
+      <app-button-form-save />
+    </app-form>
+  </div>
+</template>
+
+<script setup>
+import { onMounted, ref } from 'vue'
+import { useProfileStore } from '~/core/stores/profileStore'
+
+import UIUtils from '~/core/utils/UIUtils'
+import { useToolbar } from '~/mobile/composables/useToolbar'
+import RouteConstants from '~/core/constants/RouteConstants'
+import { saveSettingsToStore, watchSettingsStore } from '~/core/utils/SettingUtils.js'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+const profileStore = useProfileStore()
+
+const defaultAccountSource = ref(null)
+const defaultAccountDestination = ref(null)
+const defaultCategory = ref(null)
+const defaultTags = ref([])
+const autoAddedTags = ref([])
+const defaultForeignCurrency = ref([])
+const defaultTransactionTimeAtMidnight = ref(false)
+
+const syncedSettings = [
+  { store: profileStore, path: 'defaultAccountSource', ref: defaultAccountSource },
+  { store: profileStore, path: 'defaultAccountDestination', ref: defaultAccountDestination },
+  { store: profileStore, path: 'defaultCategory', ref: defaultCategory },
+  { store: profileStore, path: 'defaultTags', ref: defaultTags },
+  { store: profileStore, path: 'autoAddedTags', ref: autoAddedTags },
+  { store: profileStore, path: 'defaultForeignCurrency', ref: defaultForeignCurrency },
+  { store: profileStore, path: 'defaultTransactionTimeAtMidnight', ref: defaultTransactionTimeAtMidnight },
+]
+
+watchSettingsStore(syncedSettings)
+
+const onSave = async () => {
+  saveSettingsToStore(syncedSettings)
+  const response = await profileStore.writeProfile()
+  if (ResponseUtils.isSuccess(response)) {
+    UIUtils.showToastSuccess(t('settings.settings_saved'))
+  }
+}
+
+const toolbar = useToolbar()
+toolbar.init({
+  title: t('settings.transactions.default_form_values.title'),
+  backRoute: RouteConstants.ROUTE_SETTINGS_TRANSACTION,
+})
+
+onMounted(() => {
+  animateSettings()
+})
+</script>

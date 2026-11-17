@@ -1,42 +1,40 @@
 <template>
-  <van-config-provider :theme="theme">
+  <div :class="themeClass">
     <NuxtPwaManifest />
-    <NuxtLayout>
-      <NuxtPage />
-    </NuxtLayout>
-    <app-loading />
-  </van-config-provider>
+    <component :is="shell" />
+  </div>
 </template>
 
 <script setup>
-import { useDashboardStore } from '~/stores/dashboardStore'
-import RouteConstants from '~/constants/RouteConstants'
+import { useDashboardStore } from '~/core/stores/dashboardStore'
+import RouteConstants from '~/core/constants/RouteConstants'
+import { isDesktopUI } from '~/core/utils/UIModeUtils'
 
-import '~/assets/styles/variables.css'
-import AppLoading from '~/components/ui-kit/app-loading.vue'
+const shell = defineAsyncComponent(isDesktopUI ? () => import('~/desktop/desktop-app.vue') : () => import('~/mobile/mobile-app.vue'))
 
 const dashboardStore = useDashboardStore()
 const profileStore = useProfileStore()
 const appStore = useAppStore()
 
-const theme = computed(() => (profileStore.darkTheme ? 'dark' : 'white'))
+// theme-dark is the dark-mode hook for the desktop tokens and Tailwind's dark: variant
+const themeClass = computed(() => ({ 'theme-dark': profileStore.darkTheme }))
 const pwaColor = computed(() => (profileStore.darkTheme ? '#1c1c1e' : '#ffffff'))
 useHead({
   meta: [{ name: 'theme-color', content: pwaColor }],
 })
 
-useResize()
-
 onMounted(async () => {
+  // Before the token check: after a first setup the dashboard opens without a reload
+  await dashboardStore.init()
   if (!appStore.authToken) {
     navigateTo(`${RouteConstants.ROUTE_SETTINGS_SETUP}`)
     return
   }
-  await dashboardStore.init()
 
   appStore.fetchInfo()
   await profileStore.getProfiles({ showLoading: false })
   await appStore.syncEverythingIfOld()
+  useTodoStore().fetchTodoOnce()
 })
 </script>
 
